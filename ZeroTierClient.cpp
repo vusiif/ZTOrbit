@@ -1,4 +1,6 @@
 #include "ZeroTierClient.h"
+#include "AppLog.h"
+#include "MacPlatform.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -8,11 +10,108 @@
 #include <QTemporaryDir>
 #include <QWidget>
 #include <memory>
+#include <QRegularExpression>
+#if defined(Q_OS_MACOS)
+#include <unistd.h>
+#endif
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <winsvc.h>
+#endif
+
+namespace {
+#if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
+ZeroTier::ServiceStatus macService;
+bool macApiAvailable = false;
+std::shared_ptr<QTemporaryDir> macSession()
+{
+    static auto directory = std::make_shared<QTemporaryDir>(QDir::tempPath() + "/ztgui-session-XXXXXX");
+    return directory;
+}
+bool sessionReady() { return QFileInfo::exists(macSession()->filePath("authtoken.secret")); }
+#endif
+}
+
+void ZeroTier::startServiceMonitor(QObject *owner)
+{
+#if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
+    auto *process = new QProcess(owner);
+    auto *timer = new QTimer(process);
+    timer->setInterval(2000);
+    auto *timeout = new QTimer(process);
+    timeout->setSingleShot(true);
+    timeout->setInterval(5000);
+    QObject::connect(timeout, &QTimer::timeout, process, [process] { process->kill(); });
+    QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), process,
+        [process, timeout](int code, QProcess::ExitStatus status) {
+            timeout->stop();
+            macService.exists = QFileInfo::exists("/Library/LaunchDaemons/com.zerotier.one.plist");
+            macService.running = macApiAvailable || (code == 0 && status == QProcess::NormalExit
+                && QRegularExpression("state\\s*=\\s*running").match(QString::fromUtf8(process->readAllStandardOutput())).hasMatch());
+            macService.known = status == QProcess::NormalExit;
+        });
+    const auto refresh = [process, timeout] {
+        if (process->state() != QProcess::NotRunning) return;
+        process->start("/bin/launchctl", {"print", "system/com.zerotier.one"});
+        timeout->start();
+    };
+    QObject::connect(timer, &QTimer::timeout, process, refresh);
+    timer->start();
+    QTimer::singleShot(0, process, refresh);
+#else
+    Q_UNUSED(owner)
+#endif
+}
+
+ZeroTier::ServiceStatus ZeroTier::serviceStatus()
+{
+#ifdef Q_OS_WIN
+    SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!manager) return {false, false, false};
+    SC_HANDLE service = OpenServiceW(manager, L"ZeroTierOneService", SERVICE_QUERY_STATUS);
+    if (!service) {
+        const DWORD error = GetLastError();
+        CloseServiceHandle(manager);
+        return {false, false, error == ERROR_SERVICE_DOES_NOT_EXIST};
+    }
+    SERVICE_STATUS_PROCESS status = {};
+    DWORD bytes = 0;
+    const bool ok = QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO,
+        reinterpret_cast<LPBYTE>(&status), sizeof(status), &bytes);
+    CloseServiceHandle(service);
+    CloseServiceHandle(manager);
+    return {true, ok && status.dwCurrentState == SERVICE_RUNNING, ok};
+#elif defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
+    return macService;
+#else
+    return {!executable().isEmpty(), false, true};
+#endif
+}
+
+QString ZeroTier::matchingMoonFile(const QString &networkId)
+{
+    if (!QRegularExpression("^[0-9a-fA-F]{16}$").match(networkId).hasMatch()) return {};
+    const QDir directory(moonDirectory());
+    for (const auto &file : directory.entryInfoList(QDir::Files, QDir::Name)) {
+        const QString stem = file.completeBaseName();
+        if (file.suffix().compare("moon", Qt::CaseInsensitive) == 0
+            && QRegularExpression("^[0-9a-fA-F]{16}$").match(stem).hasMatch()
+            && stem.right(10).compare(networkId.left(10), Qt::CaseInsensitive) == 0)
+            return file.absoluteFilePath();
+    }
+    return {};
+}
 
 QString ZeroTier::dataDirectory()
 {
+#ifdef ZEROTIER_TESTING
+    const QString testing = qEnvironmentVariable("ZT_TEST_DATA_DIRECTORY");
+    if (!testing.isEmpty()) return testing;
+#endif
 #ifdef Q_OS_WIN
     return QDir(qEnvironmentVariable("ProgramData", "C:/ProgramData")).filePath("ZeroTier");
+#elif defined(Q_OS_MACOS)
+    return QStringLiteral("/Library/Application Support/ZeroTier");
 #else
     return QStringLiteral("/var/lib/zerotier-one");
 #endif
@@ -20,10 +119,31 @@ QString ZeroTier::dataDirectory()
 
 QString ZeroTier::homeDirectory()
 {
-#ifdef Q_OS_WIN
+#if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
+    return macSession()->path();
+#else
+    return systemHomeDirectory();
+#endif
+}
+
+QString ZeroTier::systemHomeDirectory()
+{
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
     return QDir(dataDirectory()).filePath("One");
 #else
     return dataDirectory();
+#endif
+}
+
+QString ZeroTier::moonDirectory() { return QDir(homeDirectory()).filePath("moons.d"); }
+QString ZeroTier::moonWriteDirectory() { return QDir(systemHomeDirectory()).filePath("moons.d"); }
+
+QString ZeroTier::sessionRefreshScript()
+{
+#if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
+    return MacPlatform::synchronizeSession(systemHomeDirectory(), homeDirectory(), getuid());
+#else
+    return {};
 #endif
 }
 
@@ -41,6 +161,11 @@ QString ZeroTier::executable()
         }
     }
     const QStringList candidates = {
+#ifdef Q_OS_MACOS
+        QStringLiteral("/usr/local/bin/zerotier-cli"),
+        QDir(systemHomeDirectory()).filePath("zerotier-cli"),
+        QDir(systemHomeDirectory()).filePath("zerotier-one")
+#else
         QDir(homeDirectory()).filePath("zerotier-cli_x64.exe"),
         QDir(homeDirectory()).filePath("zerotier-one_x64.exe"),
         QDir(homeDirectory()).filePath("zerotier-one_x86.exe"),
@@ -48,6 +173,7 @@ QString ZeroTier::executable()
             .filePath("ZeroTier/One/zerotier-one_x64.exe"),
         QDir(qEnvironmentVariable("ProgramFiles", "C:/Program Files"))
             .filePath("ZeroTier/One/zerotier-one_x64.exe")
+#endif
     };
     for (const auto &candidate : candidates)
         if (QFileInfo::exists(candidate)) return candidate;
@@ -58,6 +184,9 @@ static QStringList cliArguments(const QString &program, const QStringList &argum
 {
     auto result = arguments;
     if (QFileInfo(program).fileName().startsWith("zerotier-one")) result.prepend("-q");
+#if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
+    result.prepend("-D" + ZeroTier::homeDirectory());
+#endif
     return result;
 }
 
@@ -109,6 +238,56 @@ QString ZeroTier::quotePowerShell(const QString &value)
     return "'" + escaped + "'";
 }
 
+QString ZeroTier::serviceCommands(const QString &action)
+{
+#ifdef Q_OS_MACOS
+    return MacPlatform::serviceCommands(action, executable());
+#else
+    const QString stop = "try { Stop-Service -Name ZeroTierOneService -ErrorAction Stop } catch {}\n";
+    const QString start = "Start-Service -Name ZeroTierOneService -ErrorAction Stop\n"
+        "(Get-Service -Name ZeroTierOneService -ErrorAction Stop).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))\n";
+    if (action == "stop") return stop;
+    if (action == "start") return start;
+    if (action == "restart") return stop + start;
+    return {};
+#endif
+}
+
+QString ZeroTier::wrapScript(const QString &commands)
+{
+#ifdef Q_OS_MACOS
+    return "set -eu\nPATH=/usr/bin:/bin:/usr/sbin:/sbin\nexport PATH\n" + commands;
+#else
+    return "$ErrorActionPreference = 'Stop'\ntry {\n" + commands + "exit 0\n} catch { Write-Output $_; exit 1 }";
+#endif
+}
+
+QString ZeroTier::moonImportScript(const QList<QPair<QString, QString>> &files)
+{
+#ifdef Q_OS_MACOS
+    return wrapScript(MacPlatform::copyMoons(files, moonWriteDirectory()) + serviceCommands("restart"));
+#else
+    QString copies = "New-Item -ItemType Directory -Path " + quotePowerShell(moonWriteDirectory()) + " -Force | Out-Null\n";
+    for (const auto &file : files) copies += "Copy-Item -LiteralPath " + quotePowerShell(file.first)
+        + " -Destination " + quotePowerShell(file.second) + " -Force -ErrorAction Stop\n";
+    return wrapScript(copies + serviceCommands("restart"));
+#endif
+}
+
+QString ZeroTier::moonDeleteScript(const QString &path)
+{
+#ifdef Q_OS_MACOS
+    if (QFileInfo(path).absolutePath() != QDir(moonDirectory()).absolutePath()) return "exit 1\n";
+    const QString actual = QDir(moonWriteDirectory()).filePath(QFileInfo(path).fileName());
+    return wrapScript(MacPlatform::deleteMoon(actual, moonWriteDirectory()) + serviceCommands("restart"));
+#else
+    return wrapScript("$target = [IO.Path]::GetFullPath(" + quotePowerShell(path)
+        + ")\n$directory = [IO.Path]::GetFullPath(" + quotePowerShell(moonWriteDirectory()) + ")\n"
+        "if ([IO.Path]::GetDirectoryName($target) -ne $directory -or [IO.Path]::GetExtension($target) -ne '.moon') { throw 'Invalid Moon path' }\n"
+        "Remove-Item -LiteralPath $target -Force -ErrorAction Stop\n" + serviceCommands("restart"));
+#endif
+}
+
 ZeroTier::PowerShellInvocation ZeroTier::preparePowerShell(const QString &script)
 {
     PowerShellInvocation invocation;
@@ -130,6 +309,10 @@ ZeroTier::PowerShellInvocation ZeroTier::preparePowerShell(const QString &script
 
 QString ZeroTier::packageScript(bool uninstall, const QString &winget)
 {
+#ifdef Q_OS_MACOS
+    Q_UNUSED(winget)
+    return MacPlatform::packageScript(uninstall, dataDirectory());
+#else
     QString script = "$ErrorActionPreference = 'Stop'\n& " + quotePowerShell(winget);
     script += uninstall
         ? " uninstall --id ZeroTier.ZeroTierOne --exact --source winget --silent --disable-interactivity\n"
@@ -153,12 +336,16 @@ if (Test-Path -LiteralPath $target) {
 )PS";
     }
     return "try {\n" + script + "\nexit 0\n} catch { Write-Output $_; exit 1 }";
+#endif
 }
 
 void ZeroTier::command(QObject *owner, const QStringList &arguments,
                        std::function<void(bool, const QString &)> finished)
 {
     const QString program = executable();
+#if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
+    if (!sessionReady()) { finished(false, QStringLiteral("尚未授权读取 ZeroTier，请操作服务后重试。")); return; }
+#endif
     if (program.isEmpty()) {
         finished(false, QStringLiteral("未找到 ZeroTier，请先安装。"));
         return;
@@ -168,9 +355,10 @@ void ZeroTier::command(QObject *owner, const QStringList &arguments,
     timeout->setSingleShot(true);
     timeout->setInterval(15000);
     auto completed = std::make_shared<bool>(false);
-    auto complete = [process, finished, completed](bool ok, const QString &text) {
+    auto complete = [process, finished, completed, arguments](bool ok, const QString &text) {
         if (*completed) return;
         *completed = true;
+        AppLog::write(arguments.join(' ') + (ok ? "：完成 " : "：失败 ") + text);
         finished(ok, text);
         process->deleteLater();
     };
@@ -215,6 +403,11 @@ JsonPoller::JsonPoller(QWidget *owner, const QString &command, bool object)
             failed(QStringLiteral("服务未响应，请检查服务状态或以管理员身份运行"));
             return;
         }
+        if (!m_lastFailure.isEmpty()) AppLog::write(m_command + QStringLiteral("：恢复连接"));
+        m_lastFailure.clear();
+#if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
+        if (m_command == "info") macApiAvailable = true;
+#endif
         emit availabilityChanged(true, QStringLiteral("每 2 秒自动更新"));
         emit updated(document);
     });
@@ -224,15 +417,34 @@ JsonPoller::JsonPoller(QWidget *owner, const QString &command, bool object)
 
 void JsonPoller::failed(const QString &message)
 {
+#if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
+    if (m_command == "info") macApiAvailable = false;
+#endif
+    if (m_lastFailure != message) AppLog::write(m_command + "：" + message);
+    m_lastFailure = message;
     emit availabilityChanged(false, message);
+}
+
+JsonPoller::~JsonPoller()
+{
+    m_interval.stop();
+    m_timeout.stop();
+    m_process.disconnect(this);
+    if (m_process.state() != QProcess::NotRunning) {
+        m_process.kill();
+        m_process.waitForFinished(1000);
+    }
 }
 
 void JsonPoller::refresh()
 {
     if (!m_owner->isVisible() || m_process.state() != QProcess::NotRunning) return;
+#if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
+    if (!sessionReady()) { failed(QStringLiteral("等待授权读取 ZeroTier")); return; }
+#endif
     const QString program = ZeroTier::executable();
     if (program.isEmpty()) {
-        failed(QStringLiteral("未安装 ZeroTier，请在服务页面安装"));
+        failed(QStringLiteral("未安装 ZeroTier，请在主页安装"));
         return;
     }
     m_process.start(program, cliArguments(program, {"-j", m_command}));

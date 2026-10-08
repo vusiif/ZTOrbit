@@ -3,6 +3,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QThread>
+#include <QFile>
 #include <cstdio>
 
 int main(int argc, char **argv)
@@ -14,6 +15,15 @@ int main(int argc, char **argv)
         return qEnvironmentVariableIntValue("ZT_TEST_WINGET_CODE");
     }
     const auto mode = qEnvironmentVariable("ZT_TEST_MODE");
+    if (arguments.contains("join")) {
+        const QString logPath = qEnvironmentVariable("ZT_TEST_COMMAND_LOG");
+        if (!logPath.isEmpty()) {
+            QFile log(logPath);
+            if (log.open(QIODevice::WriteOnly | QIODevice::Append)) log.write(arguments.mid(1).join(' ').toUtf8() + '\n');
+        }
+        if (mode == "join-error") { std::puts("join failed"); return 1; }
+    }
+    if (mode == "slow-command" && (arguments.contains("join") || arguments.contains("leave"))) QThread::msleep(700);
     if (mode == "slow") QThread::msleep(6500);
     if (mode == "error") { std::puts("service unavailable"); return 1; }
     if (mode == "malformed") { std::puts("invalid json"); return 0; }
@@ -23,7 +33,7 @@ int main(int argc, char **argv)
             {"online", true}, {"tcpFallbackActive", false}, {"extraField", "preserved"}});
     } else if (arguments.contains("listnetworks")) {
         QJsonArray networks;
-        for (int i = 0; i < 40; ++i) {
+        for (int i = 0; i < (mode == "compact-lists" ? 2 : 40); ++i) {
             networks.append(QJsonObject{{"nwid", QString("8056c2e21c%1").arg(i, 6, 16, QChar('0'))},
                 {"name", QStringLiteral("团队网络")}, {"status", i % 3 ? "OK" : "ACCESS_DENIED"},
                 {"type", "PRIVATE"}, {"assignedAddresses", QJsonArray{QString("10.24.0.%1/24").arg(i + 1)}},
@@ -33,7 +43,19 @@ int main(int argc, char **argv)
         document = QJsonDocument(networks);
     } else if (arguments.contains("listpeers")) {
         QJsonArray peers;
-        for (int i = 0; i < 35; ++i)
+        if (mode == "peer-filter" || mode == "peer-reachable") {
+            const QStringList roles = {"LEAF", "LEAF", "LEAF", "PLANET", "MOON"};
+            const QList<int> latencies = {mode == "peer-reachable" ? 8 : -1, 0, 25, -1, -1};
+            for (int i = 0; i < roles.size(); ++i)
+                peers.append(QJsonObject{{"address", QString("%1").arg(i + 1, 10, 16, QChar('0'))},
+                    {"role", roles[i]}, {"latency", latencies[i]},
+                    {"paths", i == 2 || i == 3 ? QJsonArray{QJsonObject{{"address", "192.0.2.1/9993"}, {"active", true}}} : QJsonArray{}}});
+            document = QJsonDocument(peers);
+            const auto bytes = document.toJson(QJsonDocument::Compact);
+            std::fwrite(bytes.constData(), 1, bytes.size(), stdout);
+            return 0;
+        }
+        for (int i = 0; i < (mode == "compact-lists" ? 4 : 35); ++i)
             peers.append(QJsonObject{{"address", QString("%1").arg(i + 1, 10, 16, QChar('0'))},
                 {"role", i == 0 ? "PLANET" : i == 1 ? "MOON" : "LEAF"}, {"latency", 12 + i},
                 {"paths", i % 2 ? QJsonArray{} : QJsonArray{QJsonObject{{"address", "192.0.2.1/9993"}, {"active", true}}}},

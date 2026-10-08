@@ -1,11 +1,14 @@
 #include "ServiceTab.h"
 #include "../MainWindow.h"
-#include "../ZeroTierClient.h"
+#include "../UiTransitions.h"
+#include <QApplication>
+#include <QClipboard>
 #include <QHBoxLayout>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QToolButton>
 #include <QShowEvent>
 #include <QStandardPaths>
 #include <QTimer>
@@ -15,63 +18,58 @@ ServiceTab::ServiceTab(MainWindow *mainWindow, QWidget *parent)
     : QWidget(parent), m_main(mainWindow)
 {
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(8, 8, 8, 8);
+    layout->setContentsMargins(0, 0, 0, 0);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     layout->setSpacing(14);
-    auto *title = new QLabel(QStringLiteral("ZeroTier 服务"));
+    auto *title = new QLabel(QStringLiteral("ZeroTier"));
     title->setObjectName("serviceTitle");
-    QFont font = title->font();
-    font.setPointSize(18);
-    font.setBold(true);
-    title->setFont(font);
     layout->addWidget(title);
-    m_installation = new QLabel;
-    m_installation->setWordWrap(true);
-    layout->addWidget(m_installation);
-    m_service = new QLabel(QStringLiteral("等待服务状态…"));
-    m_service->setWordWrap(true);
-    layout->addWidget(m_service);
-    auto *serviceActions = new QHBoxLayout;
-    m_start = new QPushButton(QStringLiteral("启动"));
-    m_stop = new QPushButton(QStringLiteral("停止"));
-    m_restart = new QPushButton(QStringLiteral("重启"));
-    serviceActions->addWidget(m_start);
-    serviceActions->addWidget(m_stop);
-    serviceActions->addWidget(m_restart);
-    serviceActions->addStretch();
-    layout->addLayout(serviceActions);
-    connect(m_start, &QPushButton::clicked, this, [this] { changeService("start"); });
-    connect(m_stop, &QPushButton::clicked, this, [this] { changeService("stop"); });
-    connect(m_restart, &QPushButton::clicked, this, [this] { changeService("restart"); });
-    auto *packages = new QHBoxLayout;
-    m_install = new QPushButton(QStringLiteral("使用 winget 安装 ZeroTier"));
-    m_install->setObjectName("installButton");
-    m_uninstall = new QPushButton(QStringLiteral("卸载 ZeroTier 并删除数据"));
-    m_uninstall->setObjectName("uninstallButton");
-    packages->addWidget(m_install);
-    packages->addWidget(m_uninstall);
-    packages->addStretch();
-    layout->addLayout(packages);
-    connect(m_install, &QPushButton::clicked, this, [this] { packageAction(false); });
-    connect(m_uninstall, &QPushButton::clicked, this, [this] { packageAction(true); });
-    auto *hint = new QLabel(QStringLiteral("程序启动时请求管理员授权，用于读取 ZeroTier 认证信息和管理服务。"));
-    hint->setWordWrap(true);
-    layout->addWidget(hint);
+    auto *summary = new QHBoxLayout;
+    auto *identity = new QVBoxLayout;
+    identity->setSpacing(4);
+    m_node = new QLabel(QStringLiteral("—"));
+    m_node->setObjectName("nodeId");
+    m_node->setCursor(Qt::PointingHandCursor);
+    m_node->setTextInteractionFlags(Qt::LinksAccessibleByMouse | Qt::LinksAccessibleByKeyboard);
+    m_node->setOpenExternalLinks(false);
+    connect(m_node, &QLabel::linkActivated, this, [](const QString &id) { QApplication::clipboard()->setText(id); });
+    identity->addWidget(m_node);
+    m_version = new QLabel;
+    m_version->setObjectName("nodeVersion");
+    identity->addWidget(m_version);
+    summary->addLayout(identity);
+    summary->addStretch();
+    auto *actions = new QHBoxLayout;
+    actions->setSpacing(0);
+    m_action = new QPushButton;
+    m_action->setObjectName("serviceAction");
+    m_action->setMinimumWidth(110);
+    m_action->setFixedHeight(36);
+    m_dropdown = new QToolButton;
+    m_dropdown->setObjectName("serviceDropdown");
+    m_dropdown->setArrowType(Qt::DownArrow);
+    m_dropdown->setFixedWidth(32);
+    m_dropdown->setFixedHeight(36);
+    m_dropdown->setAccessibleName(QStringLiteral("更多服务操作"));
+    m_menu = new AnimatedMenu(this);
+    m_menu->setObjectName("serviceMenu");
+    connect(m_dropdown, &QToolButton::clicked, this, [this] {
+        m_menu->popup(m_dropdown->mapToGlobal(QPoint(0, m_dropdown->height())));
+    });
+    connect(m_action, &QPushButton::clicked, this, [this] {
+        if (!m_status.known) return;
+        if (!m_status.exists) packageAction(false);
+        else changeService(m_status.running ? "stop" : "start");
+    });
+    actions->addWidget(m_action);
+    actions->addWidget(m_dropdown);
+    summary->addLayout(actions);
+    layout->addLayout(summary);
     m_feedback = new QLabel;
     m_feedback->setObjectName("serviceFeedback");
     m_feedback->setWordWrap(true);
-    m_feedback->setTextInteractionFlags(Qt::TextSelectableByMouse);
     layout->addWidget(m_feedback);
-    layout->addStretch();
-    m_poller = new JsonPoller(this, "info", true);
-    connect(m_poller, &JsonPoller::availabilityChanged, this, [this](bool available, const QString &message) {
-        if (!available) m_service->setText(message);
-    });
-    connect(m_poller, &JsonPoller::updated, this, [this](const QJsonDocument &document) {
-        const auto object = document.object();
-        m_service->setText(QStringLiteral("节点 %1 · %2 · 版本 %3")
-            .arg(object["address"].toString(), object["online"].toBool() ? QStringLiteral("在线") : QStringLiteral("离线"),
-                 object["version"].toString()));
-    });
+    m_feedback->hide();
     auto *timer = new QTimer(this);
     timer->setInterval(2000);
     connect(timer, &QTimer::timeout, this, &ServiceTab::updateInstallation);
@@ -79,26 +77,45 @@ ServiceTab::ServiceTab(MainWindow *mainWindow, QWidget *parent)
     updateInstallation();
 }
 
+void ServiceTab::setNodeInfo(const QJsonObject &object)
+{
+    const QString id = object["address"].toString();
+    m_node->setText(id.isEmpty() ? QStringLiteral("—")
+        : QStringLiteral("<a href=\"%1\" style=\"color: %2; text-decoration: none\">%1</a>")
+            .arg(id.toHtmlEscaped(), palette().color(QPalette::WindowText).name()));
+    const QString version = object["version"].toString();
+    m_version->setText(version.isEmpty() ? QString() : "v" + version);
+}
+
 void ServiceTab::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
     updateInstallation();
-    m_poller->refresh();
 }
 
 void ServiceTab::updateInstallation()
 {
-    m_installed = !ZeroTier::executable().isEmpty();
-    m_installation->setText(m_installed ? QStringLiteral("已找到 ZeroTier，服务状态自动更新。")
-                                       : QStringLiteral("尚未安装 ZeroTier，请使用 winget 安装后继续。"));
-    updateButtons();
+    if (m_busy) return;
+    const auto status = m_main->serviceStatus();
+    const bool changed = status.exists != m_status.exists || status.running != m_status.running || status.known != m_status.known;
+    m_status = status;
+    if (!status.known) { UiTransitions::setText(m_feedback, QStringLiteral("无法读取服务状态，请检查管理员权限。")); m_feedback->show(); }
+    else if (m_feedback->text() == QStringLiteral("无法读取服务状态，请检查管理员权限。")) { UiTransitions::setText(m_feedback, {}); m_feedback->hide(); }
+    // Never replace live menu actions underneath the pointer.
+    if (changed || m_menu->actions().isEmpty()) updateButtons();
 }
 
 void ServiceTab::updateButtons()
 {
-    m_install->setEnabled(!m_busy && !m_installed);
-    m_uninstall->setEnabled(!m_busy && m_installed);
-    for (auto *button : {m_start, m_stop, m_restart}) button->setEnabled(!m_busy && m_installed);
+    m_action->setText(!m_status.exists ? QStringLiteral("安装")
+        : m_status.running ? QStringLiteral("停止") : QStringLiteral("启动"));
+    m_action->setEnabled(!m_busy && m_status.known);
+    m_dropdown->setVisible(m_status.exists);
+    m_dropdown->setEnabled(!m_busy && m_status.known);
+    m_menu->clear();
+    if (!m_status.exists) return;
+    if (m_status.running) m_menu->addAction(QStringLiteral("重启"), this, [this] { changeService("restart"); });
+    m_menu->addAction(QStringLiteral("卸载"), this, [this] { packageAction(true); });
 }
 
 void ServiceTab::changeService(const QString &action)
@@ -106,27 +123,39 @@ void ServiceTab::changeService(const QString &action)
     if (m_busy) return;
     m_busy = true;
     updateButtons();
-    m_feedback->setText(QStringLiteral("正在操作服务…"));
+    UiTransitions::setBusy(this, true);
+    UiTransitions::setText(m_feedback, {});
+    m_feedback->hide();
     m_main->runService(action, [this](bool ok) {
         m_busy = false;
+        UiTransitions::setBusy(this, false);
         updateInstallation();
-        m_feedback->setText(ok ? QStringLiteral("服务操作完成。") : QStringLiteral("服务操作未完成，请查看操作日志。"));
-        m_poller->refresh();
+        updateButtons();
+        UiTransitions::setText(m_feedback, ok ? QString() : QStringLiteral("操作失败，请查看 zerotier-gui.log。"));
+        m_feedback->setVisible(!ok);
     });
 }
 
 void ServiceTab::packageAction(bool uninstall)
 {
     if (m_busy) return;
+#ifdef Q_OS_MACOS
+    const QString winget;
+#else
     const QString winget = QStandardPaths::findExecutable("winget");
     if (winget.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("无法使用 winget"), QStringLiteral("未找到 winget，请安装 Windows 应用安装程序后重试。"));
         return;
     }
+#endif
     const QString title = uninstall ? QStringLiteral("卸载 ZeroTier") : QStringLiteral("安装 ZeroTier");
     const QString text = uninstall
         ? QStringLiteral("卸载 ZeroTier，并删除 %1 中的全部数据（包括节点身份和网络配置），确定继续？").arg(ZeroTier::dataDirectory())
+#ifdef Q_OS_MACOS
+        : QStringLiteral("从 ZeroTier 官方下载并安装 macOS 安装包，是否继续？");
+#else
         : QStringLiteral("使用 winget 下载并安装 ZeroTier，并接受软件包与来源协议，是否继续？");
+#endif
     QMessageBox confirmation(QMessageBox::Question, title, text,
                              QMessageBox::Yes | QMessageBox::No, this);
     confirmation.setDefaultButton(QMessageBox::No);
@@ -135,12 +164,16 @@ void ServiceTab::packageAction(bool uninstall)
     if (confirmation.exec() != QMessageBox::Yes) return;
     m_busy = true;
     updateButtons();
-    m_feedback->setText(uninstall ? QStringLiteral("正在卸载并清理数据…") : QStringLiteral("正在下载和安装…"));
+    UiTransitions::setBusy(this, true);
+    UiTransitions::setText(m_feedback, {});
+    m_feedback->hide();
     m_main->runElevatedScript(title, ZeroTier::packageScript(uninstall, winget), [this, uninstall](bool ok) {
         m_busy = false;
+        UiTransitions::setBusy(this, false);
         updateInstallation();
-        m_feedback->setText(ok ? (uninstall ? QStringLiteral("ZeroTier 已卸载，数据目录已删除。") : QStringLiteral("安装完成，可进入网络页面加入网络。"))
-                               : (uninstall ? QStringLiteral("卸载或数据清理未完成，请查看操作日志。") : QStringLiteral("安装未完成，请查看操作日志。")));
-        m_poller->refresh();
+        updateButtons();
+        UiTransitions::setText(m_feedback, ok ? QString() : QStringLiteral("操作失败，请查看 zerotier-gui.log。"));
+        m_feedback->setVisible(!ok);
+
     });
 }

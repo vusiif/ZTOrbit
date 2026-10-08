@@ -1,26 +1,39 @@
 #include "MainWindow.h"
+#include "AppLog.h"
+#include "AppStyle.h"
+#include "UiTransitions.h"
 #include "DataTable.h"
 #include "ZeroTierClient.h"
+#include "MacPlatform.h"
 #include "tabs/ServiceTab.h"
-#include "tabs/InfoTab.h"
 #include "tabs/PeersTab.h"
 #include "tabs/NetworkTab.h"
 #include "tabs/MoonTab.h"
 
 #include <QCloseEvent>
+#include <QApplication>
+#include <QAbstractButton>
+#include <QPainter>
+#include <QPushButton>
+#include <QStyleHints>
+#include <QJsonObject>
+#include <QVariantAnimation>
+#include <QPointer>
+#include <QCheckBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QFile>
-#include <QFont>
+#include <QDir>
 #include <QLabel>
 #include <QListWidget>
-#include <QScrollBar>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSplitter>
+#include <QScrollArea>
 #include <QStackedWidget>
 #include <QTemporaryDir>
-#include <QTextEdit>
 #include <QTextStream>
 #include <QTimer>
-#include <QToolButton>
 #include <QVBoxLayout>
 #include <memory>
 
@@ -29,16 +42,107 @@
 #include <shellapi.h>
 #endif
 
+namespace {
+class SettingsButton : public QPushButton {
+public:
+    SettingsButton() { setCursor(Qt::PointingHandCursor); }
+protected:
+    void paintEvent(QPaintEvent *event) override
+    {
+        QPushButton::paintEvent(event);
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.translate(rect().center());
+        painter.setPen(QPen(palette().color(QPalette::WindowText), 3, Qt::SolidLine, Qt::SquareCap));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(QPointF(0, 0), 7, 7);
+        for (int i = 0; i < 8; ++i) {
+            painter.drawLine(QPointF(0, -7), QPointF(0, -11));
+            painter.rotate(45);
+        }
+    }
+};
+
+class ThemeSwitch : public QAbstractButton {
+public:
+    explicit ThemeSwitch(QWidget *parent = nullptr) : QAbstractButton(parent)
+    {
+        setObjectName("themeSwitch");
+        setAccessibleName(QStringLiteral("切换浅色或深色主题"));
+        setFixedSize(68, 34);
+        setCursor(Qt::PointingHandCursor);
+        setCheckable(true);
+        m_position = qApp->property("darkTheme").toBool() ? 1.0 : 0.0;
+        setChecked(m_position > 0.5);
+        m_motion.setDuration(180);
+        m_motion.setEasingCurve(QEasingCurve::OutCubic);
+        connect(&m_motion, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
+            m_position = value.toReal(); update();
+        });
+    }
+    void sync()
+    {
+        const bool dark = qApp->property("darkTheme").toBool();
+        setChecked(dark);
+        m_motion.stop();
+        m_motion.setStartValue(m_position);
+        m_motion.setEndValue(dark ? 1.0 : 0.0);
+        m_motion.start();
+    }
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        const bool dark = qApp->property("darkTheme").toBool();
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(palette().color(QPalette::Mid), 1));
+        painter.setBrush(dark ? QColor("#354e61") : QColor("#e3eff8"));
+        painter.drawRoundedRect(QRectF(1, 1, 66, 32), 16, 16);
+        if (dark) {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor("#e1ebf3"));
+            painter.drawEllipse(QPointF(17, 17), 7, 7);
+            painter.setBrush(QColor("#354e61"));
+            painter.drawEllipse(QPointF(20, 14), 6, 6);
+        } else {
+            painter.setPen(QPen(QColor("#925b0d"), 1.6));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawEllipse(QPointF(51, 17), 4, 4);
+            painter.save(); painter.translate(51, 17);
+            for (int i = 0; i < 8; ++i) { painter.drawLine(QPointF(0, -7), QPointF(0, -9)); painter.rotate(45); }
+            painter.restore();
+        }
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(dark ? QColor("#9cceee") : QColor("#ffffff"));
+        painter.drawEllipse(QPointF(17 + 34 * m_position, 17), 12, 12);
+    }
+private:
+    qreal m_position = 0;
+    QVariantAnimation m_motion;
+};
+}
+
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
     setupUi();
+    ZeroTier::startServiceMonitor(this);
+#if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
+    if (!ZeroTier::executable().isEmpty()) QTimer::singleShot(0, this, [this] {
+        auto *page = m_pages->currentWidget();
+        UiTransitions::setBusy(page, true);
+        runElevatedScript(QStringLiteral("授权读取 ZeroTier"), ZeroTier::wrapScript({}), [page](bool) {
+            UiTransitions::setBusy(page, false);
+        });
+    });
+#endif
 }
 
 void MainWindow::setupUi()
 {
-    setWindowTitle(QStringLiteral("ZeroTier GUI"));
+    setWindowTitle(QStringLiteral("ZTGUI"));
     resize(1120, 720);
     setMinimumSize(760, 480);
+    setAcceptDrops(true);
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
     layout->setContentsMargins(10, 10, 10, 10);
@@ -52,40 +156,154 @@ void MainWindow::setupUi()
     sidebar->setMinimumWidth(130);
     auto *sideLayout = new QVBoxLayout(sidebar);
     sideLayout->setContentsMargins(10, 14, 10, 10);
-    auto *brand = new QLabel(QStringLiteral("ZeroTier"));
+    auto *brandRow = new QHBoxLayout;
+    auto *online = new QLabel;
+    online->setObjectName("onlineIndicator");
+    online->setFixedSize(10, 10);
+    online->setStyleSheet("background: #d95059; border-radius: 5px;");
+    online->setAccessibleName(QStringLiteral("离线"));
+    auto *brand = new QLabel(QStringLiteral("ZTGUI"));
     brand->setObjectName("brand");
-    sideLayout->addWidget(brand);
-    sideLayout->addWidget(new QLabel(QStringLiteral("连接管理")));
+    brandRow->addWidget(online);
+    brandRow->addWidget(brand);
+    brandRow->addStretch();
+    sideLayout->addLayout(brandRow);
     m_navigation = new QListWidget;
     m_navigation->setObjectName("navigation");
-    m_navigation->addItems({QStringLiteral("服务"), QStringLiteral("节点信息"),
-                            QStringLiteral("成员 / Peers"), QStringLiteral("网络 / Networks"),
-                            QStringLiteral("中转站 / Moon")});
+    m_navigation->addItem(QStringLiteral("ZeroTier"));
     m_navigation->setMinimumWidth(0);
     m_navigation->setTextElideMode(Qt::ElideNone);
     enableDragScrolling(m_navigation);
     sideLayout->addWidget(m_navigation, 1);
-    auto *hint = new QLabel(QStringLiteral("拖动分隔线调整侧栏宽度"));
-    hint->setWordWrap(true);
-    hint->setObjectName("sidebarHint");
-    sideLayout->addWidget(hint);
+    auto *settingsButton = new SettingsButton;
+    settingsButton->setObjectName("settingsButton");
+    settingsButton->setAccessibleName(QStringLiteral("设置"));
+    settingsButton->setFixedSize(40, 40);
+    sideLayout->addWidget(settingsButton, 0, Qt::AlignLeft);
+    auto *settings = new AnimatedDialog(this, Qt::Popup | Qt::FramelessWindowHint);
+    settings->setObjectName("settingsPopup");
+    auto *settingsLayout = new QVBoxLayout(settings);
+    settingsLayout->setContentsMargins(16, 16, 16, 16);
+    settingsLayout->setSpacing(12);
+    auto *themeRow = new QHBoxLayout;
+    themeRow->addWidget(new QLabel(QStringLiteral("主题")));
+    themeRow->addStretch();
+    auto *theme = new ThemeSwitch;
+    themeRow->addWidget(theme);
+    settingsLayout->addLayout(themeRow);
+    auto *system = new QCheckBox(QStringLiteral("跟随系统"));
+    system->setObjectName("followSystemTheme");
+    system->setChecked(QSettings().value("appearance/theme", "system").toString() == "system");
+    settingsLayout->addWidget(system);
+    auto *plugins = new QPushButton(QStringLiteral("插件"));
+    plugins->setObjectName("pluginsButton");
+    plugins->setEnabled(false);
+    settingsLayout->addWidget(plugins);
+    auto *about = new QPushButton(QStringLiteral("关于"));
+    about->setObjectName("aboutButton");
+    settingsLayout->addWidget(about);
+    connect(settingsButton, &QPushButton::clicked, this, [settings, settingsButton, theme] {
+        if (settings->isVisible()) { settings->close(); return; }
+        theme->sync();
+        settings->adjustSize();
+        settings->move(settingsButton->mapToGlobal(QPoint(settingsButton->width(), -settings->height())));
+        settings->show();
+    });
+    connect(about, &QPushButton::clicked, this, [this, settings] {
+        settings->close();
+        auto *dialog = new AnimatedDialog(this, Qt::Tool);
+        dialog->setObjectName("aboutDialog");
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->setWindowTitle(QStringLiteral("关于"));
+        auto *content = new QVBoxLayout(dialog);
+        content->setContentsMargins(24, 24, 24, 24);
+        auto *title = new QLabel(QStringLiteral("ZTGUI"));
+        title->setObjectName("sectionTitle");
+        content->addWidget(title);
+        content->addWidget(new QLabel(QStringLiteral("v%1").arg(QStringLiteral(ZEROTIER_GUI_VERSION))));
+        content->addWidget(new QLabel(QStringLiteral("Qt %1").arg(QString::fromLatin1(qVersion()))));
+        auto *close = new QPushButton(QStringLiteral("关闭"));
+        content->addWidget(close, 0, Qt::AlignRight);
+        connect(close, &QPushButton::clicked, dialog, &QDialog::close);
+        dialog->show();
+    });
     m_pages = new QStackedWidget;
+    m_pages->setObjectName("pages");
     m_pages->setMinimumWidth(460);
-    m_outputConsole = new QTextEdit;
-    m_outputConsole->setObjectName("outputConsole");
-    m_outputConsole->setReadOnly(true);
-    m_outputConsole->setFont(QFont("Consolas", 9));
-    m_outputConsole->setPlaceholderText(QStringLiteral("操作结果会显示在这里"));
-    m_outputConsole->document()->setMaximumBlockCount(300);
-    m_outputConsole->setMinimumHeight(50);
-    m_outputConsole->setMaximumHeight(150);
-    m_pages->addWidget(new ServiceTab(this));
-    m_pages->addWidget(new InfoTab(this));
-    m_pages->addWidget(new PeersTab(this));
-    m_pages->addWidget(new NetworkTab(this));
-    m_pages->addWidget(new MoonTab(this));
-    connect(m_navigation, &QListWidget::currentRowChanged, m_pages, &QStackedWidget::setCurrentIndex);
-    m_navigation->setCurrentRow(ZeroTier::executable().isEmpty() ? 0 : 3);
+    auto *scroll = new QScrollArea;
+    scroll->setObjectName("zeroTierScroll");
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setFrameShape(QFrame::NoFrame);
+    auto *content = new QWidget;
+    content->setObjectName("zeroTierContent");
+    auto *contentLayout = new QVBoxLayout(content);
+    contentLayout->setContentsMargins(24, 20, 24, 24);
+    contentLayout->setSpacing(24);
+    auto *service = new ServiceTab(this);
+    contentLayout->addWidget(service);
+    auto *networks = new NetworkTab(this);
+    networks->setContentSized(true);
+    contentLayout->addWidget(networks);
+    auto *peersContainer = new QWidget;
+    auto *peersLayout = new QVBoxLayout(peersContainer);
+    peersLayout->setContentsMargins(0, 0, 0, 0);
+    peersLayout->setSpacing(8);
+    auto *peersTitle = new QLabel(QStringLiteral("成员"));
+    peersTitle->setObjectName("sectionTitle");
+    peersLayout->addWidget(peersTitle);
+    auto *peers = new PeersTab(this);
+    peers->setContentSized(true);
+    peersLayout->addWidget(peers);
+    contentLayout->addWidget(peersContainer);
+    contentLayout->addStretch();
+    scroll->setWidget(content);
+    m_pages->addWidget(scroll);
+    auto nodeInfo = std::make_shared<QJsonObject>();
+    // Keep node status current throughout the scrollable page.
+    auto *poller = new JsonPoller(this, "info", true);
+    connect(poller, &JsonPoller::updated, this, [online, service, nodeInfo](const QJsonDocument &document) {
+        *nodeInfo = document.object();
+        const bool connected = (*nodeInfo)["online"].toBool();
+        online->setStyleSheet(connected ? "background: #25a773; border-radius: 5px;" : "background: #d95059; border-radius: 5px;");
+        online->setAccessibleName(connected ? QStringLiteral("在线") : QStringLiteral("离线"));
+        online->setProperty("online", connected);
+        service->setNodeInfo(*nodeInfo);
+    });
+    connect(poller, &JsonPoller::availabilityChanged, this, [online](bool available, const QString &) {
+        if (!available) {
+            online->setStyleSheet("background: #d95059; border-radius: 5px;");
+            online->setAccessibleName(QStringLiteral("离线"));
+            online->setProperty("online", false);
+        }
+    });
+    const auto changeTheme = [this, theme, service, nodeInfo](const QString &value) {
+        const auto before = UiTransitions::capture(centralWidget());
+        QSettings().setValue("appearance/theme", value);
+        applyAppStyle(*qApp);
+        theme->sync();
+        service->setNodeInfo(*nodeInfo);
+        UiTransitions::crossFade(centralWidget(), before, 220);
+    };
+    connect(theme, &QAbstractButton::clicked, this, [theme, system, changeTheme] {
+        const QSignalBlocker blocker(system);
+        system->setChecked(false);
+        changeTheme(theme->isChecked() ? "dark" : "light");
+    });
+    connect(system, &QCheckBox::toggled, this, [theme, changeTheme](bool follow) {
+        changeTheme(follow ? "system" : theme->isChecked() ? "dark" : "light");
+    });
+    connect(qApp->styleHints(), &QStyleHints::colorSchemeChanged, this, [theme, service, nodeInfo] {
+        theme->sync();
+        service->setNodeInfo(*nodeInfo);
+    });
+    connect(m_navigation, &QListWidget::currentRowChanged, this, [this](int index) {
+        if (index < 0 || index == m_pages->currentIndex()) return;
+        const auto before = UiTransitions::capture(m_pages);
+        m_pages->setCurrentIndex(index);
+        UiTransitions::crossFade(m_pages, before);
+    });
+    m_navigation->setCurrentRow(0);
     m_horizontal->addWidget(sidebar);
     m_horizontal->addWidget(m_pages);
     m_horizontal->setStretchFactor(0, 0);
@@ -94,18 +312,6 @@ void MainWindow::setupUi()
     const auto splitterState = QSettings().value("window/sidebar").toByteArray();
     if (!splitterState.isEmpty()) m_horizontal->restoreState(splitterState);
     layout->addWidget(m_horizontal, 1);
-    auto *consoleToggle = new QToolButton;
-    consoleToggle->setText(QStringLiteral("操作日志"));
-    consoleToggle->setCheckable(true);
-    consoleToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    consoleToggle->setArrowType(Qt::RightArrow);
-    m_outputConsole->hide();
-    connect(consoleToggle, &QToolButton::toggled, this, [this, consoleToggle](bool visible) {
-        m_outputConsole->setVisible(visible);
-        consoleToggle->setArrowType(visible ? Qt::DownArrow : Qt::RightArrow);
-    });
-    layout->addWidget(consoleToggle, 0, Qt::AlignLeft);
-    layout->addWidget(m_outputConsole);
     setCentralWidget(central);
     const auto geometry = QSettings().value("window/geometry").toByteArray();
     if (!geometry.isEmpty()) restoreGeometry(geometry);
@@ -119,14 +325,27 @@ void MainWindow::closeEvent(QCloseEvent *event)
     QMainWindow::closeEvent(event);
 }
 
+void MainWindow::dragEnterEvent(QDragEnterEvent *event)
+{
+    auto *moon = findChild<MoonTab *>();
+    if (moon && moon->isVisible() && moon->acceptsFiles(event->mimeData())) event->acceptProposedAction();
+    else event->ignore();
+}
+
+void MainWindow::dropEvent(QDropEvent *event)
+{
+    auto *moon = findChild<MoonTab *>();
+    if (moon && moon->isVisible() && moon->acceptsFiles(event->mimeData())) {
+        event->acceptProposedAction();
+        moon->importDrop(event->mimeData());
+    } else event->ignore();
+}
+
 void MainWindow::runService(const QString &action, std::function<void(bool)> finished)
 {
-    QString script = "$ErrorActionPreference = 'Stop'\ntry {\n";
-    if (action == "start") script += "Start-Service -Name ZeroTierOneService -ErrorAction Stop\n";
-    else if (action == "stop") script += "Stop-Service -Name ZeroTierOneService -ErrorAction Stop\n";
-    else if (action == "restart") script += "Restart-Service -Name ZeroTierOneService -ErrorAction Stop\n";
-    else { if (finished) finished(false); return; }
-    script += "exit 0\n} catch { Write-Output $_; exit 1 }";
+    const QString operation = ZeroTier::serviceCommands(action);
+    if (operation.isEmpty()) { if (finished) finished(false); return; }
+    const QString script = ZeroTier::wrapScript(operation);
     runElevatedScript(QStringLiteral("ZeroTier 服务：%1").arg(action), script, finished);
 }
 
@@ -174,6 +393,43 @@ void MainWindow::runElevatedScript(const QString &label, const QString &script,
         timer->deleteLater();
     });
     timer->start();
+#elif defined(Q_OS_MACOS)
+    auto directory = std::make_shared<QTemporaryDir>(QDir::tempPath() + "/ztgui-operation-XXXXXX");
+    if (!directory->isValid()) { if (finished) finished(false); return; }
+    const QString path = directory->filePath("operation.sh");
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) { if (finished) finished(false); return; }
+    // Preserve the operation result while refreshing the private session after partial failures.
+    const QString payload = "/bin/sh -c " + MacPlatform::quote(script) + "\nstatus=$?\n"
+        "/bin/sh -c " + MacPlatform::quote("set -eu\n" + ZeroTier::sessionRefreshScript())
+        + "\nsession_status=$?\n[ \"$status\" -ne 0 ] || status=$session_status\n"
+        "exit \"$status\"\n";
+    const QByteArray bytes = payload.toUtf8();
+    if (file.write(bytes) != bytes.size() || !file.flush()) { if (finished) finished(false); return; }
+    file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    file.close();
+    auto *process = new QProcess(this);
+    const QString command = "/bin/sh " + MacPlatform::quote(path) + " 2>&1";
+    const QString appleScript = "do shell script " + MacPlatform::appleScriptString(command) + " with administrator privileges";
+    auto completed = std::make_shared<bool>(false);
+    const auto complete = [this, process, directory, finished, completed, label](bool ok, const QString &output) {
+        if (*completed) return;
+        *completed = true;
+        if (!output.trimmed().isEmpty()) appendOutput(output.trimmed());
+        appendOutput(label + (ok ? QStringLiteral("：完成") : QStringLiteral("：失败或授权被取消")));
+        if (finished) finished(ok);
+        process->deleteLater();
+    };
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+        [process, complete](int code, QProcess::ExitStatus status) {
+            complete(code == 0 && status == QProcess::NormalExit,
+                QString::fromUtf8(process->readAllStandardOutput() + process->readAllStandardError()));
+        });
+    connect(process, &QProcess::errorOccurred, this, [complete](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) complete(false, QStringLiteral("无法启动 macOS 授权程序。"));
+    });
+    appendOutput(label + QStringLiteral("：等待系统授权"));
+    process->start("/usr/bin/osascript", {"-e", appleScript});
 #else
     Q_UNUSED(script)
     appendOutput(label + QStringLiteral("：此操作仅支持 Windows\n"));
@@ -183,9 +439,5 @@ void MainWindow::runElevatedScript(const QString &label, const QString &script,
 
 void MainWindow::appendOutput(const QString &text)
 {
-    const bool atBottom = m_outputConsole->verticalScrollBar()->value() == m_outputConsole->verticalScrollBar()->maximum();
-    QTextCursor cursor(m_outputConsole->document());
-    cursor.movePosition(QTextCursor::End);
-    cursor.insertText(text);
-    if (atBottom) m_outputConsole->verticalScrollBar()->setValue(m_outputConsole->verticalScrollBar()->maximum());
+    AppLog::write(text);
 }

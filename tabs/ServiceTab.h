@@ -1,13 +1,16 @@
 #pragma once
 #include <QWidget>
+#include "../ZeroTierClient.h"
 class MainWindow;
-class JsonPoller;
 class QLabel;
 class QPushButton;
+class QToolButton;
+class AnimatedMenu;
 class ServiceTab : public QWidget {
     Q_OBJECT
 public:
     explicit ServiceTab(MainWindow *mainWindow, QWidget *parent = nullptr);
+    void setNodeInfo(const QJsonObject &object);
 protected:
     void showEvent(QShowEvent *event) override;
 private:
@@ -16,15 +19,12 @@ private:
     void packageAction(bool uninstall);
     void updateButtons();
     MainWindow *m_main;
-    JsonPoller *m_poller;
-    QLabel *m_installation;
-    QLabel *m_service;
+    QLabel *m_node;
+    QLabel *m_version;
     QLabel *m_feedback;
-    QPushButton *m_install;
-    QPushButton *m_uninstall;
-    QPushButton *m_start;
-    QPushButton *m_stop;
-    QPushButton *m_restart;
-    bool m_installed = false;
+    QPushButton *m_action;
+    QToolButton *m_dropdown;
+    AnimatedMenu *m_menu;
+    ZeroTier::ServiceStatus m_status;
     bool m_busy = false;
 };
