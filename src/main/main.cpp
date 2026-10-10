@@ -11,6 +11,7 @@ int main(int argc, char *argv[])
     app.setApplicationName("ZTGUI");
     app.setApplicationVersion(ZEROTIER_GUI_VERSION);
     app.setOrganizationName("ZeroTierGUI");
+    AppLog::initialize();
     QSettings settings;
     if (settings.allKeys().isEmpty()) {
         const QSettings previous("ZeroTierGUI", "ZeroTier GUI");
@@ -21,7 +22,6 @@ int main(int argc, char *argv[])
 #else
     app.setWindowIcon(QIcon(QStringLiteral(":/assets/app-icon.ico")));
 #endif
-    AppLog::initialize();
     applyAppStyle(app);
     MainWindow window;
     window.show();

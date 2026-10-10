@@ -37,7 +37,7 @@ void ZeroTier::startServiceMonitor(QObject *owner)
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
     auto *process = new QProcess(owner);
     auto *timer = new QTimer(process);
-    timer->setInterval(2000);
+    timer->setInterval(1000);
     auto *timeout = new QTimer(process);
     timeout->setSingleShot(true);
     timeout->setInterval(5000);
@@ -382,7 +382,7 @@ void ZeroTier::command(QObject *owner, const QStringList &arguments,
 JsonPoller::JsonPoller(QWidget *owner, const QString &command, bool object)
     : QObject(owner), m_owner(owner), m_command(command), m_object(object)
 {
-    m_interval.setInterval(2000);
+    m_interval.setInterval(1000);
     m_timeout.setSingleShot(true);
     m_timeout.setInterval(5000);
     connect(&m_interval, &QTimer::timeout, this, &JsonPoller::refresh);
@@ -408,7 +408,7 @@ JsonPoller::JsonPoller(QWidget *owner, const QString &command, bool object)
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
         if (m_command == "info") macApiAvailable = true;
 #endif
-        emit availabilityChanged(true, QStringLiteral("每 2 秒自动更新"));
+        emit availabilityChanged(true, QStringLiteral("每 1 秒自动更新"));
         emit updated(document);
     });
     m_interval.start();

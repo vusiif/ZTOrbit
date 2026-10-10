@@ -74,6 +74,7 @@ void applyAppStyle(QApplication &app)
         QLabel#brand, QLabel#serviceTitle { font-size: 24px; font-weight: 600; color: %2; }
         QLabel#nodeId { font-size: 28px; font-weight: 600; }
         QLabel#nodeVersion { font-size: 14px; color: %3; }
+        QLabel#serviceStatusWarning { color: %10; }
         QPushButton#settingsButton { font-size: 24px; border: none; background: transparent; }
         QPushButton#settingsButton:hover { background: %9; }
         QDialog#settingsPopup { background: %6; border: 1px solid %5; border-radius: 8px; }

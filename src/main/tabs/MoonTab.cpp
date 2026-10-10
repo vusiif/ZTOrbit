@@ -131,7 +131,7 @@ MoonTab::MoonTab(MainWindow *mainWindow, QWidget *parent)
         refreshFiles();
     });
     auto *timer = new QTimer(this);
-    timer->setInterval(2000);
+    timer->setInterval(1000);
     connect(timer, &QTimer::timeout, this, [this] { if (isVisible() && !m_busy) refreshFiles(); });
     timer->start();
     refreshFiles();
@@ -236,7 +236,7 @@ void MoonTab::importFiles(const QStringList &sources, std::function<void(bool)> 
         m_add->setEnabled(true);
         UiTransitions::setBusy(this, false);
         refreshFiles();
-        if (!ok) QMessageBox::warning(messageParent ? messageParent.data() : this, QStringLiteral("添加 Moon"), QStringLiteral("文件复制或服务启动未完成，请查看 zerotier-gui.log。"));
+        if (!ok) QMessageBox::warning(messageParent ? messageParent.data() : this, QStringLiteral("添加 Moon"), QStringLiteral("文件复制或服务启动未完成，请查看 logs 文件夹中的本次启动日志。"));
         m_poller->refresh();
         if (finished) finished(ok);
     });
@@ -261,7 +261,7 @@ void MoonTab::deleteMoon(const QString &id)
         UiTransitions::setBusy(this, false);
         if (!QFileInfo::exists(path)) QSettings().remove("names/moons/" + id);
         refreshFiles();
-        if (!ok) QMessageBox::warning(this, QStringLiteral("删除 Moon"), QStringLiteral("文件删除或服务启动未完成，请查看 zerotier-gui.log。"));
+        if (!ok) QMessageBox::warning(this, QStringLiteral("删除 Moon"), QStringLiteral("文件删除或服务启动未完成，请查看 logs 文件夹中的本次启动日志。"));
         m_poller->refresh();
     });
 }

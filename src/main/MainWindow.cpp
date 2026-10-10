@@ -5,6 +5,7 @@
 #include "DataTable.h"
 #include "ZeroTierClient.h"
 #include "MacPlatform.h"
+#include "plugins/PluginRegistry.h"
 #include "tabs/ServiceTab.h"
 #include "tabs/PeersTab.h"
 #include "tabs/NetworkTab.h"
@@ -124,6 +125,7 @@ private:
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
+    m_plugins = new ZtGui::Plugins::PluginRegistry(this);
     setupUi();
     ZeroTier::startServiceMonitor(this);
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
@@ -135,6 +137,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         });
     });
 #endif
+}
+
+MainWindow::~MainWindow()
+{
+    // Release plugin widgets and callbacks before the main window's UI teardown.
+    disconnect(m_plugins, nullptr, this, nullptr);
+    delete m_plugins;
 }
 
 void MainWindow::setupUi()
@@ -170,7 +179,6 @@ void MainWindow::setupUi()
     sideLayout->addLayout(brandRow);
     m_navigation = new QListWidget;
     m_navigation->setObjectName("navigation");
-    m_navigation->addItem(QStringLiteral("ZeroTier"));
     m_navigation->setMinimumWidth(0);
     m_navigation->setTextElideMode(Qt::ElideNone);
     enableDragScrolling(m_navigation);
@@ -220,7 +228,12 @@ void MainWindow::setupUi()
         auto *title = new QLabel(QStringLiteral("ZTGUI"));
         title->setObjectName("sectionTitle");
         content->addWidget(title);
-        content->addWidget(new QLabel(QStringLiteral("v%1").arg(QStringLiteral(ZEROTIER_GUI_VERSION))));
+        auto *applicationVersion = new QLabel(QStringLiteral("v%1").arg(QStringLiteral(ZEROTIER_GUI_VERSION)));
+        applicationVersion->setObjectName("applicationVersion");
+        content->addWidget(applicationVersion);
+        auto *apiVersion = new QLabel(QStringLiteral("API %1").arg(QString::fromLatin1(ZtGui::Plugins::ApiVersion)));
+        apiVersion->setObjectName("pluginApiVersion");
+        content->addWidget(apiVersion);
         content->addWidget(new QLabel(QStringLiteral("Qt %1").arg(QString::fromLatin1(qVersion()))));
         auto *close = new QPushButton(QStringLiteral("关闭"));
         content->addWidget(close, 0, Qt::AlignRight);
@@ -259,6 +272,7 @@ void MainWindow::setupUi()
     contentLayout->addStretch();
     scroll->setWidget(content);
     m_pages->addWidget(scroll);
+    m_zeroTierPage = scroll;
     auto nodeInfo = std::make_shared<QJsonObject>();
     // Keep node status current throughout the scrollable page.
     auto *poller = new JsonPoller(this, "info", true);
@@ -298,12 +312,15 @@ void MainWindow::setupUi()
         service->setNodeInfo(*nodeInfo);
     });
     connect(m_navigation, &QListWidget::currentRowChanged, this, [this](int index) {
-        if (index < 0 || index == m_pages->currentIndex()) return;
-        const auto before = UiTransitions::capture(m_pages);
-        m_pages->setCurrentIndex(index);
-        UiTransitions::crossFade(m_pages, before);
+        if (index < 0) return;
+        activateNavigation(m_navigation->item(index)->data(Qt::UserRole).toString());
     });
-    m_navigation->setCurrentRow(0);
+    connect(m_plugins, &ZtGui::Plugins::PluginRegistry::menusChanged, this, &MainWindow::rebuildNavigation);
+    connect(m_plugins, &ZtGui::Plugins::PluginRegistry::pageCreationFailed, this,
+            [this](const QString &id, const QString &error) {
+        appendOutput(QStringLiteral("插件页面 %1：%2\n").arg(id, error));
+    });
+    rebuildNavigation();
     m_horizontal->addWidget(sidebar);
     m_horizontal->addWidget(m_pages);
     m_horizontal->setStretchFactor(0, 0);
@@ -315,6 +332,50 @@ void MainWindow::setupUi()
     setCentralWidget(central);
     const auto geometry = QSettings().value("window/geometry").toByteArray();
     if (!geometry.isEmpty()) restoreGeometry(geometry);
+}
+
+void MainWindow::rebuildNavigation()
+{
+    int selected = 0;
+    {
+        const QSignalBlocker blocker(m_navigation);
+        m_navigation->clear();
+        auto *builtin = new QListWidgetItem(QStringLiteral("ZeroTier"), m_navigation);
+        builtin->setData(Qt::UserRole, QString::fromLatin1(ZtGui::Plugins::ZeroTierMenuId));
+        for (const auto &menu : m_plugins->menus()) {
+            auto *item = new QListWidgetItem(menu.icon, menu.title, m_navigation);
+            item->setData(Qt::UserRole, menu.id);
+            item->setToolTip(menu.toolTip);
+            if (menu.id == m_activeMenuId) selected = m_navigation->count() - 1;
+        }
+        m_navigation->setCurrentRow(selected);
+    }
+    activateNavigation(m_navigation->item(selected)->data(Qt::UserRole).toString());
+}
+
+void MainWindow::activateNavigation(const QString &menuId)
+{
+    QWidget *page = m_zeroTierPage;
+    if (menuId != QLatin1String(ZtGui::Plugins::ZeroTierMenuId)) {
+        const auto result = m_plugins->page(menuId, m_pages);
+        if (!result.result.ok()) {
+            const QSignalBlocker blocker(m_navigation);
+            for (int row = 0; row < m_navigation->count(); ++row) {
+                if (m_navigation->item(row)->data(Qt::UserRole).toString() == m_activeMenuId) {
+                    m_navigation->setCurrentRow(row);
+                    break;
+                }
+            }
+            return;
+        }
+        page = result.page;
+        if (m_pages->indexOf(page) < 0) m_pages->addWidget(page);
+    }
+    m_activeMenuId = menuId;
+    if (m_pages->currentWidget() == page) return;
+    const auto before = UiTransitions::capture(m_pages);
+    m_pages->setCurrentWidget(page);
+    UiTransitions::crossFade(m_pages, before);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

@@ -1,15 +1,16 @@
-#include "../AppStyle.h"
-#include "../DataTable.h"
-#include "../MainWindow.h"
-#include "../ZeroTierClient.h"
-#include "../tabs/NetworkTab.h"
-#include "../tabs/MoonTab.h"
-#include "../AppLog.h"
-#include "../UiTransitions.h"
-#include "../NetworkBundle.h"
-#include "../MacPlatform.h"
-#include "../tabs/PeersTab.h"
-#include "../tabs/ServiceTab.h"
+#include "AppStyle.h"
+#include "DataTable.h"
+#include "MainWindow.h"
+#include "ZeroTierClient.h"
+#include "tabs/NetworkTab.h"
+#include "tabs/MoonTab.h"
+#include "AppLog.h"
+#include "UiTransitions.h"
+#include "NetworkBundle.h"
+#include "MacPlatform.h"
+#include "tabs/PeersTab.h"
+#include "tabs/ServiceTab.h"
+#include "plugins/PluginRegistry.h"
 
 #include <QApplication>
 #include <QAbstractButton>
@@ -23,6 +24,7 @@
 #include <QComboBox>
 #include <QCheckBox>
 #include <QDir>
+#include <QDateTime>
 #include <QFile>
 #include <QHeaderView>
 #include <QGraphicsOpacityEffect>
@@ -51,6 +53,8 @@
 #include <QTextStream>
 #include <QUrl>
 #include <QtTest>
+#include <stdexcept>
+#include <thread>
 
 // Only these mocks run service commands; file operations use a temporary ProgramData.
 static QString serviceMocks()
@@ -153,6 +157,298 @@ private slots:
     void cleanupTestCase() {
         qputenv("PATH", m_oldPath); qputenv("ProgramData", m_oldProgramData);
         qunsetenv("ZT_TEST_DATA_DIRECTORY");
+    }
+
+    void logsAreReservedPerLaunchAndPreserveHistory() {
+        QTemporaryDir directory;
+        QTemporaryDir workingDirectory;
+        QVERIFY(directory.isValid());
+        QVERIFY(workingDirectory.isValid());
+        QString helperName = "app_log_probe";
+#ifdef Q_OS_WIN
+        helperName += ".exe";
+#endif
+        const QString helper = directory.filePath(helperName);
+        QVERIFY(QFile::copy(QDir(QCoreApplication::applicationDirPath()).filePath(helperName), helper));
+        const QDir logs(directory.filePath("logs"));
+        const QString date = QDateTime::currentDateTime().toString("yyMMdd");
+        auto runProbe = [&] {
+            QProcess process;
+            process.setWorkingDirectory(workingDirectory.path());
+            process.start(helper, {});
+            if (!process.waitForFinished(10000) || process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
+                return QString();
+            return QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+        };
+        QCOMPARE(runProbe(), logs.filePath(date + "-1.log"));
+        QFile first(logs.filePath(date + "-1.log"));
+        QVERIFY(first.open(QIODevice::ReadOnly));
+        const QByteArray original = first.readAll();
+        first.close();
+        QCOMPARE(original.count('\n'), 43);
+        QCOMPARE(original.count(QStringLiteral("应用启动").toUtf8()), 1);
+        QVERIFY(original.contains(QStringLiteral("日志测试：中文").toUtf8()));
+        QVERIFY(original.contains("WARN captured warning"));
+        QVERIFY(original.contains("ZTGUI v" ZEROTIER_GUI_VERSION));
+        QCOMPARE(runProbe(), logs.filePath(date + "-2.log"));
+        QVERIFY(first.open(QIODevice::ReadOnly));
+        QCOMPARE(first.readAll(), original);
+        first.close();
+        QVERIFY(!QDir(workingDirectory.filePath("logs")).exists());
+
+        // Gaps, unrelated filenames, and previous dates must not reuse a log.
+        const QString yesterday = QDateTime::currentDateTime().addDays(-1).toString("yyMMdd");
+        for (const QString &name : {date + "-9.log", date + "-11.log", date + "-999.log.bak", yesterday + "-80.log"}) {
+            QFile file(logs.filePath(name));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("preserved");
+        }
+        QCOMPARE(runProbe(), logs.filePath(date + "-12.log"));
+
+        // Simultaneous launches reserve distinct filenames without overwrites.
+        QProcess processes[4];
+        for (auto &process : processes) {
+            process.setWorkingDirectory(workingDirectory.path());
+            process.start(helper, {});
+        }
+        QSet<QString> paths;
+        for (auto &process : processes) {
+            QVERIFY(process.waitForFinished(10000));
+            QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+            QCOMPARE(process.exitCode(), 0);
+            const QString path = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+            QVERIFY(!paths.contains(path));
+            paths.insert(path);
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::ReadOnly));
+            QCOMPARE(file.readAll().count('\n'), 43);
+        }
+        for (int sequence = 13; sequence <= 16; ++sequence)
+            QVERIFY(paths.contains(logs.filePath(date + "-" + QString::number(sequence) + ".log")));
+    }
+
+    void pluginRegistrationIsAtomicAndVersioned() {
+        using namespace ZtGui::Plugins;
+        QCOMPARE(ApiMajor, 0);
+        QCOMPARE(ApiMinor, 2);
+        QCOMPARE(QString::fromLatin1(ApiVersion), QStringLiteral(ZEROTIER_GUI_VERSION).section('.', 0, 1));
+        PluginRegistry registry;
+        QSignalSpy changes(&registry, &PluginRegistry::menusChanged);
+        MenuContribution menu;
+        menu.id = "overview";
+        menu.title = QStringLiteral("概览");
+        menu.createPage = [](QWidget *parent) { return new QWidget(parent); };
+        PluginDefinition plugin {{"example.alpha", "Alpha", "1.0"}, {menu}};
+        auto invalid = plugin;
+        invalid.menus.append(menu);
+        QCOMPARE(registry.registerPlugin(invalid).error, Error::InvalidMenu);
+        QVERIFY(registry.menus().isEmpty());
+        QCOMPARE(changes.count(), 0);
+        invalid = plugin;
+        invalid.info.apiMajor = ApiMajor + 1;
+        QCOMPARE(registry.registerPlugin(invalid).error, Error::IncompatibleApi);
+        invalid = plugin;
+        invalid.info.apiMinor = ApiMinor + 1;
+        QCOMPARE(registry.registerPlugin(invalid).error, Error::IncompatibleApi);
+        invalid = plugin;
+        invalid.info.apiMinor = ApiMinor - 1;
+        QCOMPARE(registry.registerPlugin(invalid).error, Error::IncompatibleApi);
+        invalid = plugin;
+        invalid.info.id = "builtin";
+        QCOMPARE(registry.registerPlugin(invalid).error, Error::InvalidPlugin);
+        invalid = plugin;
+        invalid.menus[0].id = "../zerotier";
+        QCOMPARE(registry.registerPlugin(invalid).error, Error::InvalidMenu);
+        invalid = plugin;
+        invalid.info.id = "example.alpha\n";
+        QCOMPARE(registry.registerPlugin(invalid).error, Error::InvalidPlugin);
+        invalid = plugin;
+        invalid.menus[0].createPage = {};
+        QCOMPARE(registry.registerPlugin(invalid).error, Error::InvalidMenu);
+        QVERIFY(registry.registerPlugin(plugin).ok());
+        QCOMPARE(registry.registerPlugin(plugin).error, Error::DuplicatePlugin);
+        QCOMPARE(registry.plugins().size(), 1);
+        QCOMPARE(registry.menus().first().id, QString("example.alpha/overview"));
+        QCOMPARE(changes.count(), 1);
+        plugin.info.id = "example.beta";
+        plugin.menus[0].order = 10;
+        QVERIFY(registry.registerPlugin(plugin).ok());
+        QCOMPARE(registry.menus().first().id, QString("example.beta/overview"));
+        QCOMPARE(registry.unregisterPlugin("missing").error, Error::NotFound);
+        QCOMPARE(registry.unregisterPlugin("builtin").error, Error::NotFound);
+        QCOMPARE(registry.menus().size(), 2);
+    }
+
+    void pluginPagesAreLazyAndNavigationSurvivesRemoval() {
+        using namespace ZtGui::Plugins;
+        MainWindow window;
+        auto *registry = window.pluginRegistry();
+        auto *navigation = window.findChild<QListWidget *>("navigation");
+        auto *pages = window.findChild<QStackedWidget *>("pages");
+        auto *builtin = pages->currentWidget();
+        int creations = 0;
+        MenuContribution menu;
+        menu.id = "overview";
+        menu.title = "Alpha";
+        menu.order = 50;
+        menu.createPage = [&](QWidget *parent) {
+            ++creations;
+            auto *label = new QLabel("State", parent);
+            return label;
+        };
+        PluginDefinition plugin {{"example.alpha", "Alpha", "1.0"}, {menu}};
+        QVERIFY(registry->registerPlugin(plugin).ok());
+        QCOMPARE(creations, 0);
+        QCOMPARE(pages->count(), 1);
+        QCOMPARE(navigation->count(), 2);
+        navigation->setCurrentRow(1);
+        QCOMPARE(creations, 1);
+        QPointer<QWidget> alpha = pages->currentWidget();
+        QCOMPARE(qobject_cast<QLabel *>(alpha.data())->text(), QString("State"));
+        qobject_cast<QLabel *>(alpha.data())->setText("Edited");
+        navigation->setCurrentRow(0);
+        navigation->setCurrentRow(1);
+        QCOMPARE(creations, 1);
+        QCOMPARE(pages->currentWidget(), alpha.data());
+        QCOMPARE(qobject_cast<QLabel *>(alpha.data())->text(), QString("Edited"));
+        // Insert a menu before the selected menu. Its row changes, its identity does not.
+        plugin.info.id = "example.beta";
+        plugin.menus[0].order = 0;
+        QVERIFY(registry->registerPlugin(plugin).ok());
+        QCOMPARE(navigation->currentRow(), 2);
+        QCOMPARE(pages->currentWidget(), alpha.data());
+        navigation->setCurrentRow(1);
+        QPointer<QWidget> beta = pages->currentWidget();
+        QVERIFY(beta != alpha);
+        QVERIFY(registry->unregisterPlugin("example.alpha").ok());
+        QVERIFY(alpha.isNull());
+        QCOMPARE(pages->currentWidget(), beta.data());
+        QVERIFY(registry->unregisterPlugin("example.beta").ok());
+        QVERIFY(beta.isNull());
+        QCOMPARE(pages->currentWidget(), builtin);
+        QCOMPARE(navigation->currentRow(), 0);
+        QCOMPARE(navigation->count(), 1);
+        QCOMPARE(pages->count(), 1);
+    }
+
+    void pluginFactoryFailuresCanBeRetriedAndRejectReentry() {
+        using namespace ZtGui::Plugins;
+        MainWindow window;
+        auto *registry = window.pluginRegistry();
+        auto *navigation = window.findChild<QListWidget *>("navigation");
+        auto *pages = window.findChild<QStackedWidget *>("pages");
+        auto *builtin = pages->currentWidget();
+        QSignalSpy failures(registry, &PluginRegistry::pageCreationFailed);
+        int attempts = 0;
+        Error reentry = Error::None;
+        MenuContribution menu;
+        menu.id = "overview";
+        menu.title = "Retry";
+        menu.createPage = [&](QWidget *parent) -> QWidget * {
+            reentry = registry->unregisterPlugin("example.retry").error;
+            if (++attempts == 1) return nullptr;
+            if (attempts == 2) throw std::runtime_error("test failure");
+            return new QLabel("Recovered", parent);
+        };
+        QVERIFY(registry->registerPlugin({{"example.retry", "Retry", "1.0"}, {menu}}).ok());
+        for (int attempt = 1; attempt <= 2; ++attempt) {
+            navigation->setCurrentRow(1);
+            QCOMPARE(reentry, Error::Busy);
+            QCOMPARE(attempts, attempt);
+            QCOMPARE(navigation->currentRow(), 0);
+            QCOMPARE(pages->currentWidget(), builtin);
+            QCOMPARE(pages->count(), 1);
+            QCOMPARE(failures.count(), attempt);
+        }
+        navigation->setCurrentRow(1);
+        QCOMPARE(attempts, 3);
+        QCOMPARE(pages->count(), 2);
+        QCOMPARE(registry->page("missing/page", pages).result.error, Error::NotFound);
+        QCOMPARE(registry->page("example.retry/overview", nullptr).result.error, Error::PageCreationFailed);
+    }
+
+    void pluginPagesDieBeforeFactoryResources() {
+        using namespace ZtGui::Plugins;
+        QWidget host;
+        QPointer<QWidget> page;
+        bool pageWasDestroyedFirst = false;
+        const auto addPlugin = [&](PluginRegistry &registry) {
+            auto resource = std::shared_ptr<int>(new int(1), [&](int *value) {
+                pageWasDestroyedFirst = page.isNull();
+                delete value;
+            });
+            MenuContribution menu;
+            menu.id = "overview";
+            menu.title = "Lifetime";
+            menu.createPage = [resource](QWidget *parent) { return new QWidget(parent); };
+            QVERIFY(registry.registerPlugin({{"example.lifetime", "Lifetime", "1.0"}, {menu}}).ok());
+            page = registry.page("example.lifetime/overview", &host).page;
+            QVERIFY(page);
+        };
+        {
+            PluginRegistry registry;
+            addPlugin(registry);
+            QVERIFY(!pageWasDestroyedFirst);
+            QVERIFY(registry.unregisterPlugin("example.lifetime").ok());
+            QVERIFY(pageWasDestroyedFirst);
+        }
+        pageWasDestroyedFirst = false;
+        {
+            PluginRegistry registry;
+            addPlugin(registry);
+            QVERIFY(!pageWasDestroyedFirst);
+        }
+        QVERIFY(pageWasDestroyedFirst);
+    }
+
+    void pluginFactoriesCannotBorrowHostWidgets() {
+        using namespace ZtGui::Plugins;
+        PluginRegistry registry;
+        QWidget host;
+        QWidget otherHost;
+        QPointer<QWidget> existing = new QLabel("Existing", &host);
+        QWidget *returned = &host;
+        MenuContribution menu;
+        menu.id = "overview";
+        menu.title = "Ownership";
+        menu.createPage = [&](QWidget *) { return returned; };
+        QVERIFY(registry.registerPlugin({{"example.ownership", "Ownership", "1.0"}, {menu}}).ok());
+        QCOMPARE(registry.page("example.ownership/overview", &host).result.error, Error::PageCreationFailed);
+        returned = existing;
+        QCOMPARE(registry.page("example.ownership/overview", &host).result.error, Error::PageCreationFailed);
+        QVERIFY(existing);
+        returned = new QWidget(&host);
+        // It was created before the factory ran, so it is still an existing host widget.
+        QCOMPARE(registry.page("example.ownership/overview", &host).result.error, Error::PageCreationFailed);
+        QVERIFY(registry.unregisterPlugin("example.ownership").ok());
+        QVERIFY(existing);
+
+        menu.createPage = [](QWidget *parent) { return new QWidget(parent); };
+        QVERIFY(registry.registerPlugin({{"example.ownership", "Ownership", "1.0"}, {menu}}).ok());
+        QPointer<QWidget> created = registry.page("example.ownership/overview", &host).page;
+        QVERIFY(created);
+        QCOMPARE(registry.page("example.ownership/overview", &otherHost).result.error, Error::PageCreationFailed);
+        QVERIFY(created);
+        delete created.data();
+        QVERIFY(registry.page("example.ownership/overview", &host).result.ok());
+    }
+
+    void pluginMutationRejectsWorkerThreads() {
+        using namespace ZtGui::Plugins;
+        PluginRegistry registry;
+        Result registration;
+        Result removal;
+        PageResult creation;
+        std::thread worker([&] {
+            registration = registry.registerPlugin({});
+            removal = registry.unregisterPlugin("missing");
+            creation = registry.page("missing/page", nullptr);
+        });
+        worker.join();
+        QCOMPARE(registration.error, Error::WrongThread);
+        QCOMPARE(removal.error, Error::WrongThread);
+        QCOMPARE(creation.result.error, Error::WrongThread);
+        QVERIFY(registry.plugins().isEmpty());
     }
 
     void macScriptQuotingAndSyntax() {
@@ -1066,6 +1362,9 @@ private slots:
         QTRY_VERIFY(!settings->isVisible());
         auto *about = window.findChild<QDialog *>("aboutDialog");
         QVERIFY(about && about->isVisible());
+        QCOMPARE(about->findChild<QLabel *>("applicationVersion")->text(), QStringLiteral("v" ZEROTIER_GUI_VERSION));
+        QCOMPARE(about->findChild<QLabel *>("pluginApiVersion")->text(),
+                 QStringLiteral("API %1").arg(QString::fromLatin1(ZtGui::Plugins::ApiVersion)));
         QTest::qWait(220);
         QVERIFY(about->grab().save("screenshots/about.png"));
         about->close();

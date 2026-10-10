@@ -65,13 +65,18 @@ ServiceTab::ServiceTab(MainWindow *mainWindow, QWidget *parent)
     actions->addWidget(m_dropdown);
     summary->addLayout(actions);
     layout->addLayout(summary);
+    m_statusWarning = new QLabel(QStringLiteral("服务异常，请尝试重启。"));
+    m_statusWarning->setObjectName("serviceStatusWarning");
+    m_statusWarning->setWordWrap(true);
+    layout->addWidget(m_statusWarning);
+    m_statusWarning->hide();
     m_feedback = new QLabel;
     m_feedback->setObjectName("serviceFeedback");
     m_feedback->setWordWrap(true);
     layout->addWidget(m_feedback);
     m_feedback->hide();
     auto *timer = new QTimer(this);
-    timer->setInterval(2000);
+    timer->setInterval(1000);
     connect(timer, &QTimer::timeout, this, &ServiceTab::updateInstallation);
     timer->start();
     updateInstallation();
@@ -85,6 +90,11 @@ void ServiceTab::setNodeInfo(const QJsonObject &object)
             .arg(id.toHtmlEscaped(), palette().color(QPalette::WindowText).name()));
     const QString version = object["version"].toString();
     m_version->setText(version.isEmpty() ? QString() : "v" + version);
+    // Match the final field of `zerotier-cli info`; TCP fallback takes priority
+    // over the online flag, including when the node is otherwise online.
+    const QString status = object["tcpFallbackActive"].toBool() ? QStringLiteral("TUNNELED")
+        : object["online"].toBool() ? QStringLiteral("ONLINE") : QStringLiteral("OFFLINE");
+    m_statusWarning->setVisible(status != QStringLiteral("OFFLINE") && status != QStringLiteral("ONLINE"));
 }
 
 void ServiceTab::showEvent(QShowEvent *event)
@@ -131,7 +141,7 @@ void ServiceTab::changeService(const QString &action)
         UiTransitions::setBusy(this, false);
         updateInstallation();
         updateButtons();
-        UiTransitions::setText(m_feedback, ok ? QString() : QStringLiteral("操作失败，请查看 zerotier-gui.log。"));
+        UiTransitions::setText(m_feedback, ok ? QString() : QStringLiteral("操作失败，请查看 logs 文件夹中的本次启动日志。"));
         m_feedback->setVisible(!ok);
     });
 }
@@ -172,7 +182,7 @@ void ServiceTab::packageAction(bool uninstall)
         UiTransitions::setBusy(this, false);
         updateInstallation();
         updateButtons();
-        UiTransitions::setText(m_feedback, ok ? QString() : QStringLiteral("操作失败，请查看 zerotier-gui.log。"));
+        UiTransitions::setText(m_feedback, ok ? QString() : QStringLiteral("操作失败，请查看 logs 文件夹中的本次启动日志。"));
         m_feedback->setVisible(!ok);
 
     });

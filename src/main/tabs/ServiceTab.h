@@ -21,6 +21,7 @@ private:
     MainWindow *m_main;
     QLabel *m_node;
     QLabel *m_version;
+    QLabel *m_statusWarning;
     QLabel *m_feedback;
     QPushButton *m_action;
     QToolButton *m_dropdown;

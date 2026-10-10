@@ -1,0 +1,23 @@
+find_package(Qt6 REQUIRED COMPONENTS Test)
+add_executable(fake_zerotier_cli FakeCli.cpp)
+set_target_properties(fake_zerotier_cli PROPERTIES OUTPUT_NAME "zerotier-cli"
+    RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}")
+target_link_libraries(fake_zerotier_cli PRIVATE Qt6::Core)
+
+add_executable(app_log_probe AppLogProbe.cpp "${ZTGUI_ROOT_DIR}/src/main/AppLog.cpp")
+target_include_directories(app_log_probe PRIVATE "${ZTGUI_ROOT_DIR}/src/main")
+target_compile_definitions(app_log_probe PRIVATE ZEROTIER_GUI_VERSION="${ZEROTIER_VERSION}")
+target_link_libraries(app_log_probe PRIVATE Qt6::Core)
+set_target_properties(app_log_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}")
+
+qt_add_executable(zerotier_gui_tests GuiTests.cpp ${ZTGUI_MAIN_SOURCES} ${ZTGUI_MAIN_HEADERS})
+ztgui_configure_host(zerotier_gui_tests)
+target_link_libraries(zerotier_gui_tests PRIVATE Qt6::Test)
+target_compile_definitions(zerotier_gui_tests PRIVATE ZEROTIER_TESTING)
+add_dependencies(zerotier_gui_tests fake_zerotier_cli app_log_probe)
+if(MSVC)
+    target_compile_options(fake_zerotier_cli PRIVATE /utf-8)
+    target_compile_options(app_log_probe PRIVATE /utf-8)
+endif()
+add_test(NAME gui_regressions COMMAND zerotier_gui_tests -platform offscreen -o test-results.txt,txt)
+set_tests_properties(gui_regressions PROPERTIES WORKING_DIRECTORY "${ZTGUI_BUILD_DIR}")

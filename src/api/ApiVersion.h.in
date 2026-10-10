@@ -1,0 +1,13 @@
+#pragma once
+
+namespace ZtGui::Plugins {
+inline constexpr int ApiMajor = @PROJECT_VERSION_MAJOR@;
+inline constexpr int ApiMinor = @PROJECT_VERSION_MINOR@;
+inline constexpr char ApiVersion[] = "@PROJECT_VERSION@";
+
+// Pre-release API generations may change incompatibly; require an exact match.
+inline constexpr bool isApiCompatible(int major, int minor)
+{
+    return major == ApiMajor && minor == ApiMinor;
+}
+} // namespace ZtGui::Plugins
