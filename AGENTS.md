@@ -7,7 +7,8 @@ Use that skill when prior memory may be relevant to the current request.
 
 # Project maintenance
 
-- Keep the public plugin SDK under `src/api/`, application implementation under `src/main/`, plugin projects under `src/plugins/`, and tests under `tests/`. The API must not depend on host implementation headers or sources. Respect an explicitly requested alternative plugin directory.
+- Keep the public plugin SDK under `src/client/api/`, application implementation under `src/client/main/`, plugin projects under `src/client/plugins/`, and tests under `src/tests/`. The API must not depend on host implementation headers or sources. Respect an explicitly requested alternative plugin directory.
+- The Linux server follows the same separation under `src/server/api/`, `src/server/main/`, and `src/server/plugins/`. Shared public tools and wire protocol live under `src/shared/include/`; shared voice protocol under `src/shared/voice-chat/`. Both applications and SDKs derive versions from root `VERSION`, with distinct client/server plugin IIDs and packages.
 - Application version numbers are managed by the developer. Do not automatically edit root `VERSION` for functionality, build, documentation, fixes, or optimizations; change it only when explicitly instructed by the developer. Record pending changes in an unreleased `CHANGELOG.md` section when no new version has been assigned.
 - Before the first official release, use application versions `0.<core>.<patch>` and API versions `0.<core>`. The major version stays 0; the current core/API generation is 3. When the developer assigns a non-core update version, change only the patch; core/API generation changes update the middle number and reset the patch to 0. Never change the major version or core generation without an explicit user request.
 - `VERSION` is the single source of truth for application, About dialog, Windows file metadata, and macOS bundle versions. Do not hard-code separate version values in source code.
@@ -25,4 +26,4 @@ For application builds and release packaging, read [ztgui-build](.agent/skills/z
 
 Keep README concise: architecture, structure, platforms, building, and plugin development. Preserve non-obvious deployment assumptions, design constraints, and validation history in `docs/`; do not archive removed UI usage instructions or facts readily discoverable from source. See [maintenance notes](docs/maintenance.md).
 
-Plugin documentation is owned by each plugin project and lives under `src/plugins/<plugin>/docs/`. Root documentation may link to it, but should not maintain a separate copy. Application icons and resource templates live under `src/assets/`.
+Plugin documentation is owned by each plugin project and lives under `src/client/plugins/<plugin>/docs/` or `src/server/plugins/<plugin>/docs/`. Root documentation may link to it, but should not maintain a separate copy. Application icons and resource templates live under `src/client/assets/`.

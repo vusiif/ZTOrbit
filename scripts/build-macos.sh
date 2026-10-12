@@ -28,7 +28,7 @@ ctest --test-dir "$build_directory" --output-on-failure
 api_sdk="$project_root/dist/ZTGUI-api"
 cmake --install "$build_directory" --prefix "$api_sdk"
 voice_build="$project_root/cmake-build-voice-client-macos-arm64"
-cmake -S "$project_root/src/plugins/voice-chat/client-plugin" -B "$voice_build" \
+cmake -S "$project_root/src/client/plugins/voice-chat/client-plugin" -B "$voice_build" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$api_sdk;$QT_ROOT" \
     -DCMAKE_OSX_ARCHITECTURES=arm64
 cmake --build "$voice_build" --parallel "$(sysctl -n hw.logicalcpu)"
@@ -47,10 +47,10 @@ fi
 iconset="$staging/app-icon.iconset"
 /bin/mkdir -p "$iconset" "$staging/ZTGUI.app/Contents/Resources"
 for size in 16 32 128 256 512; do
-    /usr/bin/sips -z "$size" "$size" "$project_root/src/assets/app-icon.png" \
+    /usr/bin/sips -z "$size" "$size" "$project_root/src/client/assets/app-icon.png" \
         --out "$iconset/icon_${size}x${size}.png" >/dev/null
     retina=$((size * 2))
-    /usr/bin/sips -z "$retina" "$retina" "$project_root/src/assets/app-icon.png" \
+    /usr/bin/sips -z "$retina" "$retina" "$project_root/src/client/assets/app-icon.png" \
         --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 /usr/bin/iconutil -c icns "$iconset" -o "$staging/ZTGUI.app/Contents/Resources/app-icon.icns"

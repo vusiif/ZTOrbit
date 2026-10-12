@@ -1,0 +1,33 @@
+cmake_minimum_required(VERSION 3.21.1)
+include(../../../cmake/Version.cmake)
+project(ZTServerPluginApi VERSION "${ZTGUI_API_VERSION}" LANGUAGES CXX)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Network)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+string(REGEX REPLACE "^0\\." "" ZTGUI_API_CORE "${ZTGUI_API_VERSION}")
+configure_file(ApiVersion.h.in "${CMAKE_CURRENT_BINARY_DIR}/include/ztserver/ApiVersion.h" @ONLY)
+add_library(ztserver_protocol INTERFACE)
+add_library(ZTServer::Protocol ALIAS ztserver_protocol)
+set_target_properties(ztserver_protocol PROPERTIES EXPORT_NAME Protocol)
+target_link_libraries(ztserver_protocol INTERFACE Qt6::Core Qt6::Network)
+target_compile_features(ztserver_protocol INTERFACE cxx_std_17)
+target_include_directories(ztserver_protocol INTERFACE
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../shared/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+add_library(ztserver_api INTERFACE)
+add_library(ZTServer::Api ALIAS ztserver_api)
+set_target_properties(ztserver_api PROPERTIES EXPORT_NAME Api)
+target_link_libraries(ztserver_api INTERFACE ztserver_protocol Qt6::Network)
+target_compile_features(ztserver_api INTERFACE cxx_std_17)
+target_include_directories(ztserver_api INTERFACE
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+set(sdk_cmake "${CMAKE_INSTALL_LIBDIR}/cmake/ZTServerPluginApi")
+configure_package_config_file(ZTServerPluginApiConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/ZTServerPluginApiConfig.cmake" INSTALL_DESTINATION "${sdk_cmake}")
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/ZTServerPluginApiConfigVersion.cmake" VERSION "${PROJECT_VERSION}" COMPATIBILITY ExactVersion ARCH_INDEPENDENT)
+install(TARGETS ztserver_api ztserver_protocol EXPORT ZTServerPluginApiTargets)
+install(EXPORT ZTServerPluginApiTargets NAMESPACE ZTServer:: DESTINATION "${sdk_cmake}")
+install(DIRECTORY include/ "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/include/" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/include/ztserver/ApiVersion.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/ztserver")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ZTServerPluginApiConfig.cmake" "${CMAKE_CURRENT_BINARY_DIR}/ZTServerPluginApiConfigVersion.cmake" DESTINATION "${sdk_cmake}")

@@ -7,9 +7,9 @@ description: 在本项目中创建、编写、修改和独立编译 ZTGUI 的 C+
 
 ## 接口、目录与版本
 
-本文件所在目录向上三级是仓库根目录。先读取根 `AGENTS.md`、`VERSION`、[接口文档](../../../docs/plugin-api.md) 和 `src/api/include/ztgui/` 的公开接口。插件默认位于 `src/plugins/<name>/`；用户指定其他目录时使用指定路径，例如语音插件的 `src/plugins/voice-chat/client-plugin/`。
+本文件所在目录向上三级是仓库根目录。先读取根 `AGENTS.md`、`VERSION`、[接口文档](../../../docs/plugin-api.md) 和 `src/client/api/include/ztgui/` 的公开接口。插件默认位于 `src/client/plugins/<name>/`；用户指定其他目录时使用指定路径，例如语音插件的 `src/client/plugins/voice-chat/client-plugin/`。
 
-插件只能依赖公开 SDK 和必要第三方库，不包含 `src/main/` 内部头文件。测试放在 `tests/`。需要宿主业务能力时明确设计公开服务接口，不访问宿主内部对象绕过 API。
+插件只能依赖公开 SDK 和必要第三方库，不包含 `src/client/main/` 内部头文件。测试放在 `src/tests/`。需要宿主业务能力时明确设计公开服务接口，不访问宿主内部对象绕过 API。
 
 程序版本号由开发者管理，未经开发者明确指示不得自动修改 `VERSION`。应用使用 `0.<核心>.<补丁>`，API 取 `VERSION` 前两段；开发者指定非核心新版本时仅变更补丁。未指定新版本的变更记录在 `CHANGELOG.md` 的未发布部分。插件自身版本独立于宿主；保留 `PluginInfo` 的默认 API 字段，不重复定义版本常量或生成头文件。
 
@@ -80,15 +80,19 @@ public:
 
 ## 安装 SDK、构建与启用
 
+服务端插件使用 `src/server/plugins/<name>/` 与独立 `ZTServerPluginApi`/`ZTServer::Api`，只依赖 Qt Core/Network。先读 [服务端 API](../../../docs/server-api.md)，通过独立服务端 IID、生命周期与统一路由接入；不能引用客户端或服务端宿主内部头文件。Qt6.4 的 `qt_add_plugin` 后使用 `target_sources` 显式加入源文件。初始化任务取消、停止等待与动态库释放顺序同样适用。两端 API 数字相同，但插件不能混载。
+
+客户端 `HostServices::logs().write(level,message)` 显式双写主程序和插件数据目录的日志，支持后台线程；结果分别包含两处错误。共用公开头文件位于 `src/shared/include/`，安装后的 SDK 已包含它们。语音项目另需根 `src/shared/voice-chat/` 的业务协议源码。
+
 PowerShell示例，Qt路径替换为实际动态 SDK：
 
 ```powershell
 $qtSdk = 'C:/Qt/6.8.3/msvc2022_64'
 $apiVersion = ((Get-Content VERSION -Raw).Trim().Split('.')[0..1] -join '.')
 $apiSdk = Join-Path (Get-Location) "dist/ZTGUI-api-v$apiVersion"
-cmake -S src/api -B cmake-build-api -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$qtSdk"
+cmake -S src/client/api -B cmake-build-api -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$qtSdk"
 cmake --install cmake-build-api --prefix "$apiSdk"
-cmake -S src/plugins/myplugin -B cmake-build-plugin-myplugin -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$apiSdk;$qtSdk"
+cmake -S src/client/plugins/myplugin -B cmake-build-plugin-myplugin -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$apiSdk;$qtSdk"
 cmake --build cmake-build-plugin-myplugin --config Release --parallel
 ```
 
@@ -98,4 +102,4 @@ cmake --build cmake-build-plugin-myplugin --config Release --parallel
 
 验证独立构建、真实动态加载、菜单/页面创建、父控件所有权和资源清理。涉及协议或音频时增加相关测试；不要因仅修改说明重复运行完整GUI回归。测试辅助程序不进入发行包。
 
-交付时说明源码目录、API版本、构建命令、实际产物位置、运行依赖和真实加载验证结果。插件文档放在各项目的 `docs/` 并由插件自己维护。语音项目的部署与协议见[语音插件文档](../../../src/plugins/voice-chat/docs/voice-chat.md)。
+交付时说明源码目录、API版本、构建命令、实际产物位置、运行依赖和真实加载验证结果。插件文档放在各项目的 `docs/` 并由插件自己维护。语音项目的部署与协议见[语音插件文档](../../../src/client/plugins/voice-chat/docs/voice-chat.md)。

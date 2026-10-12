@@ -5,3 +5,7 @@ dist/
 *.log
 logs/
 screenshots/
+
+.tmp/
+__pycache__/
+*.pyc

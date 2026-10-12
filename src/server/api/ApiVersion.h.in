@@ -1,0 +1,6 @@
+#pragma once
+namespace vusiif::ztgui::server::api {
+inline constexpr char ApiVersion[] = "@ZTGUI_API_VERSION@";
+inline constexpr int ApiMajor = 0;
+inline constexpr int ApiMinor = @ZTGUI_API_CORE@;
+}

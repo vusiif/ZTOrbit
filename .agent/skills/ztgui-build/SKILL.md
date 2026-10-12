@@ -32,7 +32,7 @@ $qtSdk = 'C:/Qt/6.8.3/msvc2022_64' # 替换为实际动态 SDK
 
 API 是头文件 SDK，生成过程是独立 CMake 配置、安装公开头文件/版本头/CMake 导出，再压缩，无须构造额外 API DLL。
 
-脚本将 `src/api/` 的文件名及内容哈希、API 代际、安装目录内容和 ZIP 哈希记录在 `cmake-build-api/package-state.json`，对比的是上次成功的 API 打包，不是仅看 Git 是否有未提交改动。
+脚本将 `src/client/api/` 的文件名及内容哈希、API 代际、安装目录内容和 ZIP 哈希记录在 `cmake-build-api/package-state.json`，对比的是上次成功的 API 打包，不是仅看 Git 是否有未提交改动。
 
 - 源码或 API 代际改变、SDK 缺失/内容异常、首次没有可靠记录时，生成一次干净 SDK 并更新记录。
 - SDK 正常但 ZIP 缺失或损坏时，仅重新压缩 SDK。
@@ -40,6 +40,14 @@ API 是头文件 SDK，生成过程是独立 CMake 配置、安装公开头文�
 - 用户明确要求重新生成 API 时，加 `-RebuildApi`。
 
 状态记录留在构建缓存中，不进入 SDK 压缩包。API 更新时使用干净安装目录，避免已删除头文件残留。
+
+客户端指纹同时覆盖 `src/shared/include/`，因为 SDK 安装这些公开工具与路由协议。
+
+## Linux 服务端
+
+执行本技能的 `scripts/build-linux.sh`（或根 `scripts/build-linux.sh` 兼容入口）。默认只编译 `zt-server`，生成 `dist/linux-x64/` 与 `dist/linux-x64.tar.gz`，按源码、共享公开头文件、版本与产物指纹条件更新 `dist/ZTServer-api-v<API版本>/` 与 ZIP。脚本不安装/卸载真实 ZeroTier，不停系统服务。
+
+用户明确指定语音服务端插件时添加 `--build-voice-plugin`，独立发布到 `dist/server-plugins/ztserver_voice_chat.so`，不带入宿主运行包。目标 Linux 需匹配的 Qt6 Core/Network 动态运行库。SDK 消费者、通用路由、模拟安装脚本及语音测试位于 `src/tests/server/` 与 `src/tests/voice-chat/`；测试与运行数据不进入发行包。
 
 ## 用户指定插件时
 

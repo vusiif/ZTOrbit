@@ -9,8 +9,8 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'PackageTools.ps1')
 $projectRoot = (Resolve-Path -LiteralPath $ProjectDirectory).Path
-if (!(Test-Path -LiteralPath (Join-Path $projectRoot 'src/main/CMakeLists.txt')) -or
-    !(Test-Path -LiteralPath (Join-Path $projectRoot 'src/api/CMakeLists.txt'))) { throw 'ProjectDirectory must be the ZTGUI repository root' }
+if (!(Test-Path -LiteralPath (Join-Path $projectRoot 'src/client/main/CMakeLists.txt')) -or
+    !(Test-Path -LiteralPath (Join-Path $projectRoot 'src/client/api/CMakeLists.txt'))) { throw 'ProjectDirectory must be the ZTGUI repository root' }
 $qtSdk = (Resolve-Path -LiteralPath $QtRoot).Path
 $deployQt = Join-Path $qtSdk 'bin/windeployqt.exe'
 if (!(Test-Path -LiteralPath $deployQt)) { throw 'QtRoot must contain a shared Qt SDK with windeployqt' }
@@ -23,9 +23,22 @@ if ($pluginOutputPath -eq $outputPath -or
 }
 $stagingPath = $null
 $apiStaging = $null
+# A source move invalidates CMake's recorded source directory. Keep the old
+# cache as a backup and configure a fresh one at the normal build path.
+function Protect-SourceBuildCache([string]$BuildPath, [string]$SourcePath) {
+    $cachePath = Join-Path $projectRoot "$BuildPath/CMakeCache.txt"
+    if (!(Test-Path -LiteralPath $cachePath)) { return }
+    $homeEntry = Get-Content -LiteralPath $cachePath | Where-Object { $_ -like 'CMAKE_HOME_DIRECTORY:INTERNAL=*' } | Select-Object -First 1
+    $expectedSource = [IO.Path]::GetFullPath((Join-Path $projectRoot $SourcePath)).Replace('\','/')
+    if ($homeEntry -and $homeEntry.Split('=',2)[1].TrimEnd('/') -ne $expectedSource.TrimEnd('/')) {
+        $resolvedBuild = [IO.Path]::GetFullPath((Join-Path $projectRoot $BuildPath))
+        if (!$resolvedBuild.StartsWith($projectRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Build cache outside project root' }
+        Move-Item -LiteralPath $resolvedBuild -Destination ($resolvedBuild + '.previous-' + [guid]::NewGuid())
+    }
+}
 Push-Location -LiteralPath $projectRoot
 try {
-    # Build this target only, even if this build tree also has tests/plugins configured.
+    # Build this target only, even if this build tree also has src/tests/plugins configured.
     Invoke-Checked cmake @('-S', '.', '-B', 'cmake-build-release', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$qtSdk")
     Invoke-Checked cmake @('--build', 'cmake-build-release', '--config', 'Release', '--target', 'zerotier_gui', '--parallel')
 
@@ -33,7 +46,7 @@ try {
     # are necessary only when its inputs or installed contents changed.
     $apiVersion = ((Get-Content VERSION -Raw).Trim().Split('.')[0..1] -join '.')
     $apiSdk = Resolve-PackageDirectory $projectRoot "dist/ZTGUI-api-v$apiVersion"
-    $apiFingerprint = $apiVersion + ':' + (Get-DirectoryFingerprint (Join-Path $projectRoot 'src/api'))
+    $apiFingerprint = $apiVersion + ':' + (Get-DirectoryFingerprint (Join-Path $projectRoot 'src/client/api')) + ':' + (Get-DirectoryFingerprint (Join-Path $projectRoot 'src/shared/include'))
     $apiStatePath = Join-Path $projectRoot 'cmake-build-api/package-state.json'
     $apiState = $null
     if (Test-Path -LiteralPath $apiStatePath) {
@@ -42,7 +55,8 @@ try {
     $sdkFingerprint = if (Test-Path -LiteralPath $apiSdk) { Get-DirectoryFingerprint $apiSdk } else { '' }
     $apiChanged = $RebuildApi -or !$apiState -or $apiState.inputs -ne $apiFingerprint -or $apiState.sdk -ne $sdkFingerprint
     if ($apiChanged) {
-        Invoke-Checked cmake @('-S', 'src/api', '-B', 'cmake-build-api', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$qtSdk")
+        Protect-SourceBuildCache 'cmake-build-api' 'src/client/api'
+        Invoke-Checked cmake @('-S', 'src/client/api', '-B', 'cmake-build-api', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$qtSdk")
         $apiStaging = New-PackageStaging $apiSdk
         Invoke-Checked cmake @('--install', 'cmake-build-api', '--prefix', $apiStaging)
         Publish-PackageDirectory $apiStaging $apiSdk
@@ -60,7 +74,8 @@ try {
     # Only an explicit request builds/publishes the voice plugin.
     $voiceLibrary = Join-Path $pluginOutputPath 'ztgui_voice_chat.dll'
     if ($BuildVoicePlugin) {
-        Invoke-Checked cmake @('-S', 'src/plugins/voice-chat/client-plugin', '-B', 'cmake-build-voice-client', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$apiSdk;$qtSdk")
+        Protect-SourceBuildCache 'cmake-build-voice-client' 'src/client/plugins/voice-chat/client-plugin'
+        Invoke-Checked cmake @('-S', 'src/client/plugins/voice-chat/client-plugin', '-B', 'cmake-build-voice-client', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$apiSdk;$qtSdk")
         Invoke-Checked cmake @('--build', 'cmake-build-voice-client', '--config', 'Release', '--target', 'ztgui_voice_chat', '--parallel')
         New-Item -ItemType Directory -Path $pluginOutputPath -Force | Out-Null
         Copy-Item -LiteralPath 'cmake-build-voice-client/Release/ztgui_voice_chat.dll' -Destination $voiceLibrary

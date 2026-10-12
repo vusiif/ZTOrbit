@@ -1,0 +1,6 @@
+@PACKAGE_INIT@
+set(ZTSERVER_API_VERSION "@ZTGUI_API_VERSION@")
+include(CMakeFindDependencyMacro)
+find_dependency(Qt6 6.4 COMPONENTS Core Network)
+include("${CMAKE_CURRENT_LIST_DIR}/ZTServerPluginApiTargets.cmake")
+check_required_components(ZTServerPluginApi)

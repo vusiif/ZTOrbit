@@ -1,18 +1,18 @@
 # 插件 API（开发代际 0.3）
 
-公开 SDK 位于 `src/api/`，不依赖 `src/main/`。插件通过菜单定义和 Qt Widgets 页面工厂接入宿主，可选生命周期负责初始化、导航通知和资源释放；文件与 ZeroTier 工具由宿主注入。
+公开 SDK 位于 `src/client/api/`，不依赖 `src/client/main/`。插件通过菜单定义和 Qt Widgets 页面工厂接入宿主，可选生命周期负责初始化、导航通知和资源释放；文件与 ZeroTier 工具由宿主注入。
 
 ## 命名空间与目录
 
 | 命名空间 | 职责 | 位置 |
 | --- | --- | --- |
-| `vusiif::ztgui::api` | 插件信息、菜单、结果、入口及生命周期接口 | `src/api/include/ztgui/` |
-| `vusiif::ztgui::util` | 文件、ZeroTier 查询、宿主服务和取消工具 | 公开定义在 `src/api/`，实现位于 `src/main/` |
-| `vusiif::ztgui::plugins` | 动态加载器、注册表、准备状态及清理 | `src/main/plugins/` |
-| `vusiif::ztgui::ui` | 主窗口、业务页面、表格、主题和过渡控件 | `src/main/` |
-| `vusiif::ztgui::zerotier` | ZeroTier 客户端访问、轮询及配置包 | `src/main/` |
-| `vusiif::ztgui::platform` | 平台脚本与授权辅助 | `src/main/` |
-| `vusiif::ztgui::voice_chat` | 语音客户端、服务端及共享协议 | `src/plugins/voice-chat/` |
+| `vusiif::ztgui::api` | 插件信息、菜单、结果、入口及生命周期接口 | `src/client/api/include/ztgui/` |
+| `vusiif::ztgui::util` | 文件、ZeroTier 查询、宿主服务和取消工具 | 公开定义在 `src/client/api/`，实现位于 `src/client/main/` |
+| `vusiif::ztgui::plugins` | 动态加载器、注册表、准备状态及清理 | `src/client/main/plugins/` |
+| `vusiif::ztgui::ui` | 主窗口、业务页面、表格、主题和过渡控件 | `src/client/main/` |
+| `vusiif::ztgui::zerotier` | ZeroTier 客户端访问、轮询及配置包 | `src/client/main/` |
+| `vusiif::ztgui::platform` | 平台脚本与授权辅助 | `src/client/main/` |
+| `vusiif::ztgui::voice_chat` | 语音客户端、服务端及共享协议 | `src/client/plugins/voice-chat/` |
 
 头文件路径仍使用 `<ztgui/...>`，CMake 目标仍为 `ZTGUI::Api`。不提供旧命名空间别名。宿主的 `PluginRegistry`、`PluginLoader` 和 `HostServicesImpl` 不属于公开 SDK，插件不能包含其实现头文件。
 
@@ -124,6 +124,10 @@ void getZTInfo(QObject *context, JsonCallback completed);
 void getZTPeers(QObject *context, JsonCallback completed);
 void getZTNetworks(QObject *context, JsonCallback completed);
 void getZTMoons(QObject *context, JsonCallback completed);
+void sendDataTo(const QString &networkId, const QString &memberId, const QByteArray &data,
+                QObject *context, SendCallback completed);
+void broadcastDataTo(const QString &networkId, const QByteArray &data,
+                     QObject *context, SendCallback completed);
 ```
 
 通过 `host->zeroTier()` 使用，分别复用宿主CLI的 `-j info/listpeers/listnetworks/listmoons`、平台路径、授权和超时逻辑，不触发提权。`JsonResult` 包含 `QJsonDocument document`、`QString error` 和 `ok()`：Info为对象，其余为数组，保留原始字段。
@@ -132,18 +136,22 @@ void getZTMoons(QObject *context, JsonCallback completed);
 
 插件运行在宿主进程中，不提供权限隔离。SDK不提供任意命令或管理员脚本接口。语音、桌面共享、文件传输的开发条件和待补充公共能力见[插件能力评估](plugin-api-assessment.md)。
 
+数据发送同样通过 `host->zeroTier()` 调用，要求 GUI 线程与有效上下文；销毁上下文或卸载取消尚未完成的查询。网络 ID 是 16 位十六进制，成员 ID 是 10 位。先读取本机指定网络的 IPv4，以 /24 的 `.1:18100` 为服务器，通过 `builtin/controller.members` 获取该网络成员；仅向已授权且有 IPv4 地址的成员发送。`sendDataTo` 选择一个成员，`broadcastDataTo` 向所有可发送成员逐个单播，并去重目标 IP。
+
+发送采用 UDP 18100，包为 `ZTS1`，路由 ID 由宿主绑定为调用插件 ID，负载原样保留二进制。包总长最多 1232 字节，数据上限为 `1232 - 6 - 插件ID的ASCII字节数`。接收端插件需使用相同路由，并在成员设备上监听 UDP 18100；服务端宿主已经提供该监听与路由，客户端自定义业务由插件负责接收。`SendResult` 包含 `recipients/error/ok()`，成功仅代表本地 UDP 套接字已接收发送数据，不代表远端收到；需要可靠性时由业务协议提供确认、重传或另选 TCP。无匹配授权成员、无 IPv4、过大负载或查询失败均异步返回错误。UDP 工具不代替网络或业务层身份验证。
+
 ## 独立构建与兼容边界
 
-`ZTGUI::Api` 是头文件SDK，提供C++17和Qt Widgets依赖，没有API DLL。独立安装：
+`ZTGUI::Api` 是头文件SDK，提供C++17、Qt Widgets 与 Network 依赖，没有API DLL。独立安装：
 
 ```powershell
-cmake -S src/api -B cmake-build-api -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64"
+cmake -S src/client/api -B cmake-build-api -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64"
 cmake --install cmake-build-api --prefix dist/ZTGUI-api-v0.3
 ```
 
 独立插件使用 `find_package(ZTGUIPluginApi 0.3 EXACT CONFIG REQUIRED)` 并链接 `ZTGUI::Api`，只需安装后的SDK和匹配工具链，不需要宿主源码。API常量及包版本从根 `VERSION` 前两段生成；JSON使用 `{"apiVersion":"@ZTGUI_API_VERSION@"}`，不硬编码另一份版本。
 
-应用版本为 `0.3.1`，API代际从 `VERSION` 派生为 `0.3`。此次重构改变命名空间及生命周期签名，旧插件须使用API 0.3重新编译。入口IID为 `vusiif.ztgui.api.PluginInterface/1.0`，生命周期IID为 `vusiif.ztgui.api.PluginLifecycleInterface/1.0`；旧IID不会实例化，API 0.2也不再兼容。更新SDK时会清理已废弃的头文件，程序版本仍由开发者指定。
+应用版本为 `0.3.2`，API代际从 `VERSION` 派生为 `0.3`。此前重构改变命名空间及生命周期签名，旧插件须使用API 0.3重新编译。入口IID为 `vusiif.ztgui.api.PluginInterface/1.0`，生命周期IID为 `vusiif.ztgui.api.PluginLifecycleInterface/1.0`；旧IID不会实例化，API 0.2也不再兼容。本次补丁版本更新不改变 API 代际，程序版本由开发者指定。
 
 统一使用动态Qt，宿主与插件须匹配Qt、编译器、架构、运行库及构建模式。Qt类型和std::function属于进程内C++接口，不承诺跨工具链ABI或跨进程协议。
 
@@ -154,3 +162,9 @@ cmake --install cmake-build-api --prefix dist/ZTGUI-api-v0.3
 ## 验证
 
 回归测试覆盖注册与API校验、菜单排序、懒创建/缓存、页面所有权、失败重试、重入与线程检查、退出/进入顺序、协作取消、队列跳过、GUI心跳、重复关闭、不可取消步骤与库销毁顺序、文件路径和二进制内容、JSON错误与上下文取消。旧IID拒绝测试确保旧库不会在新接口下被误实例化。测试辅助程序不进入发行包。
+
+## 插件日志与协议工具
+
+通过 `HostServices::logs()` 获取借用的 `PluginLogger`，调用 `write(LogLevel,message)` 显式双写主程序日志和 `plugins-data/<PluginInfo.name>/logs/YYMMDD-N.log`。级别为 Debug/Info/Warning/Error，UTF-8 记录包含时间、级别和插件 ID；支持后台线程，生命周期与其他宿主工具相同。返回 `LogResult::hostError/pluginError`，一处失败仍尝试另一处；失败不递归写 Qt 日志。普通 `qInfo/qWarning` 仍只写宿主日志。新增服务放在原宿主服务虚函数之后，并以旧布局编译的插件验证了原文件/查询入口。
+
+SDK 安装 `ztprotocol/` 的共享公开头文件，`ZTGUI::Protocol` 依赖 Qt Core/Network，提供路由编解码、/24 服务器地址推导与网络数据发送工具。协议版本独立于 SDK 版本；服务端插件使用独立 SDK 与 IID，详见[服务端 API](server-api.md)。
