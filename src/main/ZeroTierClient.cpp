@@ -21,7 +21,7 @@
 
 namespace {
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
-ZeroTier::ServiceStatus macService;
+vusiif::ztgui::zerotier::ServiceStatus macService;
 bool macApiAvailable = false;
 std::shared_ptr<QTemporaryDir> macSession()
 {
@@ -32,7 +32,7 @@ bool sessionReady() { return QFileInfo::exists(macSession()->filePath("authtoken
 #endif
 }
 
-void ZeroTier::startServiceMonitor(QObject *owner)
+void vusiif::ztgui::zerotier::startServiceMonitor(QObject *owner)
 {
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
     auto *process = new QProcess(owner);
@@ -63,7 +63,7 @@ void ZeroTier::startServiceMonitor(QObject *owner)
 #endif
 }
 
-ZeroTier::ServiceStatus ZeroTier::serviceStatus()
+vusiif::ztgui::zerotier::ServiceStatus vusiif::ztgui::zerotier::serviceStatus()
 {
 #ifdef Q_OS_WIN
     SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
@@ -88,7 +88,7 @@ ZeroTier::ServiceStatus ZeroTier::serviceStatus()
 #endif
 }
 
-QString ZeroTier::matchingMoonFile(const QString &networkId)
+QString vusiif::ztgui::zerotier::matchingMoonFile(const QString &networkId)
 {
     if (!QRegularExpression("^[0-9a-fA-F]{16}$").match(networkId).hasMatch()) return {};
     const QDir directory(moonDirectory());
@@ -102,7 +102,7 @@ QString ZeroTier::matchingMoonFile(const QString &networkId)
     return {};
 }
 
-QString ZeroTier::dataDirectory()
+QString vusiif::ztgui::zerotier::dataDirectory()
 {
 #ifdef ZEROTIER_TESTING
     const QString testing = qEnvironmentVariable("ZT_TEST_DATA_DIRECTORY");
@@ -117,7 +117,7 @@ QString ZeroTier::dataDirectory()
 #endif
 }
 
-QString ZeroTier::homeDirectory()
+QString vusiif::ztgui::zerotier::homeDirectory()
 {
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
     return macSession()->path();
@@ -126,7 +126,7 @@ QString ZeroTier::homeDirectory()
 #endif
 }
 
-QString ZeroTier::systemHomeDirectory()
+QString vusiif::ztgui::zerotier::systemHomeDirectory()
 {
 #if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
     return QDir(dataDirectory()).filePath("One");
@@ -135,19 +135,19 @@ QString ZeroTier::systemHomeDirectory()
 #endif
 }
 
-QString ZeroTier::moonDirectory() { return QDir(homeDirectory()).filePath("moons.d"); }
-QString ZeroTier::moonWriteDirectory() { return QDir(systemHomeDirectory()).filePath("moons.d"); }
+QString vusiif::ztgui::zerotier::moonDirectory() { return QDir(homeDirectory()).filePath("moons.d"); }
+QString vusiif::ztgui::zerotier::moonWriteDirectory() { return QDir(systemHomeDirectory()).filePath("moons.d"); }
 
-QString ZeroTier::sessionRefreshScript()
+QString vusiif::ztgui::zerotier::sessionRefreshScript()
 {
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
-    return MacPlatform::synchronizeSession(systemHomeDirectory(), homeDirectory(), getuid());
+    return vusiif::ztgui::platform::synchronizeSession(systemHomeDirectory(), homeDirectory(), getuid());
 #else
     return {};
 #endif
 }
 
-QString ZeroTier::executable()
+QString vusiif::ztgui::zerotier::executable()
 {
     const auto cli = QStandardPaths::findExecutable("zerotier-cli");
     if (!cli.isEmpty()) {
@@ -185,12 +185,12 @@ static QStringList cliArguments(const QString &program, const QStringList &argum
     auto result = arguments;
     if (QFileInfo(program).fileName().startsWith("zerotier-one")) result.prepend("-q");
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
-    result.prepend("-D" + ZeroTier::homeDirectory());
+    result.prepend("-D" + vusiif::ztgui::zerotier::homeDirectory());
 #endif
     return result;
 }
 
-QString ZeroTier::translate(const QString &value)
+QString vusiif::ztgui::zerotier::translate(const QString &value)
 {
     static const QHash<QString, QString> labels = {
         {"PLANET", "根节点"}, {"MOON", "中转站"}, {"LEAF", "成员"},
@@ -221,7 +221,7 @@ QString ZeroTier::translate(const QString &value)
     return labels.value(value, value);
 }
 
-QString ZeroTier::jsonText(const QJsonValue &value)
+QString vusiif::ztgui::zerotier::jsonText(const QJsonValue &value)
 {
     if (value.isBool()) return value.toBool() ? QStringLiteral("是") : QStringLiteral("否");
     if (value.isNull() || value.isUndefined()) return QStringLiteral("—");
@@ -230,7 +230,7 @@ QString ZeroTier::jsonText(const QJsonValue &value)
     return translate(value.toVariant().toString());
 }
 
-QString ZeroTier::quotePowerShell(const QString &value)
+QString vusiif::ztgui::zerotier::quotePowerShell(const QString &value)
 {
     QString escaped = value;
     escaped.replace('\\', '/');
@@ -238,10 +238,10 @@ QString ZeroTier::quotePowerShell(const QString &value)
     return "'" + escaped + "'";
 }
 
-QString ZeroTier::serviceCommands(const QString &action)
+QString vusiif::ztgui::zerotier::serviceCommands(const QString &action)
 {
 #ifdef Q_OS_MACOS
-    return MacPlatform::serviceCommands(action, executable());
+    return vusiif::ztgui::platform::serviceCommands(action, executable());
 #else
     const QString stop = "try { Stop-Service -Name ZeroTierOneService -ErrorAction Stop } catch {}\n";
     const QString start = "Start-Service -Name ZeroTierOneService -ErrorAction Stop\n"
@@ -253,7 +253,7 @@ QString ZeroTier::serviceCommands(const QString &action)
 #endif
 }
 
-QString ZeroTier::wrapScript(const QString &commands)
+QString vusiif::ztgui::zerotier::wrapScript(const QString &commands)
 {
 #ifdef Q_OS_MACOS
     return "set -eu\nPATH=/usr/bin:/bin:/usr/sbin:/sbin\nexport PATH\n" + commands;
@@ -262,10 +262,10 @@ QString ZeroTier::wrapScript(const QString &commands)
 #endif
 }
 
-QString ZeroTier::moonImportScript(const QList<QPair<QString, QString>> &files)
+QString vusiif::ztgui::zerotier::moonImportScript(const QList<QPair<QString, QString>> &files)
 {
 #ifdef Q_OS_MACOS
-    return wrapScript(MacPlatform::copyMoons(files, moonWriteDirectory()) + serviceCommands("restart"));
+    return wrapScript(vusiif::ztgui::platform::copyMoons(files, moonWriteDirectory()) + serviceCommands("restart"));
 #else
     QString copies = "New-Item -ItemType Directory -Path " + quotePowerShell(moonWriteDirectory()) + " -Force | Out-Null\n";
     for (const auto &file : files) copies += "Copy-Item -LiteralPath " + quotePowerShell(file.first)
@@ -274,12 +274,12 @@ QString ZeroTier::moonImportScript(const QList<QPair<QString, QString>> &files)
 #endif
 }
 
-QString ZeroTier::moonDeleteScript(const QString &path)
+QString vusiif::ztgui::zerotier::moonDeleteScript(const QString &path)
 {
 #ifdef Q_OS_MACOS
     if (QFileInfo(path).absolutePath() != QDir(moonDirectory()).absolutePath()) return "exit 1\n";
     const QString actual = QDir(moonWriteDirectory()).filePath(QFileInfo(path).fileName());
-    return wrapScript(MacPlatform::deleteMoon(actual, moonWriteDirectory()) + serviceCommands("restart"));
+    return wrapScript(vusiif::ztgui::platform::deleteMoon(actual, moonWriteDirectory()) + serviceCommands("restart"));
 #else
     return wrapScript("$target = [IO.Path]::GetFullPath(" + quotePowerShell(path)
         + ")\n$directory = [IO.Path]::GetFullPath(" + quotePowerShell(moonWriteDirectory()) + ")\n"
@@ -288,7 +288,7 @@ QString ZeroTier::moonDeleteScript(const QString &path)
 #endif
 }
 
-ZeroTier::PowerShellInvocation ZeroTier::preparePowerShell(const QString &script)
+vusiif::ztgui::zerotier::PowerShellInvocation vusiif::ztgui::zerotier::preparePowerShell(const QString &script)
 {
     PowerShellInvocation invocation;
     invocation.directory = std::make_shared<QTemporaryDir>(
@@ -307,11 +307,11 @@ ZeroTier::PowerShellInvocation ZeroTier::preparePowerShell(const QString &script
     return invocation;
 }
 
-QString ZeroTier::packageScript(bool uninstall, const QString &winget)
+QString vusiif::ztgui::zerotier::packageScript(bool uninstall, const QString &winget)
 {
 #ifdef Q_OS_MACOS
     Q_UNUSED(winget)
-    return MacPlatform::packageScript(uninstall, dataDirectory());
+    return vusiif::ztgui::platform::packageScript(uninstall, dataDirectory());
 #else
     QString script = "$ErrorActionPreference = 'Stop'\n& " + quotePowerShell(winget);
     script += uninstall
@@ -339,7 +339,7 @@ if (Test-Path -LiteralPath $target) {
 #endif
 }
 
-void ZeroTier::command(QObject *owner, const QStringList &arguments,
+void vusiif::ztgui::zerotier::command(QObject *owner, const QStringList &arguments,
                        std::function<void(bool, const QString &)> finished)
 {
     const QString program = executable();
@@ -358,9 +358,9 @@ void ZeroTier::command(QObject *owner, const QStringList &arguments,
     auto complete = [process, finished, completed, arguments](bool ok, const QString &text) {
         if (*completed) return;
         *completed = true;
-        AppLog::write(arguments.join(' ') + (ok ? "：完成 " : "：失败 ") + text);
-        finished(ok, text);
+        vusiif::ztgui::util::log::write(arguments.join(' ') + (ok ? "：完成 " : "：失败 ") + text);
         process->deleteLater();
+        finished(ok, text);
     };
     QObject::connect(timeout, &QTimer::timeout, process, [process, complete] {
         process->kill();
@@ -379,13 +379,13 @@ void ZeroTier::command(QObject *owner, const QStringList &arguments,
     timeout->start();
 }
 
-JsonPoller::JsonPoller(QWidget *owner, const QString &command, bool object)
+vusiif::ztgui::zerotier::JsonPoller::JsonPoller(QWidget *owner, const QString &command, bool object)
     : QObject(owner), m_owner(owner), m_command(command), m_object(object)
 {
     m_interval.setInterval(1000);
     m_timeout.setSingleShot(true);
     m_timeout.setInterval(5000);
-    connect(&m_interval, &QTimer::timeout, this, &JsonPoller::refresh);
+    connect(&m_interval, &QTimer::timeout, this, &vusiif::ztgui::zerotier::JsonPoller::refresh);
     connect(&m_timeout, &QTimer::timeout, this, [this] {
         m_process.kill();
         failed(QStringLiteral("ZeroTier 响应超时，正在自动重试"));
@@ -403,7 +403,7 @@ JsonPoller::JsonPoller(QWidget *owner, const QString &command, bool object)
             failed(QStringLiteral("服务未响应，请检查服务状态或以管理员身份运行"));
             return;
         }
-        if (!m_lastFailure.isEmpty()) AppLog::write(m_command + QStringLiteral("：恢复连接"));
+        if (!m_lastFailure.isEmpty()) vusiif::ztgui::util::log::write(m_command + QStringLiteral("：恢复连接"));
         m_lastFailure.clear();
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
         if (m_command == "info") macApiAvailable = true;
@@ -412,20 +412,20 @@ JsonPoller::JsonPoller(QWidget *owner, const QString &command, bool object)
         emit updated(document);
     });
     m_interval.start();
-    QTimer::singleShot(0, this, &JsonPoller::refresh);
+    QTimer::singleShot(0, this, &vusiif::ztgui::zerotier::JsonPoller::refresh);
 }
 
-void JsonPoller::failed(const QString &message)
+void vusiif::ztgui::zerotier::JsonPoller::failed(const QString &message)
 {
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
     if (m_command == "info") macApiAvailable = false;
 #endif
-    if (m_lastFailure != message) AppLog::write(m_command + "：" + message);
+    if (m_lastFailure != message) vusiif::ztgui::util::log::write(m_command + "：" + message);
     m_lastFailure = message;
     emit availabilityChanged(false, message);
 }
 
-JsonPoller::~JsonPoller()
+vusiif::ztgui::zerotier::JsonPoller::~JsonPoller()
 {
     m_interval.stop();
     m_timeout.stop();
@@ -436,13 +436,13 @@ JsonPoller::~JsonPoller()
     }
 }
 
-void JsonPoller::refresh()
+void vusiif::ztgui::zerotier::JsonPoller::refresh()
 {
     if (!m_owner->isVisible() || m_process.state() != QProcess::NotRunning) return;
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
     if (!sessionReady()) { failed(QStringLiteral("等待授权读取 ZeroTier")); return; }
 #endif
-    const QString program = ZeroTier::executable();
+    const QString program = vusiif::ztgui::zerotier::executable();
     if (program.isEmpty()) {
         failed(QStringLiteral("未安装 ZeroTier，请在主页安装"));
         return;

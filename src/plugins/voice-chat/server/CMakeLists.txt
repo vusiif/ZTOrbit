@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.21.1)
+project(ztgui_voice_server LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Headless server uses only APIs available in Ubuntu 24.04's Qt 6.4.
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Network)
+add_executable(ztgui-voice-server main.cpp)
+target_link_libraries(ztgui-voice-server PRIVATE Qt6::Core Qt6::Network)
+if(MSVC)
+    target_compile_options(ztgui-voice-server PRIVATE /utf-8)
+endif()
+install(TARGETS ztgui-voice-server RUNTIME DESTINATION bin)

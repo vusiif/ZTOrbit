@@ -4,7 +4,7 @@
 #include <QRegularExpression>
 
 namespace {
-bool valid(const NetworkBundle::Configuration &configuration)
+bool valid(const vusiif::ztgui::zerotier::bundle::Configuration &configuration)
 {
     return QRegularExpression("^[0-9a-fA-F]{16}$").match(configuration.networkId).hasMatch()
         && QRegularExpression("^[0-9a-fA-F]{16}\\.moon$", QRegularExpression::CaseInsensitiveOption)
@@ -14,7 +14,7 @@ bool valid(const NetworkBundle::Configuration &configuration)
 }
 }
 
-QByteArray NetworkBundle::encode(const Configuration &configuration)
+QByteArray vusiif::ztgui::zerotier::bundle::encode(const Configuration &configuration)
 {
     if (!valid(configuration)) return {};
     return QJsonDocument(QJsonObject{
@@ -25,7 +25,7 @@ QByteArray NetworkBundle::encode(const Configuration &configuration)
     }).toJson(QJsonDocument::Indented);
 }
 
-bool NetworkBundle::decode(const QByteArray &bytes, Configuration &configuration, QString &error)
+bool vusiif::ztgui::zerotier::bundle::decode(const QByteArray &bytes, Configuration &configuration, QString &error)
 {
     configuration = {};
     if (bytes.size() > MaxFileSize) {

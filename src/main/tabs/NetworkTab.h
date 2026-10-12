@@ -1,10 +1,11 @@
 #pragma once
 #include "../DataTable.h"
 #include <QPointer>
-class MainWindow;
-class JsonPoller;
 class QLineEdit;
 class QPushButton;
+namespace vusiif::ztgui::zerotier { class JsonPoller; }
+namespace vusiif::ztgui::ui {
+class MainWindow;
 class AnimatedDialog;
 class MoonTab;
 class NetworkTab : public DataTable {
@@ -22,7 +23,7 @@ private:
     void exportMoon(const QString &networkId, const QString &path);
     void importMoon();
     MainWindow *m_main;
-    JsonPoller *m_poller;
+    vusiif::ztgui::zerotier::JsonPoller *m_poller;
     QPushButton *m_join;
     QPointer<AnimatedDialog> m_joinDialog;
     QPointer<QLineEdit> m_input;
@@ -30,3 +31,5 @@ private:
     MoonTab *m_moon = nullptr;
     bool m_operating = false;
 };
+
+} // namespace vusiif::ztgui::ui

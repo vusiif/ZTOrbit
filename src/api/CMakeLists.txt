@@ -35,6 +35,10 @@ write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/ZTGUIPluginApiConf
 install(TARGETS ztgui_plugin_api EXPORT ZTGUIPluginApiTargets)
 install(EXPORT ZTGUIPluginApiTargets NAMESPACE ZTGUI:: DESTINATION "${ZTGUI_API_CMAKE_DIR}")
 install(DIRECTORY include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+# Remove retired headers when updating an existing development SDK installation.
+install(CODE "file(REMOVE
+    \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/ztgui/PluginPreHandle.h\"
+    \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/ztgui/PluginInitialization.h\")")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/include/ztgui/ApiVersion.h"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/ztgui")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ZTGUIPluginApiConfig.cmake"

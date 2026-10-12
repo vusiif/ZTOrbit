@@ -2,7 +2,7 @@
 #define IDI_APP_ICON 101
 
 // Explorer, shortcuts and the UAC prompt use this embedded application icon.
-IDI_APP_ICON ICON "@ZTGUI_ROOT_DIR@/assets/app-icon.ico"
+IDI_APP_ICON ICON "@ZTGUI_ROOT_DIR@/src/assets/app-icon.ico"
 
 #include <winver.h>
 VS_VERSION_INFO VERSIONINFO

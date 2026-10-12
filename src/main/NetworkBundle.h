@@ -2,7 +2,7 @@
 #include <QByteArray>
 #include <QString>
 
-namespace NetworkBundle {
+namespace vusiif::ztgui::zerotier::bundle {
 constexpr qint64 MaxFileSize = 8 * 1024 * 1024;
 struct Configuration {
     QString networkId;

@@ -9,7 +9,7 @@
 
 class QWidget;
 
-namespace ZtGui::Plugins {
+namespace vusiif::ztgui::api {
 
 inline constexpr char ZeroTierMenuId[] = "builtin/zerotier";
 
@@ -71,4 +71,4 @@ struct PageResult {
     Result result;
 };
 
-} // namespace ZtGui::Plugins
+} // namespace vusiif::ztgui::api

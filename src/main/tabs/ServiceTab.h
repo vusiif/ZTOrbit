@@ -1,10 +1,12 @@
 #pragma once
 #include <QWidget>
 #include "../ZeroTierClient.h"
-class MainWindow;
 class QLabel;
 class QPushButton;
 class QToolButton;
+namespace vusiif::ztgui::zerotier { class JsonPoller; }
+namespace vusiif::ztgui::ui {
+class MainWindow;
 class AnimatedMenu;
 class ServiceTab : public QWidget {
     Q_OBJECT
@@ -26,6 +28,8 @@ private:
     QPushButton *m_action;
     QToolButton *m_dropdown;
     AnimatedMenu *m_menu;
-    ZeroTier::ServiceStatus m_status;
+    vusiif::ztgui::zerotier::ServiceStatus m_status;
     bool m_busy = false;
 };
+
+} // namespace vusiif::ztgui::ui

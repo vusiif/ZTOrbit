@@ -62,24 +62,24 @@ void messageHandler(QtMsgType type, const QMessageLogContext &, const QString &m
 {
     const char *level = type == QtDebugMsg ? "DEBUG" : type == QtInfoMsg ? "INFO"
         : type == QtWarningMsg ? "WARN" : type == QtCriticalMsg ? "ERROR" : "FATAL";
-    AppLog::write(QString::fromLatin1(level) + " " + message);
+    vusiif::ztgui::util::log::write(QString::fromLatin1(level) + " " + message);
     if (type == QtFatalMsg) std::abort();
 }
 }
 
-QString AppLog::path()
+QString vusiif::ztgui::util::log::path()
 {
     QMutexLocker lock(&mutex);
     return openLog() ? logFile.fileName() : QString();
 }
 
-void AppLog::write(const QString &text)
+void vusiif::ztgui::util::log::write(const QString &text)
 {
     QMutexLocker lock(&mutex);
     appendEntry(text);
 }
 
-void AppLog::initialize()
+void vusiif::ztgui::util::log::initialize()
 {
     QMutexLocker lock(&mutex);
     if (initialized) return;

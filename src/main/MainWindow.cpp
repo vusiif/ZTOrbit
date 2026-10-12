@@ -6,6 +6,7 @@
 #include "ZeroTierClient.h"
 #include "MacPlatform.h"
 #include "plugins/PluginRegistry.h"
+#include "plugins/PluginLoader.h"
 #include "tabs/ServiceTab.h"
 #include "tabs/PeersTab.h"
 #include "tabs/NetworkTab.h"
@@ -13,6 +14,7 @@
 
 #include <QCloseEvent>
 #include <QApplication>
+#include <QAction>
 #include <QAbstractButton>
 #include <QPainter>
 #include <QPushButton>
@@ -24,11 +26,18 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFile>
+#include <QFormLayout>
 #include <QDir>
 #include <QLabel>
+#include <QHeaderView>
 #include <QListWidget>
+#include <QMouseEvent>
+#include <QPersistentModelIndex>
+#include <QTreeWidget>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QScopedValueRollback>
+#include <QStatusBar>
 #include <QSplitter>
 #include <QScrollArea>
 #include <QStackedWidget>
@@ -43,7 +52,28 @@
 #include <shellapi.h>
 #endif
 
+namespace vusiif::ztgui::ui {
 namespace {
+class PluginList : public QTreeWidget {
+public:
+    using QTreeWidget::QTreeWidget;
+protected:
+    void mouseReleaseEvent(QMouseEvent *event) override
+    {
+        QTreeWidget::mouseReleaseEvent(event);
+        if (event->button() != Qt::RightButton) return;
+        const QPoint position = event->position().toPoint();
+        const QPersistentModelIndex index(indexAt(position));
+        if (!index.isValid()) return;
+        // Qt's active-popup mouse path skips automatic context-menu generation.
+        // Wait until this release has finished so the new popup cannot consume it.
+        QTimer::singleShot(0, this, [this, position, index] {
+            if (isVisible() && index.isValid() && indexAt(position) == index)
+                emit customContextMenuRequested(position);
+        });
+    }
+};
+
 class SettingsButton : public QPushButton {
 public:
     SettingsButton() { setCursor(Qt::PointingHandCursor); }
@@ -123,17 +153,26 @@ private:
 };
 }
 
-MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
+MainWindow::MainWindow(QWidget *parent, const QString &pluginDirectory) : QMainWindow(parent)
 {
-    m_plugins = new ZtGui::Plugins::PluginRegistry(this);
+    m_plugins = new vusiif::ztgui::plugins::PluginRegistry(this);
     setupUi();
-    ZeroTier::startServiceMonitor(this);
+#ifdef ZEROTIER_TESTING
+    if (!pluginDirectory.isEmpty())
+#endif
+    {
+        m_pluginLoader = new vusiif::ztgui::plugins::PluginLoader;
+        for (const auto &message : m_pluginLoader->scan(pluginDirectory.isEmpty()
+                ? QCoreApplication::applicationDirPath() + "/plugins" : pluginDirectory, *m_plugins))
+            appendOutput(message + '\n');
+    }
+    vusiif::ztgui::zerotier::startServiceMonitor(this);
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
-    if (!ZeroTier::executable().isEmpty()) QTimer::singleShot(0, this, [this] {
+    if (!vusiif::ztgui::zerotier::executable().isEmpty()) QTimer::singleShot(0, this, [this] {
         auto *page = m_pages->currentWidget();
-        UiTransitions::setBusy(page, true);
-        runElevatedScript(QStringLiteral("授权读取 ZeroTier"), ZeroTier::wrapScript({}), [page](bool) {
-            UiTransitions::setBusy(page, false);
+        vusiif::ztgui::ui::setBusy(page, true);
+        runElevatedScript(QStringLiteral("授权读取 ZeroTier"), vusiif::ztgui::zerotier::wrapScript({}), [page](bool) {
+            vusiif::ztgui::ui::setBusy(page, false);
         });
     });
 #endif
@@ -142,8 +181,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 MainWindow::~MainWindow()
 {
     // Release plugin widgets and callbacks before the main window's UI teardown.
+    m_navigating = true;
+    disconnect(m_navigation, nullptr, this, nullptr);
     disconnect(m_plugins, nullptr, this, nullptr);
+    // Loader waits for creation tasks, removes pages and runs onDestroy while
+    // the registry and host services are still valid.
+    delete m_pluginLoader;
+    m_pluginLoader = nullptr;
     delete m_plugins;
+    m_plugins = nullptr;
 }
 
 void MainWindow::setupUi()
@@ -176,6 +222,9 @@ void MainWindow::setupUi()
     brandRow->addWidget(online);
     brandRow->addWidget(brand);
     brandRow->addStretch();
+    auto *version = new QLabel(QStringLiteral("v" ZEROTIER_GUI_VERSION));
+    version->setObjectName("sidebarVersion");
+    brandRow->addWidget(version, 0, Qt::AlignBottom);
     sideLayout->addLayout(brandRow);
     m_navigation = new QListWidget;
     m_navigation->setObjectName("navigation");
@@ -205,11 +254,128 @@ void MainWindow::setupUi()
     settingsLayout->addWidget(system);
     auto *plugins = new QPushButton(QStringLiteral("插件"));
     plugins->setObjectName("pluginsButton");
-    plugins->setEnabled(false);
     settingsLayout->addWidget(plugins);
     auto *about = new QPushButton(QStringLiteral("关于"));
     about->setObjectName("aboutButton");
     settingsLayout->addWidget(about);
+    auto *pluginDialog = new AnimatedDialog(this, Qt::Popup | Qt::FramelessWindowHint);
+    pluginDialog->setObjectName("pluginsPopup");
+    pluginDialog->setWindowTitle(QStringLiteral("插件"));
+    pluginDialog->resize(520, 360);
+    auto *pluginLayout = new QVBoxLayout(pluginDialog);
+    pluginLayout->setContentsMargins(20, 20, 20, 20);
+    pluginLayout->setSpacing(12);
+    auto *pluginTitle = new QLabel(QStringLiteral("插件"));
+    pluginTitle->setObjectName("sectionTitle");
+    pluginLayout->addWidget(pluginTitle);
+    auto *pluginList = new PluginList;
+    pluginList->setObjectName("pluginList");
+    pluginList->setHeaderLabels({QStringLiteral("名称"), QStringLiteral("版本"), QStringLiteral("状态")});
+    pluginList->setRootIsDecorated(false);
+    pluginList->setAlternatingRowColors(true);
+    pluginList->header()->resizeSection(0, 220);
+    pluginList->header()->resizeSection(1, 90);
+    pluginList->header()->setStretchLastSection(true);
+    enableDragScrolling(pluginList);
+    pluginLayout->addWidget(pluginList, 1);
+    auto *emptyPlugins = new QLabel(QStringLiteral("尚未加载插件"));
+    emptyPlugins->setObjectName("emptyPluginsHint");
+    pluginLayout->addWidget(emptyPlugins);
+    auto *pluginHint = new QLabel(QStringLiteral("增减插件后需重启程序。"));
+    pluginHint->setObjectName("sidebarHint");
+    pluginLayout->addWidget(pluginHint);
+    auto *closePlugins = new QPushButton(QStringLiteral("关闭"));
+    closePlugins->setObjectName("closePluginsButton");
+    pluginLayout->addWidget(closePlugins, 0, Qt::AlignRight);
+    connect(closePlugins, &QPushButton::clicked, pluginDialog, &QDialog::reject);
+    const auto refreshPlugins = [this, pluginList, emptyPlugins] {
+        pluginList->clear();
+        for (const auto &info : m_plugins->plugins()) {
+            QString state;
+            switch (m_plugins->preparationState(info.id)) {
+            case vusiif::ztgui::plugins::PreparationState::Ready: state = QStringLiteral("已就绪"); break;
+            case vusiif::ztgui::plugins::PreparationState::Preparing: state = QStringLiteral("初始化中"); break;
+            case vusiif::ztgui::plugins::PreparationState::Failed: state = QStringLiteral("初始化失败"); break;
+            }
+            auto *item = new QTreeWidgetItem(pluginList, {info.name, info.version, state});
+            item->setData(0, Qt::UserRole, info.id);
+            item->setToolTip(0, info.id);
+            item->setToolTip(2, m_plugins->preparationMessage(info.id));
+        }
+        emptyPlugins->setVisible(pluginList->topLevelItemCount() == 0);
+    };
+    connect(m_plugins, &vusiif::ztgui::plugins::PluginRegistry::menusChanged, pluginDialog, refreshPlugins);
+    pluginList->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(pluginList, &QTreeWidget::customContextMenuRequested, pluginDialog,
+            [this, pluginList, pluginDialog](const QPoint &position) {
+        for (auto *existing : pluginDialog->findChildren<QMenu *>("pluginContextMenu", Qt::FindDirectChildrenOnly))
+            if (existing->isVisible()) return;
+        auto *item = pluginList->itemAt(position);
+        if (!item) return;
+        pluginList->setCurrentItem(item);
+        vusiif::ztgui::api::PluginInfo info {item->data(0, Qt::UserRole).toString(), item->text(0), item->text(1)};
+        bool loaded = false;
+        for (const auto &registered : m_plugins->plugins()) {
+            if (registered.id == info.id) { info = registered; loaded = true; break; }
+        }
+        auto *menu = new AnimatedMenu(pluginDialog);
+        menu->setObjectName("pluginContextMenu");
+        connect(menu, &QMenu::aboutToHide, menu, &QObject::deleteLater);
+        auto *load = menu->addAction(loaded ? QStringLiteral("卸载") : QStringLiteral("加载"));
+        load->setObjectName("togglePluginLoadAction");
+        load->setEnabled(false);
+        auto *aboutPlugin = menu->addAction(QStringLiteral("关于"));
+        aboutPlugin->setObjectName("aboutPluginAction");
+        connect(aboutPlugin, &QAction::triggered, pluginDialog, [pluginDialog, info, loaded] {
+            // Native menu dismissal may also hide its enclosing Qt::Popup.
+            // Restore the list after the menu releases its grab, then open the child.
+            QTimer::singleShot(0, pluginDialog, [pluginDialog, info, loaded] {
+                if (!pluginDialog->isVisible()) pluginDialog->show();
+                auto *dialog = new AnimatedDialog(pluginDialog, Qt::Popup | Qt::FramelessWindowHint);
+                dialog->setObjectName("pluginAboutPopup");
+                dialog->setAttribute(Qt::WA_DeleteOnClose);
+                dialog->setWindowTitle(QStringLiteral("关于插件"));
+                dialog->setFixedWidth(420);
+                auto *layout = new QVBoxLayout(dialog);
+                layout->setContentsMargins(20, 20, 20, 20);
+                layout->setSpacing(16);
+                auto *title = new QLabel(QStringLiteral("关于插件"));
+                title->setObjectName("sectionTitle");
+                layout->addWidget(title);
+                auto *fields = new QFormLayout;
+                fields->setSpacing(12);
+                const auto addField = [fields](const QString &caption, const QString &text, const char *name) {
+                    auto *value = new QLabel(text);
+                    value->setObjectName(name);
+                    value->setTextFormat(Qt::PlainText);
+                    value->setWordWrap(true);
+                    value->setTextInteractionFlags(Qt::TextSelectableByMouse);
+                    fields->addRow(caption, value);
+                };
+                addField(QStringLiteral("名称"), info.name, "pluginAboutName");
+                addField(QStringLiteral("插件 ID"), info.id, "pluginAboutId");
+                addField(QStringLiteral("版本"), info.version, "pluginAboutVersion");
+                addField(QStringLiteral("API 版本"), QStringLiteral("%1.%2").arg(info.apiMajor).arg(info.apiMinor), "pluginAboutApiVersion");
+                addField(QStringLiteral("加载状态"), loaded ? QStringLiteral("已加载") : QStringLiteral("未加载"), "pluginAboutLoadState");
+                layout->addLayout(fields);
+                auto *close = new QPushButton(QStringLiteral("关闭"));
+                close->setObjectName("closePluginAboutButton");
+                layout->addWidget(close, 0, Qt::AlignRight);
+                connect(close, &QPushButton::clicked, dialog, &QDialog::reject);
+                connect(pluginDialog, &QDialog::finished, dialog, &QDialog::reject);
+                dialog->adjustSize();
+                dialog->move(pluginDialog->mapToGlobal(pluginDialog->rect().center()) - dialog->rect().center());
+                dialog->show();
+            });
+        });
+        menu->popup(pluginList->viewport()->mapToGlobal(position));
+    });
+    connect(plugins, &QPushButton::clicked, this, [this, settings, pluginDialog, refreshPlugins] {
+        settings->close();
+        refreshPlugins();
+        pluginDialog->move(mapToGlobal(rect().center()) - pluginDialog->rect().center());
+        pluginDialog->show();
+    });
     connect(settingsButton, &QPushButton::clicked, this, [settings, settingsButton, theme] {
         if (settings->isVisible()) { settings->close(); return; }
         theme->sync();
@@ -231,7 +397,7 @@ void MainWindow::setupUi()
         auto *applicationVersion = new QLabel(QStringLiteral("v%1").arg(QStringLiteral(ZEROTIER_GUI_VERSION)));
         applicationVersion->setObjectName("applicationVersion");
         content->addWidget(applicationVersion);
-        auto *apiVersion = new QLabel(QStringLiteral("API %1").arg(QString::fromLatin1(ZtGui::Plugins::ApiVersion)));
+        auto *apiVersion = new QLabel(QStringLiteral("API %1").arg(QString::fromLatin1(vusiif::ztgui::api::ApiVersion)));
         apiVersion->setObjectName("pluginApiVersion");
         content->addWidget(apiVersion);
         content->addWidget(new QLabel(QStringLiteral("Qt %1").arg(QString::fromLatin1(qVersion()))));
@@ -275,8 +441,8 @@ void MainWindow::setupUi()
     m_zeroTierPage = scroll;
     auto nodeInfo = std::make_shared<QJsonObject>();
     // Keep node status current throughout the scrollable page.
-    auto *poller = new JsonPoller(this, "info", true);
-    connect(poller, &JsonPoller::updated, this, [online, service, nodeInfo](const QJsonDocument &document) {
+    auto *poller = new vusiif::ztgui::zerotier::JsonPoller(this, "info", true);
+    connect(poller, &vusiif::ztgui::zerotier::JsonPoller::updated, this, [online, service, nodeInfo](const QJsonDocument &document) {
         *nodeInfo = document.object();
         const bool connected = (*nodeInfo)["online"].toBool();
         online->setStyleSheet(connected ? "background: #25a773; border-radius: 5px;" : "background: #d95059; border-radius: 5px;");
@@ -284,7 +450,7 @@ void MainWindow::setupUi()
         online->setProperty("online", connected);
         service->setNodeInfo(*nodeInfo);
     });
-    connect(poller, &JsonPoller::availabilityChanged, this, [online](bool available, const QString &) {
+    connect(poller, &vusiif::ztgui::zerotier::JsonPoller::availabilityChanged, this, [online](bool available, const QString &) {
         if (!available) {
             online->setStyleSheet("background: #d95059; border-radius: 5px;");
             online->setAccessibleName(QStringLiteral("离线"));
@@ -292,12 +458,12 @@ void MainWindow::setupUi()
         }
     });
     const auto changeTheme = [this, theme, service, nodeInfo](const QString &value) {
-        const auto before = UiTransitions::capture(centralWidget());
+        const auto before = vusiif::ztgui::ui::capture(centralWidget());
         QSettings().setValue("appearance/theme", value);
-        applyAppStyle(*qApp);
+        vusiif::ztgui::ui::applyAppStyle(*qApp);
         theme->sync();
         service->setNodeInfo(*nodeInfo);
-        UiTransitions::crossFade(centralWidget(), before, 220);
+        vusiif::ztgui::ui::crossFade(centralWidget(), before, 220);
     };
     connect(theme, &QAbstractButton::clicked, this, [theme, system, changeTheme] {
         const QSignalBlocker blocker(system);
@@ -315,8 +481,8 @@ void MainWindow::setupUi()
         if (index < 0) return;
         activateNavigation(m_navigation->item(index)->data(Qt::UserRole).toString());
     });
-    connect(m_plugins, &ZtGui::Plugins::PluginRegistry::menusChanged, this, &MainWindow::rebuildNavigation);
-    connect(m_plugins, &ZtGui::Plugins::PluginRegistry::pageCreationFailed, this,
+    connect(m_plugins, &vusiif::ztgui::plugins::PluginRegistry::menusChanged, this, &MainWindow::rebuildNavigation);
+    connect(m_plugins, &vusiif::ztgui::plugins::PluginRegistry::pageCreationFailed, this,
             [this](const QString &id, const QString &error) {
         appendOutput(QStringLiteral("插件页面 %1：%2\n").arg(id, error));
     });
@@ -341,11 +507,15 @@ void MainWindow::rebuildNavigation()
         const QSignalBlocker blocker(m_navigation);
         m_navigation->clear();
         auto *builtin = new QListWidgetItem(QStringLiteral("ZeroTier"), m_navigation);
-        builtin->setData(Qt::UserRole, QString::fromLatin1(ZtGui::Plugins::ZeroTierMenuId));
+        builtin->setData(Qt::UserRole, QString::fromLatin1(vusiif::ztgui::api::ZeroTierMenuId));
         for (const auto &menu : m_plugins->menus()) {
             auto *item = new QListWidgetItem(menu.icon, menu.title, m_navigation);
             item->setData(Qt::UserRole, menu.id);
             item->setToolTip(menu.toolTip);
+            if (m_plugins->preparationState(menu.pluginId) != vusiif::ztgui::plugins::PreparationState::Ready) {
+                item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
+                item->setToolTip(m_plugins->preparationMessage(menu.pluginId));
+            }
             if (menu.id == m_activeMenuId) selected = m_navigation->count() - 1;
         }
         m_navigation->setCurrentRow(selected);
@@ -355,35 +525,74 @@ void MainWindow::rebuildNavigation()
 
 void MainWindow::activateNavigation(const QString &menuId)
 {
+    const auto restoreSelection = [this] {
+        const QSignalBlocker blocker(m_navigation);
+        for (int row = 0; row < m_navigation->count(); ++row) {
+            if (m_navigation->item(row)->data(Qt::UserRole).toString() == m_activeMenuId) {
+                m_navigation->setCurrentRow(row);
+                break;
+            }
+        }
+    };
+    if (m_navigating) { restoreSelection(); return; }
+    const QScopedValueRollback<bool> guard(m_navigating, true);
     QWidget *page = m_zeroTierPage;
-    if (menuId != QLatin1String(ZtGui::Plugins::ZeroTierMenuId)) {
+    if (menuId != QLatin1String(vusiif::ztgui::api::ZeroTierMenuId)) {
         const auto result = m_plugins->page(menuId, m_pages);
         if (!result.result.ok()) {
-            const QSignalBlocker blocker(m_navigation);
-            for (int row = 0; row < m_navigation->count(); ++row) {
-                if (m_navigation->item(row)->data(Qt::UserRole).toString() == m_activeMenuId) {
-                    m_navigation->setCurrentRow(row);
-                    break;
-                }
-            }
+            restoreSelection();
             return;
         }
         page = result.page;
         if (m_pages->indexOf(page) < 0) m_pages->addWidget(page);
     }
-    m_activeMenuId = menuId;
-    if (m_pages->currentWidget() == page) return;
-    const auto before = UiTransitions::capture(m_pages);
-    m_pages->setCurrentWidget(page);
-    UiTransitions::crossFade(m_pages, before);
+    const bool changed = m_pages->currentWidget() != page;
+    const auto before = changed ? vusiif::ztgui::ui::capture(m_pages) : QPixmap{};
+    const auto activated = m_plugins->activateMenu(menuId, [this, &menuId, page, &restoreSelection] {
+        m_activeMenuId = menuId;
+        m_pages->setCurrentWidget(page);
+        restoreSelection();
+    });
+    if (!activated.ok()) { restoreSelection(); return; }
+    if (changed) vusiif::ztgui::ui::crossFade(m_pages, before);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    if (m_pluginLoader && !m_shutdownReady) {
+        event->ignore();
+        if (m_closing) return;
+        m_closing = true;
+        m_navigating = true;
+        centralWidget()->setEnabled(false);
+        setAcceptDrops(false);
+        statusBar()->setObjectName("shutdownStatus");
+        updateShutdownMessage();
+        connect(m_pluginLoader, &vusiif::ztgui::plugins::PluginLoader::shutdownProgress, this,
+                [this](const QStringList &pending) { m_shutdownPending = pending; updateShutdownMessage(); });
+        connect(m_pluginLoader, &vusiif::ztgui::plugins::PluginLoader::shutdownFinished, this, [this] {
+            m_shutdownReady = true;
+            // Close after the loader's completion signal has fully returned.
+            QTimer::singleShot(0, this, [this] { close(); });
+        });
+        QTimer::singleShot(5000, this, [this] {
+            if (!m_shutdownReady) { m_shutdownSlow = true; updateShutdownMessage(); }
+        });
+        m_pluginLoader->requestShutdown();
+        return;
+    }
     QSettings settings;
     settings.setValue("window/geometry", saveGeometry());
     settings.setValue("window/sidebar", m_horizontal->saveState());
     QMainWindow::closeEvent(event);
+}
+
+void MainWindow::updateShutdownMessage()
+{
+    QString message = m_shutdownSlow ? QStringLiteral("等待时间较长，正在等待插件初始化结束")
+                                    : QStringLiteral("正在退出，正在停止插件初始化…");
+    if (!m_shutdownPending.isEmpty()) message += QStringLiteral("：") + m_shutdownPending.join(QStringLiteral("、"));
+    statusBar()->showMessage(message);
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent *event)
@@ -404,9 +613,9 @@ void MainWindow::dropEvent(QDropEvent *event)
 
 void MainWindow::runService(const QString &action, std::function<void(bool)> finished)
 {
-    const QString operation = ZeroTier::serviceCommands(action);
+    const QString operation = vusiif::ztgui::zerotier::serviceCommands(action);
     if (operation.isEmpty()) { if (finished) finished(false); return; }
-    const QString script = ZeroTier::wrapScript(operation);
+    const QString script = vusiif::ztgui::zerotier::wrapScript(operation);
     runElevatedScript(QStringLiteral("ZeroTier 服务：%1").arg(action), script, finished);
 }
 
@@ -414,7 +623,7 @@ void MainWindow::runElevatedScript(const QString &label, const QString &script,
                                    std::function<void(bool)> finished)
 {
 #ifdef Q_OS_WIN
-    const auto invocation = ZeroTier::preparePowerShell(script);
+    const auto invocation = vusiif::ztgui::zerotier::preparePowerShell(script);
     if (!invocation.directory->isValid()) {
         appendOutput(QStringLiteral("无法创建操作日志\n"));
         if (finished) finished(false);
@@ -461,8 +670,8 @@ void MainWindow::runElevatedScript(const QString &label, const QString &script,
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly)) { if (finished) finished(false); return; }
     // Preserve the operation result while refreshing the private session after partial failures.
-    const QString payload = "/bin/sh -c " + MacPlatform::quote(script) + "\nstatus=$?\n"
-        "/bin/sh -c " + MacPlatform::quote("set -eu\n" + ZeroTier::sessionRefreshScript())
+    const QString payload = "/bin/sh -c " + vusiif::ztgui::platform::quote(script) + "\nstatus=$?\n"
+        "/bin/sh -c " + vusiif::ztgui::platform::quote("set -eu\n" + vusiif::ztgui::zerotier::sessionRefreshScript())
         + "\nsession_status=$?\n[ \"$status\" -ne 0 ] || status=$session_status\n"
         "exit \"$status\"\n";
     const QByteArray bytes = payload.toUtf8();
@@ -470,8 +679,8 @@ void MainWindow::runElevatedScript(const QString &label, const QString &script,
     file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     file.close();
     auto *process = new QProcess(this);
-    const QString command = "/bin/sh " + MacPlatform::quote(path) + " 2>&1";
-    const QString appleScript = "do shell script " + MacPlatform::appleScriptString(command) + " with administrator privileges";
+    const QString command = "/bin/sh " + vusiif::ztgui::platform::quote(path) + " 2>&1";
+    const QString appleScript = "do shell script " + vusiif::ztgui::platform::appleScriptString(command) + " with administrator privileges";
     auto completed = std::make_shared<bool>(false);
     const auto complete = [this, process, directory, finished, completed, label](bool ok, const QString &output) {
         if (*completed) return;
@@ -500,5 +709,7 @@ void MainWindow::runElevatedScript(const QString &label, const QString &script,
 
 void MainWindow::appendOutput(const QString &text)
 {
-    AppLog::write(text);
+    vusiif::ztgui::util::log::write(text);
 }
+
+} // namespace vusiif::ztgui::ui

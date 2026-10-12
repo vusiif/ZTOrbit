@@ -25,17 +25,32 @@ cmake -S "$project_root" -B "$build_directory" \
 cmake --build "$build_directory" --parallel "$(sysctl -n hw.logicalcpu)"
 ctest --test-dir "$build_directory" --output-on-failure
 
+api_sdk="$project_root/dist/ZTGUI-api"
+cmake --install "$build_directory" --prefix "$api_sdk"
+voice_build="$project_root/cmake-build-voice-client-macos-arm64"
+cmake -S "$project_root/src/plugins/voice-chat/client-plugin" -B "$voice_build" \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$api_sdk;$QT_ROOT" \
+    -DCMAKE_OSX_ARCHITECTURES=arm64
+cmake --build "$voice_build" --parallel "$(sysctl -n hw.logicalcpu)"
+
 staging="$(mktemp -d "$build_directory/package.XXXXXX")"
 trap '/bin/rm -rf -- "$staging"' EXIT
 /usr/bin/ditto "$build_directory/ZTGUI.app" "$staging/ZTGUI.app"
+/bin/mkdir -p "$staging/ZTGUI.app/Contents/MacOS/plugins"
+voice_library="$(find "$voice_build" -maxdepth 1 -type f \( -name 'ztgui_voice_chat.dylib' -o -name 'ztgui_voice_chat.so' \) -print -quit)"
+if [[ -z "$voice_library" ]]; then
+    echo 'Voice plugin artifact not found' >&2
+    exit 1
+fi
+/bin/cp "$voice_library" "$staging/ZTGUI.app/Contents/MacOS/plugins/"
 
 iconset="$staging/app-icon.iconset"
 /bin/mkdir -p "$iconset" "$staging/ZTGUI.app/Contents/Resources"
 for size in 16 32 128 256 512; do
-    /usr/bin/sips -z "$size" "$size" "$project_root/assets/app-icon.png" \
+    /usr/bin/sips -z "$size" "$size" "$project_root/src/assets/app-icon.png" \
         --out "$iconset/icon_${size}x${size}.png" >/dev/null
     retina=$((size * 2))
-    /usr/bin/sips -z "$retina" "$retina" "$project_root/assets/app-icon.png" \
+    /usr/bin/sips -z "$retina" "$retina" "$project_root/src/assets/app-icon.png" \
         --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 /usr/bin/iconutil -c icns "$iconset" -o "$staging/ZTGUI.app/Contents/Resources/app-icon.icns"
@@ -44,7 +59,9 @@ plist="$staging/ZTGUI.app/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string app-icon.icns' "$plist"
 (
     cd "$staging"
-    "$QT_ROOT/bin/macdeployqt" ZTGUI.app -always-overwrite -codesign=- -dmg
+    "$QT_ROOT/bin/macdeployqt" ZTGUI.app \
+        "-executable=ZTGUI.app/Contents/MacOS/plugins/$(basename "$voice_library")" \
+        -always-overwrite -codesign=- -dmg
 )
 /usr/bin/lipo -verify_arch arm64 "$staging/ZTGUI.app/Contents/MacOS/ZTGUI"
 /usr/bin/codesign --verify --deep --strict "$staging/ZTGUI.app"

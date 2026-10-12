@@ -2,7 +2,6 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QLabel>
-#include <QGraphicsOpacityEffect>
 #include <QPainter>
 #include <QPointer>
 #include <QSettings>
@@ -54,13 +53,13 @@ public:
             setGeometry(parentWidget()->rect());
             show();
             raise();
-            if (UiTransitions::enabled() && isVisible()) m_spinner.start();
+            if (vusiif::ztgui::ui::enabled() && isVisible()) m_spinner.start();
         } else {
             parentWidget()->setEnabled(m_restoreEnabled);
             if (m_focus && m_focus->isVisible() && m_focus->isEnabled()) m_focus->setFocus(Qt::OtherFocusReason);
             m_focus.clear();
         }
-        if (!UiTransitions::enabled() || !isVisible()) {
+        if (!vusiif::ztgui::ui::enabled() || !isVisible()) {
             m_opacity = busy ? 1.0 : 0.0;
             if (!busy) hide();
             update();
@@ -99,7 +98,7 @@ protected:
     void showEvent(QShowEvent *event) override
     {
         QWidget::showEvent(event);
-        if (m_busy && UiTransitions::enabled()) m_spinner.start();
+        if (m_busy && vusiif::ztgui::ui::enabled()) m_spinner.start();
     }
     void hideEvent(QHideEvent *event) override
     {
@@ -164,14 +163,68 @@ private:
     QVariantAnimation m_fade;
     qreal m_opacity = 1.0;
 };
+
+// The real dialog must disappear immediately: Qt's popup dismissal paths can
+// repeatedly call close() until there is no active popup. Never defer that close
+// for an animation. This non-interactive window only paints a cached image.
+class DialogClosingFade : public QWidget {
+public:
+    DialogClosingFade(QWidget *owner, const QPixmap &snapshot, const QRect &geometry, qreal opacity)
+        : QWidget(owner, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowTransparentForInput
+                         | Qt::WindowDoesNotAcceptFocus), m_snapshot(snapshot), m_opacity(opacity)
+    {
+        setObjectName("dialogClosingFade");
+        setAttribute(Qt::WA_TranslucentBackground);
+        setAttribute(Qt::WA_ShowWithoutActivating);
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setFocusPolicy(Qt::NoFocus);
+        setGeometry(geometry);
+        if (owner) owner->installEventFilter(this);
+        m_fade.setDuration(120);
+        m_fade.setStartValue(opacity);
+        m_fade.setEndValue(0.0);
+        m_fade.setEasingCurve(QEasingCurve::OutCubic);
+        connect(&m_fade, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
+            m_opacity = value.toReal();
+            update();
+        });
+        connect(&m_fade, &QVariantAnimation::finished, this, [this] { dismiss(); });
+        show();
+        m_fade.start();
+    }
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        painter.setOpacity(m_opacity);
+        painter.drawPixmap(QPoint(0, 0), m_snapshot);
+    }
+    bool eventFilter(QObject *object, QEvent *event) override
+    {
+        if (object == parentWidget() && (event->type() == QEvent::Hide || event->type() == QEvent::Move
+                                         || event->type() == QEvent::Resize)) dismiss();
+        return QWidget::eventFilter(object, event);
+    }
+private:
+    void dismiss()
+    {
+        m_fade.stop();
+        setObjectName({});
+        hide();
+        deleteLater();
+    }
+    QPixmap m_snapshot;
+    QVariantAnimation m_fade;
+    qreal m_opacity;
+};
 }
 
-bool UiTransitions::enabled()
+bool vusiif::ztgui::ui::enabled()
 {
     return true;
 }
 
-QPixmap UiTransitions::capture(QWidget *widget)
+QPixmap vusiif::ztgui::ui::capture(QWidget *widget)
 {
     // A snapshot containing a loading indicator would freeze it during a cross-fade.
     for (auto *overlay : widget->findChildren<QWidget *>("operationOverlay"))
@@ -179,7 +232,7 @@ QPixmap UiTransitions::capture(QWidget *widget)
     return enabled() && widget->isVisible() && !widget->size().isEmpty() ? widget->grab() : QPixmap();
 }
 
-void UiTransitions::crossFade(QWidget *widget, const QPixmap &before, int duration)
+void vusiif::ztgui::ui::crossFade(QWidget *widget, const QPixmap &before, int duration)
 {
     // A new snapshot already contains any partially blended previous transition.
     for (auto *child : widget->findChildren<QWidget *>("uiTransitionOverlay", Qt::FindDirectChildrenOnly))
@@ -187,7 +240,7 @@ void UiTransitions::crossFade(QWidget *widget, const QPixmap &before, int durati
     if (!before.isNull() && enabled() && widget->isVisible()) new SnapshotFade(widget, before, duration);
 }
 
-void UiTransitions::setText(QLabel *label, const QString &text)
+void vusiif::ztgui::ui::setText(QLabel *label, const QString &text)
 {
     if (label->text() == text) return;
     const QPixmap before = capture(label);
@@ -195,40 +248,31 @@ void UiTransitions::setText(QLabel *label, const QString &text)
     crossFade(label, before, 160);
 }
 
-void UiTransitions::setBusy(QWidget *page, bool busy)
+void vusiif::ztgui::ui::setBusy(QWidget *page, bool busy)
 {
     auto *overlay = static_cast<OperationOverlay *>(page->findChild<QWidget *>("operationOverlay", Qt::FindDirectChildrenOnly));
     if (!overlay && busy) overlay = new OperationOverlay(page);
     if (overlay) overlay->setBusy(busy);
 }
 
-AnimatedDialog::AnimatedDialog(QWidget *parent, Qt::WindowFlags flags)
+vusiif::ztgui::ui::AnimatedDialog::AnimatedDialog(QWidget *parent, Qt::WindowFlags flags)
     : QDialog(parent, flags)
 {
-    // Effects render into a transparent pixmap; paint ordinary dialog backgrounds explicitly.
     setAutoFillBackground(true);
-    m_opacity = new QGraphicsOpacityEffect(this);
-    m_opacity->setOpacity(1.0);
-    setGraphicsEffect(m_opacity);
-    m_fade.setTargetObject(m_opacity);
-    m_fade.setPropertyName("opacity");
+    // Native window opacity avoids rerendering the whole widget tree each frame.
+    m_fade.setTargetObject(this);
+    m_fade.setPropertyName("windowOpacity");
     m_fade.setEasingCurve(QEasingCurve::OutCubic);
-    connect(&m_fade, &QPropertyAnimation::finished, this, [this] {
-        if (m_closing) {
-            setEnabled(true);
-            QDialog::done(m_pendingResult);
-        }
-    });
 }
 
-void AnimatedDialog::showEvent(QShowEvent *event)
+void vusiif::ztgui::ui::AnimatedDialog::showEvent(QShowEvent *event)
 {
     m_fade.stop();
     m_closing = false;
     setEnabled(true);
-    m_opacity->setOpacity(UiTransitions::enabled() ? 0.0 : 1.0);
+    setWindowOpacity(vusiif::ztgui::ui::enabled() ? 0.0 : 1.0);
     QDialog::showEvent(event);
-    if (UiTransitions::enabled()) {
+    if (vusiif::ztgui::ui::enabled()) {
         m_fade.setDuration(180);
         m_fade.setStartValue(0.0);
         m_fade.setEndValue(1.0);
@@ -236,31 +280,26 @@ void AnimatedDialog::showEvent(QShowEvent *event)
     }
 }
 
-void AnimatedDialog::done(int result)
+void vusiif::ztgui::ui::AnimatedDialog::done(int result)
 {
     if (m_closing) return;
-    if (!isVisible() || !UiTransitions::enabled()) {
-        m_closing = true;
-        m_fade.stop();
-        QDialog::done(result);
-        return;
-    }
     m_closing = true;
-    m_pendingResult = result;
     m_fade.stop();
-    m_fade.setDuration(140);
-    m_fade.setStartValue(m_opacity->opacity());
-    m_fade.setEndValue(0.0);
-    m_fade.start();
+    if (isVisible() && vusiif::ztgui::ui::enabled() && windowOpacity() > 0.0) {
+        const QPixmap snapshot = grab();
+        if (!snapshot.isNull())
+            new DialogClosingFade(parentWidget(), snapshot, QRect(mapToGlobal(QPoint()), size()), windowOpacity());
+    }
+    QDialog::done(result);
 }
 
-void AnimatedDialog::closeEvent(QCloseEvent *event)
+void vusiif::ztgui::ui::AnimatedDialog::closeEvent(QCloseEvent *event)
 {
-    event->ignore();
+    event->accept();
     done(QDialog::Rejected);
 }
 
-void AnimatedMenu::showEvent(QShowEvent *event)
+void vusiif::ztgui::ui::AnimatedMenu::showEvent(QShowEvent *event)
 {
     QMenu::showEvent(event);
     auto *fade = new QPropertyAnimation(this, "windowOpacity", this);

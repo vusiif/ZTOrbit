@@ -1,6 +1,7 @@
 #include "PluginRegistry.h"
 
 #include <QApplication>
+#include <QDebug>
 #include <QRegularExpression>
 #include <QScopedValueRollback>
 #include <QSet>
@@ -9,7 +10,8 @@
 #include <exception>
 #include <utility>
 
-namespace ZtGui::Plugins {
+namespace vusiif::ztgui::plugins {
+using namespace vusiif::ztgui::api;
 namespace {
 bool validId(const QString &id)
 {
@@ -23,11 +25,12 @@ QString fullId(const QString &pluginId, const QString &menuId)
 }
 }
 
-PluginRegistry::PluginRegistry(QObject *parent) : QObject(parent) {}
+PluginRegistry::PluginRegistry(QObject *parent) : QObject(parent), m_active(location(ZeroTierMenuId)) {}
 
 PluginRegistry::~PluginRegistry()
 {
     const QScopedValueRollback<bool> guard(m_busy, true);
+    notifyTransition(location(ZeroTierMenuId));
     // Destroy widgets while factory captures (and future loader handles) still live.
     for (const auto &page : std::as_const(m_pages)) delete page.data();
     m_pages.clear();
@@ -42,7 +45,7 @@ Result PluginRegistry::checkMutation() const
     return {};
 }
 
-Result PluginRegistry::registerPlugin(PluginDefinition definition)
+Result PluginRegistry::registerPlugin(PluginDefinition definition, PluginLifecycleInterface *lifecycle, bool preparing)
 {
     if (const auto result = checkMutation(); !result.ok()) return result;
     const auto &info = definition.info;
@@ -63,6 +66,8 @@ Result PluginRegistry::registerPlugin(PluginDefinition definition)
     }
     const QString id = info.id;
     m_plugins.insert(id, std::move(definition));
+    if (lifecycle) m_lifecycles.insert(id, lifecycle);
+    if (preparing) m_preparation.insert(id, {PreparationState::Preparing, QStringLiteral("插件准备中…")});
     emit menusChanged();
     return {};
 }
@@ -74,11 +79,14 @@ Result PluginRegistry::unregisterPlugin(const QString &pluginId)
     if (plugin == m_plugins.end()) return {Error::NotFound, QStringLiteral("插件未注册：%1").arg(pluginId)};
     {
         const QScopedValueRollback<bool> guard(m_busy, true);
+        if (m_active.plugin.id == pluginId) notifyTransition(location(ZeroTierMenuId));
         for (const auto &menu : plugin->menus) {
             auto page = m_pages.take(fullId(pluginId, menu.id));
             delete page.data();
         }
         m_plugins.erase(plugin);
+        m_lifecycles.remove(pluginId);
+        m_preparation.remove(pluginId);
     }
     emit menusChanged();
     return {};
@@ -115,6 +123,10 @@ PageResult PluginRegistry::page(const QString &menuId, QWidget *parent)
     const auto plugin = m_plugins.constFind(menuId.left(separator));
     if (separator < 0 || plugin == m_plugins.cend())
         return {nullptr, {Error::NotFound, QStringLiteral("菜单未注册：%1").arg(menuId)}};
+    const auto preparation = m_preparation.value(plugin->info.id);
+    if (preparation.state != PreparationState::Ready)
+        return {nullptr, {preparation.state == PreparationState::Preparing ? Error::Busy : Error::PageCreationFailed,
+            preparation.message}};
     const auto menu = std::find_if(plugin->menus.cbegin(), plugin->menus.cend(), [&](const MenuContribution &item) {
         return fullId(plugin->info.id, item.id) == menuId;
     });
@@ -164,4 +176,65 @@ PageResult PluginRegistry::page(const QString &menuId, QWidget *parent)
     return {widget, {}};
 }
 
-} // namespace ZtGui::Plugins
+Result PluginRegistry::setPreparationState(const QString &pluginId, PreparationState state, const QString &message)
+{
+    if (const auto result = checkMutation(); !result.ok()) return result;
+    if (!m_plugins.contains(pluginId)) return {Error::NotFound, QStringLiteral("插件未注册：%1").arg(pluginId)};
+    m_preparation.insert(pluginId, {state, message});
+    emit menusChanged();
+    return {};
+}
+
+PreparationState PluginRegistry::preparationState(const QString &pluginId) const
+{
+    Q_ASSERT(QThread::currentThread() == thread());
+    return m_preparation.value(pluginId).state;
+}
+
+QString PluginRegistry::preparationMessage(const QString &pluginId) const
+{
+    Q_ASSERT(QThread::currentThread() == thread());
+    return m_preparation.value(pluginId).message;
+}
+
+MenuLocation PluginRegistry::location(const QString &menuId) const
+{
+    if (menuId == QLatin1String(ZeroTierMenuId))
+        return {{"builtin", QStringLiteral("ZeroTier"), QCoreApplication::applicationVersion()},
+                {ZeroTierMenuId, "builtin", "zerotier", QStringLiteral("ZeroTier"), {}, {}, 0}, true};
+    for (const auto &menu : menus()) {
+        if (menu.id == menuId) return {m_plugins.value(menu.pluginId).info, menu, false};
+    }
+    return {};
+}
+
+void PluginRegistry::notifyTransition(const MenuLocation &next, const std::function<void()> &commit)
+{
+    if (m_active.menu.id == next.menu.id) { if (commit) commit(); return; }
+    const auto previous = m_active;
+    auto invoke = [](auto callback) {
+        try { callback(); }
+        catch (const std::exception &e) { qWarning() << "[插件] 导航生命周期异常:" << e.what(); }
+        catch (...) { qWarning() << "[插件] 导航生命周期抛出未知异常"; }
+    };
+    if (auto *old = m_lifecycles.value(previous.plugin.id))
+        invoke([&] { old->onExitedTo(next); });
+    m_active = next;
+    if (commit) commit();
+    if (auto *entry = m_lifecycles.value(next.plugin.id))
+        invoke([&] { entry->onEnteredFrom(previous); });
+}
+
+Result PluginRegistry::activateMenu(const QString &menuId, const std::function<void()> &commit)
+{
+    if (const auto result = checkMutation(); !result.ok()) return result;
+    const auto next = location(menuId);
+    if (next.menu.id.isEmpty()) return {Error::NotFound, QStringLiteral("菜单未注册：%1").arg(menuId)};
+    if (!next.builtin && preparationState(next.plugin.id) != PreparationState::Ready)
+        return {Error::Busy, QStringLiteral("插件尚未准备就绪")};
+    const QScopedValueRollback<bool> guard(m_busy, true);
+    notifyTransition(next, commit);
+    return {};
+}
+
+} // namespace vusiif::ztgui::plugins

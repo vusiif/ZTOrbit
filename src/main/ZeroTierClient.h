@@ -12,7 +12,7 @@
 class QWidget;
 class QTemporaryDir;
 
-namespace ZeroTier {
+namespace vusiif::ztgui::zerotier {
 struct ServiceStatus { bool exists = false; bool running = false; bool known = true; };
 ServiceStatus serviceStatus();
 QString matchingMoonFile(const QString &networkId);
@@ -40,7 +40,6 @@ struct PowerShellInvocation {
 PowerShellInvocation preparePowerShell(const QString &script);
 void command(QObject *owner, const QStringList &arguments,
              std::function<void(bool, const QString &)> finished);
-}
 
 // Each poll owns one process. Slow requests never overlap or block the UI.
 class JsonPoller : public QObject {
@@ -62,3 +61,5 @@ private:
     QString m_lastFailure;
     void failed(const QString &message);
 };
+
+} // namespace vusiif::ztgui::zerotier

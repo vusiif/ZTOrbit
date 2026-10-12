@@ -1,0 +1,19 @@
+[Unit]
+Description=ZTGUI room voice relay
+After=network-online.target zerotier-one.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+ExecStart=/opt/ztgui-voice/bin/ztgui-voice-server --listen 10.10.10.1 --tcp-port 18100 --udp-port 18100
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

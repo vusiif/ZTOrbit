@@ -14,6 +14,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+namespace vusiif::ztgui::ui {
 ServiceTab::ServiceTab(MainWindow *mainWindow, QWidget *parent)
     : QWidget(parent), m_main(mainWindow)
 {
@@ -109,8 +110,8 @@ void ServiceTab::updateInstallation()
     const auto status = m_main->serviceStatus();
     const bool changed = status.exists != m_status.exists || status.running != m_status.running || status.known != m_status.known;
     m_status = status;
-    if (!status.known) { UiTransitions::setText(m_feedback, QStringLiteral("无法读取服务状态，请检查管理员权限。")); m_feedback->show(); }
-    else if (m_feedback->text() == QStringLiteral("无法读取服务状态，请检查管理员权限。")) { UiTransitions::setText(m_feedback, {}); m_feedback->hide(); }
+    if (!status.known) { vusiif::ztgui::ui::setText(m_feedback, QStringLiteral("无法读取服务状态，请检查管理员权限。")); m_feedback->show(); }
+    else if (m_feedback->text() == QStringLiteral("无法读取服务状态，请检查管理员权限。")) { vusiif::ztgui::ui::setText(m_feedback, {}); m_feedback->hide(); }
     // Never replace live menu actions underneath the pointer.
     if (changed || m_menu->actions().isEmpty()) updateButtons();
 }
@@ -133,15 +134,15 @@ void ServiceTab::changeService(const QString &action)
     if (m_busy) return;
     m_busy = true;
     updateButtons();
-    UiTransitions::setBusy(this, true);
-    UiTransitions::setText(m_feedback, {});
+    vusiif::ztgui::ui::setBusy(this, true);
+    vusiif::ztgui::ui::setText(m_feedback, {});
     m_feedback->hide();
     m_main->runService(action, [this](bool ok) {
         m_busy = false;
-        UiTransitions::setBusy(this, false);
+        vusiif::ztgui::ui::setBusy(this, false);
         updateInstallation();
         updateButtons();
-        UiTransitions::setText(m_feedback, ok ? QString() : QStringLiteral("操作失败，请查看 logs 文件夹中的本次启动日志。"));
+        vusiif::ztgui::ui::setText(m_feedback, ok ? QString() : QStringLiteral("操作失败，请查看 logs 文件夹中的本次启动日志。"));
         m_feedback->setVisible(!ok);
     });
 }
@@ -160,7 +161,7 @@ void ServiceTab::packageAction(bool uninstall)
 #endif
     const QString title = uninstall ? QStringLiteral("卸载 ZeroTier") : QStringLiteral("安装 ZeroTier");
     const QString text = uninstall
-        ? QStringLiteral("卸载 ZeroTier，并删除 %1 中的全部数据（包括节点身份和网络配置），确定继续？").arg(ZeroTier::dataDirectory())
+        ? QStringLiteral("卸载 ZeroTier，并删除 %1 中的全部数据（包括节点身份和网络配置），确定继续？").arg(vusiif::ztgui::zerotier::dataDirectory())
 #ifdef Q_OS_MACOS
         : QStringLiteral("从 ZeroTier 官方下载并安装 macOS 安装包，是否继续？");
 #else
@@ -174,16 +175,18 @@ void ServiceTab::packageAction(bool uninstall)
     if (confirmation.exec() != QMessageBox::Yes) return;
     m_busy = true;
     updateButtons();
-    UiTransitions::setBusy(this, true);
-    UiTransitions::setText(m_feedback, {});
+    vusiif::ztgui::ui::setBusy(this, true);
+    vusiif::ztgui::ui::setText(m_feedback, {});
     m_feedback->hide();
-    m_main->runElevatedScript(title, ZeroTier::packageScript(uninstall, winget), [this, uninstall](bool ok) {
+    m_main->runElevatedScript(title, vusiif::ztgui::zerotier::packageScript(uninstall, winget), [this, uninstall](bool ok) {
         m_busy = false;
-        UiTransitions::setBusy(this, false);
+        vusiif::ztgui::ui::setBusy(this, false);
         updateInstallation();
         updateButtons();
-        UiTransitions::setText(m_feedback, ok ? QString() : QStringLiteral("操作失败，请查看 logs 文件夹中的本次启动日志。"));
+        vusiif::ztgui::ui::setText(m_feedback, ok ? QString() : QStringLiteral("操作失败，请查看 logs 文件夹中的本次启动日志。"));
         m_feedback->setVisible(!ok);
 
     });
 }
+
+} // namespace vusiif::ztgui::ui

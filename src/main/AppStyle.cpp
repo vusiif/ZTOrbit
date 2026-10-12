@@ -21,14 +21,14 @@ public:
 };
 }
 
-void applyAppStyle(QApplication &app)
+void vusiif::ztgui::ui::applyAppStyle(QApplication &app)
 {
     static bool installed = false;
     if (!installed) { app.setStyle(new CleanFocusStyle); installed = true; }
     static bool connected = false;
     if (!connected) {
         QObject::connect(app.styleHints(), &QStyleHints::colorSchemeChanged, &app, [&app] {
-            if (QSettings().value("appearance/theme", "system").toString() == "system") applyAppStyle(app);
+            if (QSettings().value("appearance/theme", "system").toString() == "system") vusiif::ztgui::ui::applyAppStyle(app);
         });
         connected = true;
     }
@@ -77,16 +77,17 @@ void applyAppStyle(QApplication &app)
         QLabel#serviceStatusWarning { color: %10; }
         QPushButton#settingsButton { font-size: 24px; border: none; background: transparent; }
         QPushButton#settingsButton:hover { background: %9; }
-        QDialog#settingsPopup { background: %6; border: 1px solid %5; border-radius: 8px; }
+        QDialog#settingsPopup, QDialog#pluginsPopup, QDialog#pluginAboutPopup { background: %6; border: 1px solid %5; border-radius: 8px; }
         QPushButton#serviceAction { border-top-right-radius: 0; border-bottom-right-radius: 0; }
         QToolButton#serviceDropdown { border-top-left-radius: 0; border-bottom-left-radius: 0; padding: 0; }
         QLabel#sectionTitle { font-size: 16px; font-weight: 600; color: %2; }
-        QLabel#sidebarHint, QLabel#tableStatus, QLabel#moonEmptyHint { color: %3; font-size: 12px; }
+        QLabel#sidebarHint, QLabel#sidebarVersion, QLabel#tableStatus, QLabel#moonEmptyHint { color: %3; font-size: 12px; }
         QListWidget#navigation { background: transparent; border: none; }
         QListWidget#navigation::item { padding: 12px 8px; border-radius: 4px; }
         QListWidget#navigation::item:selected { background: %4; }
         QTreeWidget { border: 1px solid %5; background: %6; alternate-background-color: %7; }
         QTreeWidget::item:selected { background: %4; }
+        QTreeWidget#pluginList::item { min-height: 30px; }
         QScrollArea#zeroTierScroll { border: none; background: transparent; }
         QWidget#zeroTierContent { background: %11; }
         QHeaderView::section { background: %1; color: %8; padding: 9px 8px; border: none; border-right: 1px solid %5; }
@@ -102,6 +103,7 @@ void applyAppStyle(QApplication &app)
         QMenu { background: %6; color: %8; border: 1px solid %5; padding: 5px; }
         QMenu::item { padding: 8px 24px; border-radius: 3px; }
         QMenu::item:selected { background: %4; }
+        QMenu::item:disabled { color: %3; }
         QPushButton#confirmDelete { color: %10; border-color: %10; }
         QFrame#confirmCard { background: %6; border: 1px solid %5; border-radius: 8px; }
         QComboBox QAbstractItemView { background: %6; color: %8; selection-background-color: %4; }

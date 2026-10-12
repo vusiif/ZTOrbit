@@ -1,6 +1,6 @@
 #pragma once
 
-namespace ZtGui::Plugins {
+namespace vusiif::ztgui::api {
 inline constexpr int ApiMajor = @PROJECT_VERSION_MAJOR@;
 inline constexpr int ApiMinor = @PROJECT_VERSION_MINOR@;
 inline constexpr char ApiVersion[] = "@PROJECT_VERSION@";
@@ -10,4 +10,4 @@ inline constexpr bool isApiCompatible(int major, int minor)
 {
     return major == ApiMajor && minor == ApiMinor;
 }
-} // namespace ZtGui::Plugins
+} // namespace vusiif::ztgui::api

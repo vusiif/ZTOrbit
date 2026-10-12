@@ -9,6 +9,7 @@ class QPushButton;
 class QVBoxLayout;
 class QDialog;
 
+namespace vusiif::ztgui::ui {
 struct TableRow {
     QString id;
     QStringList cells; // Name is inserted separately as the first column.
@@ -61,3 +62,5 @@ private:
     bool m_contentSized = false;
     void updateContentHeight();
 };
+
+} // namespace vusiif::ztgui::ui

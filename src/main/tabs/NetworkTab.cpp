@@ -23,6 +23,7 @@
 #include <memory>
 #include <QVBoxLayout>
 
+namespace vusiif::ztgui::ui {
 NetworkTab::NetworkTab(MainWindow *mainWindow, QWidget *parent)
     : DataTable("networks", {"名称", "网络 ID", "状态", "分配的 IP"}, parent, true, false), m_main(mainWindow)
 {
@@ -82,7 +83,7 @@ NetworkTab::NetworkTab(MainWindow *mainWindow, QWidget *parent)
             QApplication::clipboard()->setText(addresses.join("\n"));
         });
         copyIp->setEnabled(!addresses.isEmpty());
-        const QString moon = ZeroTier::matchingMoonFile(id);
+        const QString moon = vusiif::ztgui::zerotier::matchingMoonFile(id);
         if (!moon.isEmpty()) menu.addAction(QStringLiteral("导出中转站"), this, [this, id, moon] { exportMoon(id, moon); });
         menu.addAction(QStringLiteral("退出网络"), this, [this, id] {
             if (QMessageBox::question(this, QStringLiteral("退出网络"), QStringLiteral("退出网络 %1？").arg(id),
@@ -90,16 +91,16 @@ NetworkTab::NetworkTab(MainWindow *mainWindow, QWidget *parent)
         });
         menu.exec(tree()->viewport()->mapToGlobal(position));
     });
-    m_poller = new JsonPoller(this, "listnetworks");
-    connect(m_poller, &JsonPoller::availabilityChanged, this, &DataTable::setAvailability);
-    connect(m_poller, &JsonPoller::updated, this, [this](const QJsonDocument &document) {
+    m_poller = new vusiif::ztgui::zerotier::JsonPoller(this, "listnetworks");
+    connect(m_poller, &vusiif::ztgui::zerotier::JsonPoller::availabilityChanged, this, &DataTable::setAvailability);
+    connect(m_poller, &vusiif::ztgui::zerotier::JsonPoller::updated, this, [this](const QJsonDocument &document) {
         QList<TableRow> rows;
         for (const auto &network : document.array()) {
             const auto object = network.toObject();
             const QString id = object["nwid"].toString(object["id"].toString());
             QStringList addresses;
             for (const auto &address : object["assignedAddresses"].toArray()) addresses << address.toString();
-            rows.append({id, {id, ZeroTier::translate(object["status"].toString()),
+            rows.append({id, {id, vusiif::ztgui::zerotier::translate(object["status"].toString()),
                 addresses.isEmpty() ? QStringLiteral("—") : addresses.join(", ")}, object});
         }
         setRows(rows);
@@ -163,7 +164,7 @@ MoonTab *NetworkTab::moonTab()
         m_moon = new MoonTab(m_main, m_moonDialog);
         layout->addWidget(m_moon);
         connect(m_moon, &MoonTab::busyChanged, this, [this](bool busy) {
-            if (m_joinDialog) UiTransitions::setBusy(m_joinDialog, busy);
+            if (m_joinDialog) vusiif::ztgui::ui::setBusy(m_joinDialog, busy);
         });
     }
     return m_moon;
@@ -189,7 +190,7 @@ void NetworkTab::exportMoon(const QString &networkId, const QString &path)
         return;
     }
     const QByteArray contents = source.read(4 * 1024 * 1024 + 1);
-    const QByteArray bundle = NetworkBundle::encode({networkId, QFileInfo(path).fileName(), contents});
+    const QByteArray bundle = vusiif::ztgui::zerotier::bundle::encode({networkId, QFileInfo(path).fileName(), contents});
     QSaveFile output(destination);
     if (source.error() != QFileDevice::NoError || bundle.isEmpty() || !output.open(QIODevice::WriteOnly)
         || output.write(bundle) != bundle.size() || !output.commit())
@@ -218,10 +219,10 @@ void NetworkTab::importConfigurationFile(const QString &source)
         QMessageBox::warning(parent, QStringLiteral("导入失败"), QStringLiteral("无法读取配置包。"));
         return;
     }
-    NetworkBundle::Configuration configuration;
+    vusiif::ztgui::zerotier::bundle::Configuration configuration;
     QString error;
-    const QByteArray bytes = input.read(NetworkBundle::MaxFileSize + 1);
-    if (input.error() != QFileDevice::NoError || !NetworkBundle::decode(bytes, configuration, error)) {
+    const QByteArray bytes = input.read(vusiif::ztgui::zerotier::bundle::MaxFileSize + 1);
+    if (input.error() != QFileDevice::NoError || !vusiif::ztgui::zerotier::bundle::decode(bytes, configuration, error)) {
         QMessageBox::warning(parent, QStringLiteral("导入失败"), error.isEmpty() ? QStringLiteral("配置包读取失败。") : error);
         return;
     }
@@ -254,13 +255,13 @@ void NetworkTab::operate(const QString &action, const QString &id, bool moonConf
     }
     m_operating = true;
     // Capture the dialog's enabled state before disabling its parent page.
-    if (m_joinDialog) UiTransitions::setBusy(m_joinDialog, true);
-    UiTransitions::setBusy(this, true);
+    if (m_joinDialog) vusiif::ztgui::ui::setBusy(m_joinDialog, true);
+    vusiif::ztgui::ui::setBusy(this, true);
     const QPointer<AnimatedDialog> submittedDialog = m_joinDialog;
-    ZeroTier::command(this, {action, id}, [this, action, submittedDialog, moonConfigured](bool ok, const QString &output) {
+    vusiif::ztgui::zerotier::command(this, {action, id}, [this, action, submittedDialog, moonConfigured](bool ok, const QString &output) {
         m_operating = false;
-        UiTransitions::setBusy(this, false);
-        if (submittedDialog) UiTransitions::setBusy(submittedDialog, false);
+        vusiif::ztgui::ui::setBusy(this, false);
+        if (submittedDialog) vusiif::ztgui::ui::setBusy(submittedDialog, false);
         m_main->appendOutput(output + '\n');
         if (!ok) QMessageBox::warning(submittedDialog ? static_cast<QWidget *>(submittedDialog.data()) : this,
             QStringLiteral("操作失败"), (moonConfigured ? QStringLiteral("中转站已配置，但加入网络失败。可再次点击确认重试。\n") : QString())
@@ -271,3 +272,5 @@ void NetworkTab::operate(const QString &action, const QString &id, bool moonConf
         }
     });
 }
+
+} // namespace vusiif::ztgui::ui

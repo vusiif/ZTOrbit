@@ -1,167 +1,156 @@
-# 左侧栏插件 API v0.2
+# 插件 API（开发代际 0.3）
 
-本 API 为插件贡献左侧菜单和对应的 Qt Widgets 页面提供统一入口。宿主按菜单 ID 导航，插件只声明菜单与页面工厂，不直接操作左侧列表或页面堆栈。
+公开 SDK 位于 `src/api/`，不依赖 `src/main/`。插件通过菜单定义和 Qt Widgets 页面工厂接入宿主，可选生命周期负责初始化、导航通知和资源释放；文件与 ZeroTier 工具由宿主注入。
 
-当前实现覆盖注册、校验、菜单排序、懒创建页面、页面缓存和注销清理。默认未注册扩展，界面仍只有 ZeroTier；设置中的“插件”入口仍待后续管理界面接入。
+## 命名空间与目录
 
-## 独立 SDK
-
-`src/api/` 只包含公开接口和 SDK 构建配置，不依赖 `src/main/`。`src/main/` 包含主程序、ZeroTier 业务与插件注册表，依赖 CMake 目标 `ZTGUI::Api`。API 目前是头文件 SDK，无需生成或链接额外的 API DLL。
-
-在仓库根目录独立配置并安装 SDK（不构建主程序）：
-
-```powershell
-cmake -S src/api -B cmake-build-api -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64"
-cmake --install cmake-build-api --prefix dist/ZTGUI-api-v0.2
-```
-
-安装目录包含 `include/ztgui/PluginApi.h`、生成的 `include/ztgui/ApiVersion.h` 和 `lib/cmake/ZTGUIPluginApi/`。插件开发者只需这份安装后的 SDK 及匹配的 Qt/编译工具链，无需主程序源码。源目录单独配置时仍从仓库根目录的 `VERSION` 读取版本。
-
-独立插件项目的 CMake 示例：
-
-```cmake
-cmake_minimum_required(VERSION 3.21.1)
-project(MyPlugin LANGUAGES CXX)
-find_package(ZTGUIPluginApi 0.2 EXACT CONFIG REQUIRED)
-add_library(my_plugin MODULE Plugin.cpp)
-target_link_libraries(my_plugin PRIVATE ZTGUI::Api)
-```
-
-配置插件时，将安装后的 SDK 和 Qt SDK 路径加入 `CMAKE_PREFIX_PATH`。插件源码使用 `#include <ztgui/PluginApi.h>`；该目标会提供头文件路径、C++17 要求及 Qt Widgets 依赖。这个构建示例仅说明依赖方式；外部 DLL 的入口协议及宿主加载器尚未实现。
-
-主程序当前为 `0.2.2`，API 为 `0.2`。正式发布前首段固定 0，第二段表示核心/API 代际，第三段仅记录主程序非核心更新、修复和优化。API 版本常量 `ApiMajor`、`ApiMinor`、`ApiVersion` 和 CMake 包版本都从 `VERSION` 前两段生成。插件必须精确匹配 API 两段；`0.2.x` 主程序更新不改变 API 兼容性。Qt、编译器、架构和运行库的二进制兼容性仍需单独满足。
-
-## 层次与边界
-
-```text
-插件定义 / 后续插件加载器
-           │ registerPlugin(PluginDefinition)
-           ▼
-     PluginRegistry
-           │ menusChanged / menus() / page(menuId, parent)
-           ▼
-       MainWindow
-           │ 稳定 ID → 左侧菜单与页面
-           ▼
-       QWidget 页面
-```
-
-| 文件 | 职责 |
-| --- | --- |
-| `src/api/include/ztgui/PluginApi.h` | 公开数据结构、API 版本、错误类型与页面工厂签名 |
-| `src/main/plugins/PluginRegistry.h/.cpp` | 校验与保存定义、菜单查询、页面创建与资源释放 |
-| `src/main/MainWindow.h/.cpp` | 侧栏展示、按 ID 切换、动画与失败回退 |
-
-`PluginDefinition` 是宿主进程内的 C++ API，当前适用于随程序编译的扩展。它包含 Qt 类型和 `std::function`，不能作为跨进程协议或稳定的 DLL ABI。API 版本用于能力兼容校验，不代表二进制兼容。
-
-项目已有静态 Qt 单 EXE 构建路径。外部插件的发现、安装、启用状态、动态库加载、依赖检查和卸载策略属于后续加载层；本次没有加入 DLL 扫描或热卸载。后续加载器应将插件转换成相同的 `PluginDefinition`，并维持代码与资源的生命周期。若需要独立进程或脚本插件，应增加序列化协议和宿主页面适配器，不能直接传递 QWidget 或页面工厂。
-
-## 插件和菜单定义
-
-| 类型 | 字段 | 约定 |
+| 命名空间 | 职责 | 位置 |
 | --- | --- | --- |
-| `PluginInfo` | `id` | 全局唯一；建议使用反向域名，例如 `com.example.monitor` |
-| | `name`, `version` | 非空显示名称、插件自身的版本字符串 |
-| | `apiMajor`, `apiMinor` | 默认 0.2；预发布阶段两段必须与宿主完全一致，主程序后缀版本不参与 API 校验 |
-| `MenuContribution` | `id` | 插件内唯一，例如 `overview` |
-| | `title` | 非空菜单标题；允许与其他菜单重名 |
-| | `icon`, `toolTip` | 可选图标、提示文字 |
-| | `order` | 默认 100；数值越小越靠前 |
-| | `createPage` | 必填；`QWidget *(QWidget *parent)` 页面工厂 |
-| `PluginDefinition` | `info`, `menus` | 插件信息和至少一个菜单 |
+| `vusiif::ztgui::api` | 插件信息、菜单、结果、入口及生命周期接口 | `src/api/include/ztgui/` |
+| `vusiif::ztgui::util` | 文件、ZeroTier 查询、宿主服务和取消工具 | 公开定义在 `src/api/`，实现位于 `src/main/` |
+| `vusiif::ztgui::plugins` | 动态加载器、注册表、准备状态及清理 | `src/main/plugins/` |
+| `vusiif::ztgui::ui` | 主窗口、业务页面、表格、主题和过渡控件 | `src/main/` |
+| `vusiif::ztgui::zerotier` | ZeroTier 客户端访问、轮询及配置包 | `src/main/` |
+| `vusiif::ztgui::platform` | 平台脚本与授权辅助 | `src/main/` |
+| `vusiif::ztgui::voice_chat` | 语音客户端、服务端及共享协议 | `src/plugins/voice-chat/` |
 
-插件 ID 和本地菜单 ID 都匹配 `[a-z0-9][a-z0-9._-]{0,127}`，不允许 `/`、空白或中文。全局菜单 ID 由宿主拼接为 `pluginId/menuId`，例如 `com.example.monitor/overview`。展示标题可以使用中文。
+头文件路径仍使用 `<ztgui/...>`，CMake 目标仍为 `ZTGUI::Api`。不提供旧命名空间别名。宿主的 `PluginRegistry`、`PluginLoader` 和 `HostServicesImpl` 不属于公开 SDK，插件不能包含其实现头文件。
 
-内置 ZeroTier 固定为 `builtin/zerotier`，始终放在第一项。`builtin` 是保留的插件 ID，不能注册；内置页面也不属于插件注册表，不能通过注销插件删除。插件菜单按 `order` 排序，同序号时按全局菜单 ID 排序，与注册顺序无关。
+## 当前入口与生命周期
 
-## 宿主接口
-
-通过 `MainWindow::pluginRegistry()` 获取该窗口的注册表。所有接口和信号都在 GUI 线程使用；注册表也应在 GUI 线程创建。
-
-| 接口 | 行为 |
-| --- | --- |
-| `registerPlugin(PluginDefinition)` → `Result` | 按值保存定义和工厂捕获；完整校验后一次性注册；失败不添加任何菜单 |
-| `unregisterPlugin(pluginId)` → `Result` | 同步销毁已创建的页面，再释放工厂和定义，最后通知菜单变化 |
-| `plugins()` → `QList<PluginInfo>` | 按插件 ID 排序的信息快照 |
-| `menus()` → `QList<RegisteredMenu>` | 排序后的菜单快照；包含全局 ID、插件 ID、本地 ID 和显示字段 |
-| `page(menuId, parent)` → `PageResult` | 首次调用创建，之后返回缓存页面；缓存被销毁后允许重新创建 |
-| `menusChanged()` | 注册、注销成功后的信号；宿主重新查询菜单，并保持当前菜单 ID |
-| `pageCreationFailed(menuId, message)` | 工厂返回无效控件或抛出异常时的信号；主窗口写日志 |
-
-注册重复插件 ID 会失败。需要替换插件时，先注销，再注册新的定义；当前没有在线修改菜单的接口。
-
-`Result::ok()` 判断成功；`Result::error` 是可供程序判断的错误码，`message` 是可展示或记录的原因。`PageResult` 包含 `page` 和 `result`，失败时 `page == nullptr`。
-
-| 错误码 | 含义 |
-| --- | --- |
-| `None` | 成功 |
-| `WrongThread` | 注册、注销或创建页面不在 GUI 线程 |
-| `Busy` | 页面工厂或清理期间重入注册、注销、页面创建 |
-| `InvalidPlugin` | 插件 ID、名称或版本无效，或使用保留 ID |
-| `IncompatibleApi` | API 主版本或核心版本与宿主不一致 |
-| `DuplicatePlugin` | 插件 ID 已注册 |
-| `InvalidMenu` | 菜单为空、ID 无效／重复、标题为空或工厂缺失 |
-| `NotFound` | 插件或菜单不存在 |
-| `PageCreationFailed` | 页面创建失败，或没有有效的父控件 |
-
-## 页面与生命周期
-
-1. 注册时不创建页面；首次点击菜单才执行页面工厂。
-2. 工厂必须返回 `new` 创建的、直接由传入 `parent` 持有的控件。不能返回父控件、借用宿主已有控件或与其他菜单共用页面。页面内部的布局和滚动由插件负责。
-3. 同一菜单在一个注册表中缓存一个页面，供同一宿主使用。切换菜单不会销毁页面，输入和滚动位置由控件保留。
-4. 工厂应快速完成 UI 构造，耗时操作使用异步方式。工厂或页面析构期间不能重入修改注册表；这类调用返回 `Busy`。
-5. 工厂返回空指针、无效控件或抛出异常时，宿主保留之前的页面和选中菜单。下次点击允许重试。返回已有控件时不销毁该控件；工厂抛出异常前创建的临时资源由工厂负责清理。
-6. 注销插件时，页面同步销毁，页面工厂的捕获随后释放。插件代码、共享资源或未来加载器句柄必须至少活到这两步完成，不能只依赖注册调用时的栈变量。
-7. 注销当前显示的插件后，导航回到 ZeroTier；注销其他插件或插入更靠前的菜单时，当前页面按 ID 保持。
-8. 窗口关闭时先销毁插件页面和工厂，再销毁主窗口 UI。异步回调应使用 QObject 上下文或 QPointer，确保页面销毁后不继续访问控件。
-
-插件运行在宿主进程中，这个 API 不提供权限隔离。页面工厂只接收父控件，宿主不通过该接口提供 ZeroTier 命令执行、管理员脚本或其他业务服务。后续业务能力应以明确的服务接口另行设计。
-
-## 最小接入示例
-
-下面代码由宿主启动代码或后续加载器调用，定义两个菜单。插件页面实现只需要公开 API；示例中的 `MainWindow` 用于演示宿主注册入口。
+`PluginInterface.h` 的入口位于 `vusiif::ztgui::api`：
 
 ```cpp
-#include "MainWindow.h"
-#include "plugins/PluginRegistry.h"
-#include <QLabel>
-#include <utility>
+class PluginInterface {
+public:
+    virtual ~PluginInterface() = default;
+    virtual PluginDefinition definition() = 0;
+};
+```
 
-ZtGui::Plugins::Result registerMonitor(MainWindow &window)
-{
-    using namespace ZtGui::Plugins;
-    PluginDefinition plugin;
-    plugin.info = {"com.example.monitor", QStringLiteral("网络监控"), "1.0.0"};
+`PluginLifecycle.h` 的可选生命周期位于同一命名空间，全部有默认实现，插件只覆盖需要的方法：
 
-    MenuContribution overview;
-    overview.id = "overview";
-    overview.title = QStringLiteral("网络监控");
-    overview.toolTip = QStringLiteral("查看连接监控");
-    overview.order = 100;
-    overview.createPage = [](QWidget *parent) -> QWidget * {
-        return new QLabel(QStringLiteral("网络监控概览"), parent);
+```cpp
+class PluginLifecycleInterface {
+public:
+    virtual ~PluginLifecycleInterface() = default;
+    virtual CreateTask onCreate(util::HostServices &services,
+                                const util::CancellationToken &cancellation);
+    virtual void onDestroy();
+    virtual void onEnteredFrom(const MenuLocation &previous);
+    virtual void onExitedTo(const MenuLocation &next);
+};
+
+struct CreateResult { bool success = true; QString message; };
+using CreateTask = std::function<CreateResult()>;
+```
+
+初始化只有这一个 `onCreate` 签名。旧的初始化/预处理接口、单参数重载、结果转换与入口优先级分支已移除。
+
+所有钩子在 GUI 线程调用；`onCreate()` 在成功注册后调用一次，快速返回有限时间的后台准备任务。默认空任务表示立即就绪。实际任务由独立线程池执行，最多同时运行2项；任务不能访问GUI对象或作为永久录音、视频、收包循环。`CreateResult{false, message}` 或异常表示失败，菜单保持禁用并显示原因。
+
+`MenuLocation` 包含 `PluginInfo plugin`、`RegisteredMenu menu` 和 `bool builtin`，可区分同一插件的多个菜单。内置 ZeroTier 使用 `builtin/zerotier`，`builtin == true`。
+
+每次成功改变菜单ID，按 `A.onExitedTo(B) → 页面切换 → B.onEnteredFrom(A)` 在GUI线程执行。同一插件不同菜单也触发；重复选择当前菜单、列表重建和页面创建失败不触发。菜单切换保留页面与任务，是否暂停预览、语音或传输由插件决定。钩子应快速返回，重入导航或注册表修改被拒绝，异常记录日志后继续切换。
+
+## 取消与关闭
+
+`vusiif::ztgui::util::CancellationToken` 可复制且线程安全。入口参数的令牌必须按值捕获到返回任务，不能保存参数引用。宿主关闭或内部卸载时请求取消，任务在步骤之间检查 `isCancellationRequested()`，清理部分资源后返回。`CancellationSource` 提供 `token()` 和幂等的 `requestCancellation()`，由宿主持有。
+
+```cpp
+api::CreateTask onCreate(util::HostServices &services,
+                         const util::CancellationToken &cancellation) override {
+    host = &services;
+    return [state = sharedState, cancellation] {
+        if (cancellation.isCancellationRequested()) return api::CreateResult{false, "cancelled"};
+        state->prepareFirstStep();
+        if (cancellation.isCancellationRequested()) return api::CreateResult{false, "cancelled"};
+        state->prepareSecondStep();
+        return api::CreateResult{};
     };
-
-    MenuContribution history;
-    history.id = "history";
-    history.title = QStringLiteral("连接记录");
-    history.order = 110;
-    history.createPage = [](QWidget *parent) -> QWidget * {
-        return new QLabel(QStringLiteral("连接历史"), parent);
-    };
-
-    plugin.menus = {overview, history};
-    return window.pluginRegistry()->registerPlugin(std::move(plugin));
 }
 ```
 
-移除该插件：
+正常关闭窗口时，宿主暂不接受第一次关闭事件，禁用新操作，显示退出状态及待结束的插件名称；请求初始化取消，跳过未开始的任务。完成通知和20ms非阻塞线程池检查推进退出，GUI事件循环保持运行。重复关闭只发起一次停机，超过5秒显示等待较长提示；任务真正结束后才关闭窗口。
+
+清理顺序为：请求取消 → 确认任务结束 → 退出当前插件菜单 → 销毁页面和工厂 → 取消服务查询 → `onDestroy()` → 销毁插件根对象并卸载库。初始化失败、取消或未执行时也会清理生命周期，`onDestroy()` 应允许资源尚未准备或仅部分准备。
+
+取消不能强行打断不可取消的第三方调用，耗时IO应有自己的超时或取消方式。页面析构和 `onDestroy()` 仍须及时同步停止自身业务线程，不能在DLL卸载后留下线程、回调或函数对象。直接析构加载器或绕过窗口的quit路径保留阻塞等待兜底。长期业务的异步停机尚待扩展。
+
+宿主内部 `PluginLoader::requestShutdown()` 非阻塞，`shutdownProgress(QStringList)` 报告待结束的插件名，`shutdownFinished()` 表示初始化和线程池已结束。调用者须保持加载器和注册表存活至完成，再执行析构清理。内部单插件 `unload(pluginId, registry)` 仍同步等待，整体停机期间拒绝扫描和卸载。当前没有目录监听或热加载管理界面。
+
+## 数据结构与约束
+
+| 类型 | 字段/签名 | 约定 |
+| --- | --- | --- |
+| `PluginInfo` | `id`, `name`, `version`, `apiMajor`, `apiMinor` | ID全局唯一；名称与版本非空，API字段默认从SDK生成常量取得 |
+| `MenuContribution` | `id`, `title`, `icon`, `toolTip`, `order`, `createPage` | 本地ID唯一，标题非空，工厂必填；默认order为100 |
+| `PluginDefinition` | `PluginInfo info`, `QList<MenuContribution> menus` | 至少一个菜单 |
+| `RegisteredMenu` | `id`, `pluginId`, `localId`及显示字段 | 全局ID为 `pluginId/menuId` |
+| `Result` | `Error error`, `QString message`, `ok()` | 错误码可供程序判断，message供展示或日志 |
+| `PageResult` | `QWidget *page`, `Result result` | 失败时page为空 |
+| `PageFactory` | `std::function<QWidget *(QWidget *parent)>` | 在GUI线程返回新建、由parent直接持有的控件 |
+
+插件ID与本地菜单ID匹配 `[a-z0-9][a-z0-9._-]{0,127}`。`builtin` 为保留插件ID，内置ZeroTier始终位于首项；插件菜单按order再按全局ID排序。
+
+注册不创建页面，首次访问才调用工厂，一个菜单缓存一个页面。切换菜单保留输入及滚动状态；缓存页面销毁后可重建。工厂不能返回父控件、借用已有控件或与其他菜单共用页面，不能跨宿主复用。工厂失败保留原页面和选中菜单，下次访问可重试。页面析构先同步停止自己的线程，随后才释放工厂捕获和插件库。
+
+错误码：`None`、`WrongThread`、`Busy`、`InvalidPlugin`、`IncompatibleApi`、`DuplicatePlugin`、`InvalidMenu`、`NotFound`、`PageCreationFailed`。注册、注销、创建页面和导航期间的线程/重入检查由宿主注册表执行。
+
+## 宿主工具
+
+工具定义都位于 `vusiif::ztgui::util`，由 `onCreate` 注入 `HostServices`。服务为借用引用，可保存指针并交给页面使用，有效至 `onDestroy()` 返回，不能delete。公开SDK只有抽象定义，宿主提供实现。
+
+### 文件
 
 ```cpp
-const auto result = window.pluginRegistry()->unregisterPlugin("com.example.monitor");
-if (!result.ok()) window.appendOutput(result.message + '\n');
+FileResult readFile(const QString &relativePath);
+FileResult writeFile(const QString &relativePath, const QByteArray &data);
 ```
+
+通过 `host->files()` 使用。`FileResult` 包含 `QByteArray data`、`QString error` 和 `ok()`；空文件读取成功，写入成功data为空。字节不做编码转换。
+
+根目录为 `applicationDirPath()/plugins-data/<PluginInfo.name>/`，由宿主绑定。例如程序为 `C:/ztgui/ZTGUI.exe`、插件名为 `chat`，读取 `file1.txt` 就是 `C:/ztgui/plugins-data/chat/file1.txt`；插件不再传名称前缀。现有语音插件使用 `plugins-data/语音聊天/`。
+
+名称支持中文和内部空格，但必须是普通目录名；非法路径字符、设备名、首尾空白、末尾句点、`.`/`..` 或空名会使文件操作返回错误。名称应稳定且唯一，同名插件共用目录，大小写差异不能保证跨平台分离；改名后使用新目录，迁移需明确数据归属。
+
+写入自动创建目录并通过 `QSaveFile` 原子替换；文件操作可在后台线程调用，宿主串行化操作。拒绝绝对路径、`..`、盘符、链接/目录联接以及非普通文件，不能通过工具跨插件目录访问。权限不足或文件不存在通过error返回。整文件读写适合配置和小缓存，大文件需要流式IO。
+
+### ZeroTier
+
+```cpp
+using JsonCallback = std::function<void(const JsonResult &)>;
+void getZTInfo(QObject *context, JsonCallback completed);
+void getZTPeers(QObject *context, JsonCallback completed);
+void getZTNetworks(QObject *context, JsonCallback completed);
+void getZTMoons(QObject *context, JsonCallback completed);
+```
+
+通过 `host->zeroTier()` 使用，分别复用宿主CLI的 `-j info/listpeers/listnetworks/listmoons`、平台路径、授权和超时逻辑，不触发提权。`JsonResult` 包含 `QJsonDocument document`、`QString error` 和 `ok()`：Info为对象，其余为数组，保留原始字段。
+
+查询在GUI线程以有效GUI线程QObject上下文调用，回调异步在该线程执行；上下文销毁或卸载取消请求并释放回调。命令失败、超时、无效JSON及错误类型均返回错误。错误线程或空上下文被拒绝并记警告，不调用回调。`onDestroy()` 阶段查询已关闭，但仍可同步保存文件。
+
+插件运行在宿主进程中，不提供权限隔离。SDK不提供任意命令或管理员脚本接口。语音、桌面共享、文件传输的开发条件和待补充公共能力见[插件能力评估](plugin-api-assessment.md)。
+
+## 独立构建与兼容边界
+
+`ZTGUI::Api` 是头文件SDK，提供C++17和Qt Widgets依赖，没有API DLL。独立安装：
+
+```powershell
+cmake -S src/api -B cmake-build-api -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64"
+cmake --install cmake-build-api --prefix dist/ZTGUI-api-v0.3
+```
+
+独立插件使用 `find_package(ZTGUIPluginApi 0.3 EXACT CONFIG REQUIRED)` 并链接 `ZTGUI::Api`，只需安装后的SDK和匹配工具链，不需要宿主源码。API常量及包版本从根 `VERSION` 前两段生成；JSON使用 `{"apiVersion":"@ZTGUI_API_VERSION@"}`，不硬编码另一份版本。
+
+应用版本为 `0.3.1`，API代际从 `VERSION` 派生为 `0.3`。此次重构改变命名空间及生命周期签名，旧插件须使用API 0.3重新编译。入口IID为 `vusiif.ztgui.api.PluginInterface/1.0`，生命周期IID为 `vusiif.ztgui.api.PluginLifecycleInterface/1.0`；旧IID不会实例化，API 0.2也不再兼容。更新SDK时会清理已废弃的头文件，程序版本仍由开发者指定。
+
+统一使用动态Qt，宿主与插件须匹配Qt、编译器、架构、运行库及构建模式。Qt类型和std::function属于进程内C++接口，不承诺跨工具链ABI或跨进程协议。
+
+启动扫描程序旁 `plugins/` 的直接子文件，按文件名排序，先检查IID和API数字，再实例化并注册。Windows为 `ZTGUI.exe` 同级plugins；macOS为 `ZTGUI.app/Contents/MacOS/plugins/`。缺失目录正常启动，其他库忽略，失败记日志并继续。更新插件退出后替换并重启，运行依赖须与发行包共同部署。
+
+最小独立插件、完整构建及部署流程见[插件开发技能](../.agent/skills/ztgui-plugin-dev/SKILL.md)。插件自身文档由其项目的docs目录维护。
 
 ## 验证
 
-回归测试覆盖原子注册、API 版本拒绝、命名空间与排序、懒创建、状态缓存、菜单位置变化、当前／非当前插件移除、工厂失败重试、重入拒绝、页面所有权、后台线程拒绝和页面先于工厂资源销毁。测试插件只在测试中注册，不进入正式应用的默认导航。
+回归测试覆盖注册与API校验、菜单排序、懒创建/缓存、页面所有权、失败重试、重入与线程检查、退出/进入顺序、协作取消、队列跳过、GUI心跳、重复关闭、不可取消步骤与库销毁顺序、文件路径和二进制内容、JSON错误与上下文取消。旧IID拒绝测试确保旧库不会在新接口下被误实例化。测试辅助程序不进入发行包。

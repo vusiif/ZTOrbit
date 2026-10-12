@@ -4,7 +4,7 @@
 
 ## 构建
 
-在 Apple Silicon Mac 上安装 Xcode Command Line Tools、CMake 和支持 arm64 的 Qt 6.8 或更新 SDK。
+在 Apple Silicon Mac 上安装 Xcode Command Line Tools、CMake 和支持 arm64 的动态 Qt 6.8 或更新 SDK（包括 Multimedia）。
 Qt 6.8 的目标系统为 macOS 12 或更新版本；使用更新 Qt 时，以该 Qt SDK 的系统要求为准。
 
 若使用 Homebrew，可先执行：
@@ -26,7 +26,7 @@ bash scripts/build-macos.sh
 QT_ROOT="$HOME/Qt/6.8.3/macos" bash scripts/build-macos.sh
 ```
 
-脚本只构建 `arm64`，先运行 GUI 回归测试，再生成包含 Qt Frameworks 和插件的独立应用。
+脚本只构建 `arm64`，先运行 GUI 回归测试，再独立编译语音插件并生成包含 Qt Frameworks 和插件的独立应用。应用插件位于 `Contents/MacOS/plugins/`，与 Qt 自身后端插件目录分开；宿主已声明麦克风用途，首次入房时请求录音权限。
 输出文件：
 
 - `dist/macos-arm64/ZTGUI-arm64.dmg`

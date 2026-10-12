@@ -26,8 +26,9 @@
 #include <QVBoxLayout>
 #include <QWidgetAction>
 
+namespace vusiif::ztgui::ui {
 namespace {
-QString moonDirectory() { return ZeroTier::moonDirectory(); }
+QString moonDirectory() { return vusiif::ztgui::zerotier::moonDirectory(); }
 QString moonId(const QString &value)
 {
     return QRegularExpression("^[0-9a-fA-F]{1,16}$").match(value).hasMatch()
@@ -124,9 +125,9 @@ MoonTab::MoonTab(MainWindow *mainWindow, QWidget *parent)
         menu.exec(tree()->viewport()->mapToGlobal(position));
     });
     connect(tree(), &QTreeWidget::itemDoubleClicked, this, [this] { showDetails(); });
-    m_poller = new JsonPoller(this, "listmoons");
-    connect(m_poller, &JsonPoller::availabilityChanged, this, &DataTable::setAvailability);
-    connect(m_poller, &JsonPoller::updated, this, [this](const QJsonDocument &document) {
+    m_poller = new vusiif::ztgui::zerotier::JsonPoller(this, "listmoons");
+    connect(m_poller, &vusiif::ztgui::zerotier::JsonPoller::availabilityChanged, this, &DataTable::setAvailability);
+    connect(m_poller, &vusiif::ztgui::zerotier::JsonPoller::updated, this, [this](const QJsonDocument &document) {
         m_document = document;
         refreshFiles();
     });
@@ -213,7 +214,7 @@ void MoonTab::importFiles(const QStringList &sources, std::function<void(bool)> 
     for (const auto &source : sources) {
         const QFileInfo file(source);
         if (!file.isFile() || file.suffix().compare("moon", Qt::CaseInsensitive) != 0) continue;
-        const QString destination = QDir(ZeroTier::moonWriteDirectory()).filePath(file.fileName());
+        const QString destination = QDir(vusiif::ztgui::zerotier::moonWriteDirectory()).filePath(file.fileName());
         if (file.absoluteFilePath().compare(destination, Qt::CaseInsensitive) == 0) continue;
         const QString key = file.fileName().toLower();
         if (submitted.contains(key) || QFileInfo::exists(QDir(moonDirectory()).filePath(file.fileName()))) {
@@ -228,13 +229,13 @@ void MoonTab::importFiles(const QStringList &sources, std::function<void(bool)> 
     m_busy = true;
     emit busyChanged(true);
     m_add->setEnabled(false);
-    UiTransitions::setBusy(this, true);
-    const QString script = ZeroTier::moonImportScript(copies);
+    vusiif::ztgui::ui::setBusy(this, true);
+    const QString script = vusiif::ztgui::zerotier::moonImportScript(copies);
     m_main->runElevatedScript(QStringLiteral("添加 Moon 并重启服务"), script, [this, finished, messageParent](bool ok) {
         m_busy = false;
         emit busyChanged(false);
         m_add->setEnabled(true);
-        UiTransitions::setBusy(this, false);
+        vusiif::ztgui::ui::setBusy(this, false);
         refreshFiles();
         if (!ok) QMessageBox::warning(messageParent ? messageParent.data() : this, QStringLiteral("添加 Moon"), QStringLiteral("文件复制或服务启动未完成，请查看 logs 文件夹中的本次启动日志。"));
         m_poller->refresh();
@@ -252,16 +253,18 @@ void MoonTab::deleteMoon(const QString &id)
     m_busy = true;
     emit busyChanged(true);
     m_add->setEnabled(false);
-    UiTransitions::setBusy(this, true);
-    const QString script = ZeroTier::moonDeleteScript(path);
+    vusiif::ztgui::ui::setBusy(this, true);
+    const QString script = vusiif::ztgui::zerotier::moonDeleteScript(path);
     m_main->runElevatedScript(QStringLiteral("删除 Moon 并重启服务"), script, [this, id, path](bool ok) {
         m_busy = false;
         emit busyChanged(false);
         m_add->setEnabled(true);
-        UiTransitions::setBusy(this, false);
+        vusiif::ztgui::ui::setBusy(this, false);
         if (!QFileInfo::exists(path)) QSettings().remove("names/moons/" + id);
         refreshFiles();
         if (!ok) QMessageBox::warning(this, QStringLiteral("删除 Moon"), QStringLiteral("文件删除或服务启动未完成，请查看 logs 文件夹中的本次启动日志。"));
         m_poller->refresh();
     });
 }
+
+} // namespace vusiif::ztgui::ui

@@ -9,6 +9,7 @@
 #include <QShowEvent>
 #include <QSettings>
 
+namespace vusiif::ztgui::ui {
 PeersTab::PeersTab(MainWindow *mainWindow, QWidget *parent)
     : DataTable("peers", {"名称", "角色", "连接", "IP 地址", "延迟（ms）"}, parent, true, false)
 {
@@ -36,9 +37,9 @@ PeersTab::PeersTab(MainWindow *mainWindow, QWidget *parent)
         menu.addAction(QStringLiteral("修改备注"), this, &DataTable::editRemark);
         menu.exec(tree()->viewport()->mapToGlobal(position));
     });
-    m_poller = new JsonPoller(this, "listpeers");
-    connect(m_poller, &JsonPoller::availabilityChanged, this, &DataTable::setAvailability);
-    connect(m_poller, &JsonPoller::updated, this, [this](const QJsonDocument &document) {
+    m_poller = new vusiif::ztgui::zerotier::JsonPoller(this, "listpeers");
+    connect(m_poller, &vusiif::ztgui::zerotier::JsonPoller::availabilityChanged, this, &DataTable::setAvailability);
+    connect(m_poller, &vusiif::ztgui::zerotier::JsonPoller::updated, this, [this](const QJsonDocument &document) {
         QList<TableRow> rows;
         for (const auto &peer : document.array()) {
             const auto object = peer.toObject();
@@ -55,8 +56,8 @@ PeersTab::PeersTab(MainWindow *mainWindow, QWidget *parent)
                 if (!address.isEmpty() && !addresses.contains(address)) addresses << address;
             }
             const QString id = object["address"].toString();
-            rows.append({id, {ZeroTier::translate(role),
-                latency < 0 ? QStringLiteral("不可达") : ZeroTier::translate(direct ? "DIRECT" : "RELAY"),
+            rows.append({id, {vusiif::ztgui::zerotier::translate(role),
+                latency < 0 ? QStringLiteral("不可达") : vusiif::ztgui::zerotier::translate(direct ? "DIRECT" : "RELAY"),
                 addresses.isEmpty() ? QStringLiteral("—") : addresses.join(", "),
                 latency < 0 ? QStringLiteral("—") : QString::number(latency)}, object});
         }
@@ -76,3 +77,5 @@ void PeersTab::showEvent(QShowEvent *event)
     DataTable::showEvent(event);
     m_poller->refresh();
 }
+
+} // namespace vusiif::ztgui::ui

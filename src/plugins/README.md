@@ -6,4 +6,6 @@
 
 创建、编写和独立编译插件的流程见 [插件开发 SKILL](../../.agent/skills/ztgui-plugin-dev/SKILL.md)，接口说明见 [插件 API 文档](../../docs/plugin-api.md)。
 
-目前 API 支持进程内注册；外部 DLL 的入口协议和自动加载器尚未实现。独立编译成功后，是否需要接入主程序按具体任务决定。
+动态插件实现公开 `PluginInterface` 并携带 SDK 生成的 API 元数据；ZTGUI 启动时扫描可执行文件旁的 `plugins/` 并注册菜单，增减插件后重启即可。
+
+语音插件维护在 `voice-chat/`，包含 `client-plugin/`、独立 Linux `server/` 和项目自维护的 `docs/`，构建与部署见 [语音文档](voice-chat/docs/voice-chat.md)。

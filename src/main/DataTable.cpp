@@ -26,6 +26,7 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 
+namespace vusiif::ztgui::ui {
 namespace {
 constexpr int BadgeRole = Qt::UserRole + 2;
 constexpr int ActionRowRole = Qt::UserRole + 3;
@@ -168,7 +169,7 @@ private:
 void appendJson(QTreeWidgetItem *parent, const QString &key, const QJsonValue &value)
 {
     auto *item = new QTreeWidgetItem(parent);
-    item->setText(0, ZeroTier::translate(key));
+    item->setText(0, vusiif::ztgui::zerotier::translate(key));
     item->setToolTip(0, key);
     if (value.isObject()) {
         const auto object = value.toObject();
@@ -178,7 +179,7 @@ void appendJson(QTreeWidgetItem *parent, const QString &key, const QJsonValue &v
         item->setText(1, QStringLiteral("%1 项").arg(array.size()));
         for (int i = 0; i < array.size(); ++i) appendJson(item, QString::number(i + 1), array[i]);
     } else {
-        item->setText(1, ZeroTier::jsonText(value));
+        item->setText(1, vusiif::ztgui::zerotier::jsonText(value));
         item->setToolTip(1, value.toVariant().toString());
     }
 }
@@ -425,7 +426,7 @@ void DataTable::setAvailability(bool available, const QString &message)
 
 void DataTable::updateStatus()
 {
-    UiTransitions::setText(m_status, m_available ? QString() : m_message);
+    vusiif::ztgui::ui::setText(m_status, m_available ? QString() : m_message);
 }
 
 QString DataTable::selectedId() const
@@ -526,3 +527,5 @@ void DataTable::showDetails()
     layout->addWidget(close, 0, Qt::AlignRight);
     m_details->show();
 }
+
+} // namespace vusiif::ztgui::ui

@@ -2,14 +2,14 @@
 #include <QDir>
 #include <QFileInfo>
 
-QString MacPlatform::quote(const QString &value)
+QString vusiif::ztgui::platform::quote(const QString &value)
 {
     QString escaped = value;
     escaped.replace("'", "'\\''");
     return "'" + escaped + "'";
 }
 
-QString MacPlatform::appleScriptString(const QString &value)
+QString vusiif::ztgui::platform::appleScriptString(const QString &value)
 {
     QString escaped = value;
     escaped.replace('\\', "\\\\");
@@ -19,7 +19,7 @@ QString MacPlatform::appleScriptString(const QString &value)
     return '"' + escaped + '"';
 }
 
-QString MacPlatform::serviceCommands(const QString &action, const QString &cli)
+QString vusiif::ztgui::platform::serviceCommands(const QString &action, const QString &cli)
 {
     const QString stop = "launchctl bootout system/com.zerotier.one >/dev/null 2>&1 || true\n";
     const QString probe = quote(cli) + (QFileInfo(cli).fileName().startsWith("zerotier-one") ? " -q" : "") + " -j info";
@@ -36,7 +36,7 @@ QString MacPlatform::serviceCommands(const QString &action, const QString &cli)
     return {};
 }
 
-QString MacPlatform::packageScript(bool uninstall, const QString &dataDirectory)
+QString vusiif::ztgui::platform::packageScript(bool uninstall, const QString &dataDirectory)
 {
     if (!uninstall) return QStringLiteral(R"SH(set -eu
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
@@ -59,7 +59,7 @@ trap '/bin/rm -rf -- "$temporary"' EXIT HUP INT TERM
         "  /bin/rm -rf -- \"$target\"\nfi\n";
 }
 
-QString MacPlatform::copyMoons(const QList<QPair<QString, QString>> &files, const QString &directory)
+QString vusiif::ztgui::platform::copyMoons(const QList<QPair<QString, QString>> &files, const QString &directory)
 {
     QString commands = "/bin/mkdir -p " + quote(directory) + "\n";
     for (const auto &file : files) {
@@ -70,7 +70,7 @@ QString MacPlatform::copyMoons(const QList<QPair<QString, QString>> &files, cons
     return commands;
 }
 
-QString MacPlatform::deleteMoon(const QString &path, const QString &directory)
+QString vusiif::ztgui::platform::deleteMoon(const QString &path, const QString &directory)
 {
     if (QFileInfo(path).absolutePath() != QDir(directory).absolutePath()
         || QFileInfo(path).suffix().compare("moon", Qt::CaseInsensitive) != 0) return "exit 1\n";
@@ -80,7 +80,7 @@ QString MacPlatform::deleteMoon(const QString &path, const QString &directory)
         "/bin/rm -f -- " + quote(path) + "\n";
 }
 
-QString MacPlatform::synchronizeSession(const QString &systemHome, const QString &sessionHome, unsigned int userId)
+QString vusiif::ztgui::platform::synchronizeSession(const QString &systemHome, const QString &sessionHome, unsigned int userId)
 {
     // The session contains only local API credentials and public signed Moon files.
     // Never copy identity.secret or print authentication contents to the log.

@@ -1,7 +1,8 @@
 #pragma once
 #include "../DataTable.h"
+namespace vusiif::ztgui::zerotier { class JsonPoller; }
+namespace vusiif::ztgui::ui {
 class MainWindow;
-class JsonPoller;
 class InfoTab : public DataTable {
     Q_OBJECT
 public:
@@ -9,5 +10,7 @@ public:
 protected:
     void showEvent(QShowEvent *event) override;
 private:
-    JsonPoller *m_poller;
+    vusiif::ztgui::zerotier::JsonPoller *m_poller;
 };
+
+} // namespace vusiif::ztgui::ui

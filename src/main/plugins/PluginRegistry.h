@@ -1,12 +1,15 @@
 #pragma once
 
 #include <ztgui/PluginApi.h>
+#include <ztgui/PluginLifecycle.h>
 #include <QObject>
 #include <QMap>
 #include <QPointer>
 #include <QWidget>
 
-namespace ZtGui::Plugins {
+namespace vusiif::ztgui::plugins {
+
+enum class PreparationState { Ready, Preparing, Failed };
 
 class PluginRegistry final : public QObject {
     Q_OBJECT
@@ -15,21 +18,33 @@ public:
     ~PluginRegistry() override;
 
     // Registration is atomic. Definitions and their factory captures are retained.
-    Result registerPlugin(PluginDefinition definition);
-    Result unregisterPlugin(const QString &pluginId);
-    QList<PluginInfo> plugins() const;
-    QList<RegisteredMenu> menus() const;
-    PageResult page(const QString &menuId, QWidget *parent);
+    api::Result registerPlugin(api::PluginDefinition definition, api::PluginLifecycleInterface *lifecycle = nullptr,
+                          bool preparing = false);
+    api::Result unregisterPlugin(const QString &pluginId);
+    QList<api::PluginInfo> plugins() const;
+    QList<api::RegisteredMenu> menus() const;
+    api::PageResult page(const QString &menuId, QWidget *parent);
+    api::Result setPreparationState(const QString &pluginId, PreparationState state, const QString &message = {});
+    PreparationState preparationState(const QString &pluginId) const;
+    QString preparationMessage(const QString &pluginId) const;
+    api::Result activateMenu(const QString &menuId, const std::function<void()> &commit = {});
 
 signals:
     void menusChanged();
     void pageCreationFailed(const QString &menuId, const QString &message);
 
 private:
-    Result checkMutation() const;
-    QMap<QString, PluginDefinition> m_plugins;
+    friend class PluginLoader;
+    api::Result checkMutation() const;
+    QMap<QString, api::PluginDefinition> m_plugins;
     QMap<QString, QPointer<QWidget>> m_pages;
+    QMap<QString, api::PluginLifecycleInterface *> m_lifecycles;
+    api::MenuLocation m_active;
+    api::MenuLocation location(const QString &menuId) const;
+    void notifyTransition(const api::MenuLocation &next, const std::function<void()> &commit = {});
+    struct Preparation { PreparationState state = PreparationState::Ready; QString message; };
+    QMap<QString, Preparation> m_preparation;
     bool m_busy = false;
 };
 
-} // namespace ZtGui::Plugins
+} // namespace vusiif::ztgui::plugins

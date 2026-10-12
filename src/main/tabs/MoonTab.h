@@ -3,12 +3,13 @@
 #include <QJsonDocument>
 #include <QHash>
 #include <functional>
-class MainWindow;
-class JsonPoller;
 class QPushButton;
 class QMimeData;
 class QDragEnterEvent;
 class QDropEvent;
+namespace vusiif::ztgui::zerotier { class JsonPoller; }
+namespace vusiif::ztgui::ui {
+class MainWindow;
 class MoonTab : public DataTable {
     Q_OBJECT
 public:
@@ -27,9 +28,11 @@ private:
     void refreshFiles();
     void deleteMoon(const QString &id);
     MainWindow *m_main;
-    JsonPoller *m_poller;
+    vusiif::ztgui::zerotier::JsonPoller *m_poller;
     QPushButton *m_add;
     QHash<QString, QString> m_files;
     QJsonDocument m_document;
     bool m_busy = false;
 };
+
+} // namespace vusiif::ztgui::ui

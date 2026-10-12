@@ -11,7 +11,7 @@ int main(int argc, char *argv[])
     app.setApplicationName("ZTGUI");
     app.setApplicationVersion(ZEROTIER_GUI_VERSION);
     app.setOrganizationName("ZeroTierGUI");
-    AppLog::initialize();
+    vusiif::ztgui::util::log::initialize();
     QSettings settings;
     if (settings.allKeys().isEmpty()) {
         const QSettings previous("ZeroTierGUI", "ZeroTier GUI");
@@ -22,8 +22,8 @@ int main(int argc, char *argv[])
 #else
     app.setWindowIcon(QIcon(QStringLiteral(":/assets/app-icon.ico")));
 #endif
-    applyAppStyle(app);
-    MainWindow window;
+    vusiif::ztgui::ui::applyAppStyle(app);
+    vusiif::ztgui::ui::MainWindow window;
     window.show();
     return app.exec();
 }
