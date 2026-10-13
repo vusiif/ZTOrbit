@@ -1,4 +1,5 @@
 #pragma once
+#include <QElapsedTimer>
 
 #include <QObject>
 #include <QJsonDocument>
@@ -9,7 +10,6 @@
 #include <QList>
 #include <QPair>
 
-class QWidget;
 class QTemporaryDir;
 
 namespace vusiif::ztgui::zerotier {
@@ -45,20 +45,25 @@ void command(QObject *owner, const QStringList &arguments,
 class JsonPoller : public QObject {
     Q_OBJECT
 public:
-    JsonPoller(QWidget *owner, const QString &command, bool object = false);
+    JsonPoller(QObject *owner, const QString &command, bool object = false);
     ~JsonPoller() override;
     void refresh();
+    void setActive(bool active);
+    bool isActive() const { return m_active; }
 signals:
     void updated(const QJsonDocument &document);
     void availabilityChanged(bool available, const QString &message);
 private:
-    QWidget *m_owner;
+    bool m_active = false;
     QString m_command;
     bool m_object;
     QProcess m_process;
     QTimer m_interval;
     QTimer m_timeout;
     QString m_lastFailure;
+    int m_failures = 0;
+    bool m_requestPending = false;
+    QElapsedTimer m_failurePeriod;
     void failed(const QString &message);
 };
 

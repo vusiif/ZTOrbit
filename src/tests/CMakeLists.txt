@@ -11,7 +11,7 @@ if(WIN32)
 endif()
 add_executable(instance_probe InstanceProbe.cpp "${ZTGUI_ROOT_DIR}/src/client/main/SingleInstance.cpp")
 target_include_directories(instance_probe PRIVATE "${ZTGUI_ROOT_DIR}/src/client/main")
-target_link_libraries(instance_probe PRIVATE Qt6::Widgets Qt6::Network)
+target_link_libraries(instance_probe PRIVATE Qt6::Gui Qt6::Network)
 set_target_properties(instance_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}")
 if(MSVC)
     target_compile_options(instance_probe PRIVATE /utf-8)
@@ -28,9 +28,12 @@ target_compile_definitions(app_log_probe PRIVATE ZEROTIER_GUI_VERSION="${ZEROTIE
 target_link_libraries(app_log_probe PRIVATE Qt6::Core)
 set_target_properties(app_log_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}")
 
-qt_add_executable(zerotier_gui_tests GuiTests.cpp ${ZTGUI_MAIN_SOURCES} ${ZTGUI_MAIN_HEADERS})
+qt_add_executable(zerotier_gui_tests QmlTests.cpp ${ZTGUI_MAIN_SOURCES} ${ZTGUI_MAIN_HEADERS})
 ztgui_configure_host(zerotier_gui_tests)
-target_link_libraries(zerotier_gui_tests PRIVATE Qt6::Test)
+target_link_libraries(zerotier_gui_tests PRIVATE Qt6::Test Qt6::Widgets)
+ztgui_add_qml_ui(zerotier_gui_tests)
+qt_add_resources(zerotier_gui_tests test_app_icon PREFIX "/" BASE "${ZTGUI_ROOT_DIR}/src/client"
+    FILES "${ZTGUI_ROOT_DIR}/src/client/assets/app-icon.png")
 target_compile_definitions(zerotier_gui_tests PRIVATE ZEROTIER_TESTING)
 add_dependencies(zerotier_gui_tests fake_zerotier_cli app_log_probe)
 add_dependencies(zerotier_gui_tests instance_probe)
@@ -41,6 +44,21 @@ endif()
 add_test(NAME gui_regressions COMMAND zerotier_gui_tests -platform offscreen -o test-results.txt,txt)
 set_tests_properties(gui_regressions PROPERTIES WORKING_DIRECTORY "${ZTGUI_BUILD_DIR}")
 set_tests_properties(gui_regressions PROPERTIES TIMEOUT 120)
+set_tests_properties(gui_regressions PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software")
+add_test(NAME gpu_acceleration_override COMMAND zerotier_gui_tests
+    --disable-gpu-acceleration gpuAccelerationCommandLineOverrideIsTemporary
+    -platform offscreen -o gpu-override-results.txt,txt)
+set_tests_properties(gpu_acceleration_override PROPERTIES
+    WORKING_DIRECTORY "${ZTGUI_BUILD_DIR}" TIMEOUT 30
+    ENVIRONMENT "QT_QUICK_BACKEND=software")
+
+qt_add_executable(core_tests CoreTests.cpp ${ZTGUI_MAIN_SOURCES} ${ZTGUI_MAIN_HEADERS})
+ztgui_configure_host(core_tests)
+target_link_libraries(core_tests PRIVATE Qt6::Test Qt6::Widgets)
+target_compile_definitions(core_tests PRIVATE ZEROTIER_TESTING)
+add_dependencies(core_tests fake_zerotier_cli app_log_probe instance_probe)
+add_test(NAME core_regressions COMMAND core_tests -platform offscreen)
+set_tests_properties(core_regressions PROPERTIES WORKING_DIRECTORY "${ZTGUI_BUILD_DIR}" TIMEOUT 120)
 
 foreach(kind good bad obsolete legacy lifecycle lifecycle_failed cancellable cancellable_second cancellable_queued cancellable_blocked)
     set(FIXTURE_API_VERSION "${ZTGUI_API_VERSION}")
@@ -116,7 +134,6 @@ set(ZTGUI_VOICE_PLUGIN_PATH "" CACHE FILEPATH "Independently built voice plugin 
 if(ZTGUI_VOICE_PLUGIN_PATH)
     find_package(Qt6 REQUIRED COMPONENTS Network)
     qt_add_executable(voice_plugin_tests plugins/VoicePluginTests.cpp
-        "${ZTGUI_ROOT_DIR}/src/client/main/AppStyle.cpp"
         "${ZTGUI_ROOT_DIR}/src/client/main/plugins/PluginLoader.cpp" "${ZTGUI_ROOT_DIR}/src/client/main/plugins/PluginRegistry.cpp")
     target_link_libraries(voice_plugin_tests PRIVATE ZTGUI::Api Qt6::Test Qt6::Network Qt6::Concurrent)
     ztgui_add_plugin_tools_test(voice_plugin_tests)
@@ -125,4 +142,5 @@ if(ZTGUI_VOICE_PLUGIN_PATH)
         target_compile_options(voice_plugin_tests PRIVATE /utf-8)
     endif()
     add_test(NAME voice_plugin_panel COMMAND voice_plugin_tests -platform offscreen)
+    set_tests_properties(voice_plugin_panel PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software")
 endif()

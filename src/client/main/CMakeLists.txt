@@ -1,11 +1,10 @@
 set(ZTGUI_MAIN_SOURCES
-    AppStyle.cpp AppLog.cpp UiTransitions.cpp MainWindow.cpp DataTable.cpp SingleInstance.cpp PluginImport.cpp GuideOverlay.cpp
-    ZeroTierClient.cpp NetworkMembers.cpp NetworkMemberRow.cpp NetworkBundle.cpp MacPlatform.cpp plugins/PluginRegistry.cpp plugins/PluginLoader.cpp plugins/HostServicesImpl.cpp
-    tabs/ServiceTab.cpp tabs/InfoTab.cpp tabs/PeersTab.cpp tabs/NetworkTab.cpp tabs/MoonTab.cpp)
+    AppController.cpp RecordModel.cpp SystemOperations.cpp AppLog.cpp SingleInstance.cpp PluginImport.cpp
+    ZeroTierClient.cpp NetworkMembers.cpp NetworkBundle.cpp MacPlatform.cpp
+    plugins/PluginRegistry.cpp plugins/PluginLoader.cpp plugins/HostServicesImpl.cpp)
 set(ZTGUI_MAIN_HEADERS
-    MainWindow.h AppStyle.h AppLog.h UiTransitions.h DataTable.h ZeroTierClient.h
-    NetworkBundle.h NetworkMemberRow.h MacPlatform.h plugins/PluginRegistry.h plugins/PluginLoader.h plugins/HostServicesImpl.h
-    tabs/ServiceTab.h tabs/InfoTab.h tabs/PeersTab.h tabs/NetworkTab.h tabs/MoonTab.h)
+    AppController.h RecordModel.h SystemOperations.h AppLog.h SingleInstance.h PluginImport.h ZeroTierClient.h
+    NetworkBundle.h MacPlatform.h plugins/PluginRegistry.h plugins/PluginLoader.h plugins/HostServicesImpl.h)
 list(TRANSFORM ZTGUI_MAIN_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 list(TRANSFORM ZTGUI_MAIN_HEADERS PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 set(ZTGUI_MAIN_SOURCES "${ZTGUI_MAIN_SOURCES}" PARENT_SCOPE)
@@ -13,12 +12,12 @@ set(ZTGUI_MAIN_HEADERS "${ZTGUI_MAIN_HEADERS}" PARENT_SCOPE)
 
 # Shared build settings, with separate compilations for production and tests.
 function(ztgui_configure_host target)
-    target_link_libraries(${target} PRIVATE ZTGUI::Api Qt6::Concurrent Qt6::Network)
+    target_link_libraries(${target} PRIVATE ZTGUI::Api Qt6::Concurrent Qt6::Network Qt6::QuickControls2)
     target_include_directories(${target} PRIVATE "${ZTGUI_ROOT_DIR}/src/client/main")
     target_compile_definitions(${target} PRIVATE ZEROTIER_GUI_VERSION="${ZEROTIER_VERSION}")
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}")
     if(WIN32)
-        target_link_libraries(${target} PRIVATE shell32 advapi32)
+        target_link_libraries(${target} PRIVATE shell32 advapi32 comctl32)
         target_compile_definitions(${target} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     endif()
     if(MSVC)
@@ -28,6 +27,28 @@ endfunction()
 
 qt_add_executable(zerotier_gui WIN32 main.cpp ${ZTGUI_MAIN_SOURCES} ${ZTGUI_MAIN_HEADERS})
 ztgui_configure_host(zerotier_gui)
+# Widgets supplies Qt.labs.platform's native tray/menu fallback only; application
+# windows, pages, dialogs and plugin pages are Qt Quick items.
+target_link_libraries(zerotier_gui PRIVATE Qt6::Widgets)
+qt_policy(SET QTP0004 NEW)
+function(ztgui_add_qml_ui target)
+    qt_policy(SET QTP0004 NEW)
+    set(qml_options)
+    if(NOT target STREQUAL "zerotier_gui")
+        # Qt 6.8/MSBuild cannot create qmlcache directories containing _.. when
+        # the test target imports QML sources outside its own source directory.
+        list(APPEND qml_options NO_CACHEGEN)
+    endif()
+    set(qml_sources)
+    foreach(name Main Theme ActionButton RecordList Guide StartupError LazyPopup AppPopup AppDialog AppMenu AppMenuItem BoundedScrollView GearButton GearIcon ThemeToggle)
+        set(source "${ZTGUI_ROOT_DIR}/src/client/main/qml/${name}.qml")
+        set_source_files_properties("${source}" PROPERTIES QT_RESOURCE_ALIAS "qml/${name}.qml")
+        list(APPEND qml_sources "${source}")
+    endforeach()
+    set_source_files_properties("${ZTGUI_ROOT_DIR}/src/client/main/qml/Theme.qml" PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+    qt_add_qml_module(${target} URI ZTGUI VERSION 1.0 RESOURCE_PREFIX /qt/qml ${qml_options} QML_FILES ${qml_sources})
+endfunction()
+ztgui_add_qml_ui(zerotier_gui)
 set_target_properties(zerotier_gui PROPERTIES OUTPUT_NAME "ZTGUI")
 if(APPLE)
     set_target_properties(zerotier_gui PROPERTIES

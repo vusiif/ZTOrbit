@@ -31,4 +31,4 @@ cd /root/Server/ZTServer
 
 服务保持前台运行，由附带 `zt-server.service` 交给 systemd 托管。启动工作目录决定 `plugins/`、`plugins-data/` 与 `logs/` 的位置；插件变化后需重启。扫描目录直接子文件中的 `.so`，坏插件被拒绝并记录日志。首版没有账户、Token 或 TLS，监听全部 IPv4 地址，访问范围由部署网络和防火墙控制。
 
-SDK、协议和查询接口见 [服务端 API](../../docs/server-api.md)，语音插件部署与业务规则见 [语音服务端文档](plugins/voice-chat/docs/voice-chat.md)。
+SDK、协议和查询接口见 [服务端 API](../../docs/server-api.md)，语音插件部署与业务规则见 [语音服务端文档](../plugins/voice-chat/server/docs/voice-chat.md)。

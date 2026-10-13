@@ -4,7 +4,7 @@
 #include <QLocalServer>
 #include <memory>
 #include <functional>
-class QWidget;
+class QWindow;
 
 namespace vusiif::ztgui::platform {
 class SingleInstance final : public QObject {
@@ -13,7 +13,7 @@ public:
     explicit SingleInstance(QObject *parent = nullptr, const QString &identitySuffix = {});
     Result acquire();
     void setActivation(std::function<void()> activate);
-    static void activateWindow(QWidget &window);
+    static void activateWindow(QWindow &window);
     QString error() const { return m_error; }
 private:
     QString m_key, m_error;

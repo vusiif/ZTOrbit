@@ -1,6 +1,6 @@
 #include "PluginRegistry.h"
 
-#include <QApplication>
+#include <QGuiApplication>
 #include <QDebug>
 #include <QRegularExpression>
 #include <QScopedValueRollback>
@@ -31,10 +31,11 @@ PluginRegistry::~PluginRegistry()
 {
     const QScopedValueRollback<bool> guard(m_busy, true);
     notifyTransition(location(ZeroTierMenuId));
-    // Destroy widgets while factory captures (and future loader handles) still live.
+    // Destroy Quick items while factory captures (and future loader handles) still live.
     for (const auto &page : std::as_const(m_pages)) delete page.data();
     m_pages.clear();
     m_plugins.clear();
+    if (m_engine) { m_engine->collectGarbage(); m_engine->clearComponentCache(); }
 }
 
 Result PluginRegistry::checkMutation() const
@@ -87,6 +88,7 @@ Result PluginRegistry::unregisterPlugin(const QString &pluginId)
         m_plugins.erase(plugin);
         m_lifecycles.remove(pluginId);
         m_preparation.remove(pluginId);
+        if (m_engine) { m_engine->collectGarbage(); m_engine->clearComponentCache(); }
     }
     emit menusChanged();
     return {};
@@ -115,10 +117,12 @@ QList<RegisteredMenu> PluginRegistry::menus() const
     return result;
 }
 
-PageResult PluginRegistry::page(const QString &menuId, QWidget *parent)
+PageResult PluginRegistry::page(const QString &menuId, QQmlEngine *engine, QQuickItem *parent)
 {
     if (const auto result = checkMutation(); !result.ok()) return {nullptr, result};
-    if (!parent) return {nullptr, {Error::PageCreationFailed, QStringLiteral("页面需要宿主父控件")}};
+    if (!engine || !parent) return {nullptr, {Error::PageCreationFailed, QStringLiteral("页面需要宿主引擎和父项")}};
+    if (m_engine && m_engine != engine) return {nullptr, {Error::PageCreationFailed, QStringLiteral("页面引擎不能改变")}};
+    m_engine = engine;
     const auto separator = menuId.indexOf('/');
     const auto plugin = m_plugins.constFind(menuId.left(separator));
     if (separator < 0 || plugin == m_plugins.cend())
@@ -133,29 +137,29 @@ PageResult PluginRegistry::page(const QString &menuId, QWidget *parent)
     if (menu == plugin->menus.cend())
         return {nullptr, {Error::NotFound, QStringLiteral("菜单未注册：%1").arg(menuId)}};
     if (auto *cached = m_pages.value(menuId).data()) {
-        if (cached->parentWidget() != parent)
+        if (cached->parentItem() != parent)
             return {nullptr, {Error::PageCreationFailed, QStringLiteral("页面已属于另一个宿主")}};
         return {cached, {}};
     }
 
-    const auto existingChildren = parent->findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly);
-    QWidget *widget = nullptr;
+    const auto existingChildren = parent->findChildren<QQuickItem *>(QString(), Qt::FindDirectChildrenOnly);
+    QQuickItem *widget = nullptr;
     QString failure;
     bool sharedWidget = false;
     {
         const QScopedValueRollback<bool> guard(m_busy, true);
         try {
-            widget = menu->createPage(parent);
-            if (!widget) failure = QStringLiteral("页面工厂未返回控件");
-            else if (widget == parent || widget->parentWidget() != parent)
-                failure = QStringLiteral("页面工厂必须返回由宿主父控件持有的新控件");
+            widget = menu->createPage(engine, parent);
+            if (!widget) failure = QStringLiteral("页面工厂未返回项");
+            else if (widget == parent || (widget->parentItem() != parent || widget->parent() != parent))
+                failure = QStringLiteral("页面工厂必须返回由宿主父项持有的新项");
             else if (existingChildren.contains(widget))
-                failure = QStringLiteral("页面工厂不能借用宿主已有的控件");
+                failure = QStringLiteral("页面工厂不能借用宿主已有的项");
             else {
                 for (const auto &existing : std::as_const(m_pages)) {
                     if (existing == widget) {
                         sharedWidget = true;
-                        failure = QStringLiteral("不同菜单不能共用页面控件");
+                        failure = QStringLiteral("不同菜单不能共用页面项");
                         break;
                     }
                 }
@@ -167,7 +171,7 @@ PageResult PluginRegistry::page(const QString &menuId, QWidget *parent)
         }
         if (failure.isEmpty()) m_pages.insert(menuId, widget);
         if (!failure.isEmpty() && widget && widget != parent && !sharedWidget && !existingChildren.contains(widget)
-            && widget->parentWidget() == parent) delete widget;
+            && widget->parentItem() == parent) delete widget;
     }
     if (!failure.isEmpty()) {
         emit pageCreationFailed(menuId, failure);

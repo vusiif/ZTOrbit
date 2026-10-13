@@ -3,7 +3,9 @@ param(
     [string]$OutputDirectory = 'dist/windows-x64',
     [string]$PluginOutputDirectory = 'dist/plugins',
     [switch]$RebuildApi,
-    [switch]$BuildVoicePlugin
+    [switch]$BuildVoicePlugin,
+    [switch]$IncludeOpenGLSoftware,
+    [switch]$KeepAllQmlStyles
 )
 # Compatibility entry point. Build/packaging implementation lives with the build skill.
 $projectRoot = Split-Path $PSScriptRoot -Parent

@@ -26,6 +26,8 @@ $qtSdk = 'C:/Qt/6.8.3/msvc2022_64' # 替换为实际动态 SDK
 
 [build-windows.ps1](scripts/build-windows.ps1) 控制主程序、条件 API 更新与可选插件；[PackageTools.ps1](scripts/PackageTools.ps1) 提供路径检查、内容指纹、干净目录替换和 ZIP 创建。仓库 `scripts/build-windows.ps1` 仅为兼容入口，遵守相同的默认范围。
 
+Windows默认运行包只保留宿主使用的Basic控件样式、中文／英文Qt翻译和运行插件，不带QML调试工具；保留语音需要的Multimedia／FFmpeg。Qt Quick默认使用D3D11，另有无需OpenGL库的CPU绘制模式，因此不默认部署Mesa的 `opengl32sw.dll`。需要显式OpenGL软件兼容环境时添加 `-IncludeOpenGLSoftware`；第三方插件明确导入其他控件样式时添加 `-KeepAllQmlStyles`。裁剪仅发生在已校验的干净暂存目录，不能处理用户已有的插件／数据目录。
+
 脚本用显式目标 `zerotier_gui` 构建主程序。不要用默认“构建全部目标”替代，以免现有构建缓存启用了测试或插件。GUI 回归、服务端、语音面板和音频测试不是普通打包的默认构建目标；根据用户要求或实际代码变化选择需要的验证。
 
 ## API 是否更新

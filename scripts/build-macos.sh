@@ -28,7 +28,7 @@ ctest --test-dir "$build_directory" --output-on-failure
 api_sdk="$project_root/dist/ZTGUI-api"
 cmake --install "$build_directory" --prefix "$api_sdk"
 voice_build="$project_root/cmake-build-voice-client-macos-arm64"
-cmake -S "$project_root/src/client/plugins/voice-chat/client-plugin" -B "$voice_build" \
+cmake -S "$project_root/src/plugins/voice-chat/client" -B "$voice_build" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$api_sdk;$QT_ROOT" \
     -DCMAKE_OSX_ARCHITECTURES=arm64
 cmake --build "$voice_build" --parallel "$(sysctl -n hw.logicalcpu)"
@@ -59,7 +59,7 @@ plist="$staging/ZTGUI.app/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string app-icon.icns' "$plist"
 (
     cd "$staging"
-    "$QT_ROOT/bin/macdeployqt" ZTGUI.app \
+    "$QT_ROOT/bin/macdeployqt" ZTGUI.app -qmldir="$project_root/src/client/main/qml" \
         "-executable=ZTGUI.app/Contents/MacOS/plugins/$(basename "$voice_library")" \
         -always-overwrite -codesign=- -dmg
 )

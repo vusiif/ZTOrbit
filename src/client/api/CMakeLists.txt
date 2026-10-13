@@ -11,7 +11,7 @@ endif()
 set(ZTGUI_API_VERSION "0.${CMAKE_MATCH_1}")
 project(ZTGUIPluginApi VERSION "${ZTGUI_API_VERSION}" LANGUAGES CXX)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Network)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Quick Qml Network)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -20,7 +20,7 @@ add_library(ztgui_plugin_api INTERFACE)
 add_library(ZTGUI::Api ALIAS ztgui_plugin_api)
 set_target_properties(ztgui_plugin_api PROPERTIES EXPORT_NAME Api)
 target_compile_features(ztgui_plugin_api INTERFACE cxx_std_17)
-target_link_libraries(ztgui_plugin_api INTERFACE Qt6::Widgets)
+target_link_libraries(ztgui_plugin_api INTERFACE Qt6::Quick Qt6::Qml)
 target_include_directories(ztgui_plugin_api INTERFACE
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>"

@@ -5,7 +5,8 @@
 #include <QObject>
 #include <QMap>
 #include <QPointer>
-#include <QWidget>
+#include <QQuickItem>
+#include <QQmlEngine>
 
 namespace vusiif::ztgui::plugins {
 
@@ -23,7 +24,7 @@ public:
     api::Result unregisterPlugin(const QString &pluginId);
     QList<api::PluginInfo> plugins() const;
     QList<api::RegisteredMenu> menus() const;
-    api::PageResult page(const QString &menuId, QWidget *parent);
+    api::PageResult page(const QString &menuId, QQmlEngine *engine, QQuickItem *parent);
     api::Result setPreparationState(const QString &pluginId, PreparationState state, const QString &message = {});
     PreparationState preparationState(const QString &pluginId) const;
     QString preparationMessage(const QString &pluginId) const;
@@ -37,7 +38,8 @@ private:
     friend class PluginLoader;
     api::Result checkMutation() const;
     QMap<QString, api::PluginDefinition> m_plugins;
-    QMap<QString, QPointer<QWidget>> m_pages;
+    QMap<QString, QPointer<QQuickItem>> m_pages;
+    QPointer<QQmlEngine> m_engine;
     QMap<QString, api::PluginLifecycleInterface *> m_lifecycles;
     api::MenuLocation m_active;
     api::MenuLocation location(const QString &menuId) const;

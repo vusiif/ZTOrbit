@@ -1,6 +1,6 @@
 # 服务端插件 API 与传输协议
 
-宿主是 `zt-server`，公开 SDK 在 `src/server/api/`，实现位于 `src/server/main/`，插件默认在 `src/server/plugins/`。客户端和服务端版本均由根 `VERSION` 派生，当前程序0.3.2 / SDK0.3；相同数字不代表两端动态库可混载。
+宿主是 `zt-server`，公开 SDK 在 `src/server/api/`，实现位于 `src/server/main/`，插件默认在 `src/plugins/<name>/server/`。客户端和服务端版本均由根 `VERSION` 派生，当前程序0.3.3 / SDK0.3；相同数字不代表两端动态库可混载。
 
 ## 独立 SDK 与插件
 

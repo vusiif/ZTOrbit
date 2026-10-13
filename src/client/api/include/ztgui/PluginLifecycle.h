@@ -35,5 +35,5 @@ public:
     virtual void onExitedTo(const MenuLocation &next) { Q_UNUSED(next); }
 };
 }
-#define ZTGUI_PLUGIN_LIFECYCLE_IID "vusiif.ztgui.api.PluginLifecycleInterface/1.0"
+#define ZTGUI_PLUGIN_LIFECYCLE_IID "vusiif.ztgui.api.PluginLifecycleInterface/2.0"
 Q_DECLARE_INTERFACE(vusiif::ztgui::api::PluginLifecycleInterface, ZTGUI_PLUGIN_LIFECYCLE_IID)

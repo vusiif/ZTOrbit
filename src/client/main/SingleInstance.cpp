@@ -7,7 +7,7 @@
 #include <QTimer>
 #include <QCryptographicHash>
 #include <QCoreApplication>
-#include <QWidget>
+#include <QWindow>
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
@@ -82,9 +82,9 @@ void SingleInstance::setActivation(std::function<void()> activate) {
     m_activate = std::move(activate);
     if (m_pending && m_activate) { m_pending = false; QTimer::singleShot(0, this, [this] { m_activate(); }); }
 }
-void SingleInstance::activateWindow(QWidget &window) {
-    if (window.isMinimized()) window.showNormal(); else window.show();
-    window.raise(); window.activateWindow();
+void SingleInstance::activateWindow(QWindow &window) {
+    if (window.windowState() == Qt::WindowMinimized) window.showNormal(); else window.show();
+    window.raise(); window.requestActivate();
 #ifdef Q_OS_WIN
     const auto handle = reinterpret_cast<HWND>(window.winId());
     SetForegroundWindow(handle); SetFocus(handle);

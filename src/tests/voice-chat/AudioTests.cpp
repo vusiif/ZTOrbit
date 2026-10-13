@@ -1,4 +1,4 @@
-#include "../../client/plugins/voice-chat/client-plugin/AudioMath.h"
+#include "../../plugins/voice-chat/client/AudioMath.h"
 #include <QtTest>
 #include <cmath>
 using namespace vusiif::ztgui::voice_chat;

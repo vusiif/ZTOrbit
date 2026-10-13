@@ -15,6 +15,12 @@ int main(int argc, char **argv)
         return qEnvironmentVariableIntValue("ZT_TEST_WINGET_CODE");
     }
     const auto mode = qEnvironmentVariable("ZT_TEST_MODE");
+    const auto queryLog = qEnvironmentVariable("ZT_TEST_QUERY_LOG");
+    if (!queryLog.isEmpty()) {
+        QFile log(queryLog);
+        if (log.open(QIODevice::WriteOnly | QIODevice::Append))
+            log.write(mode.toUtf8() + '|' + arguments.mid(1).join(' ').toUtf8() + '\n');
+    }
     if (arguments.contains("join")) {
         const QString logPath = qEnvironmentVariable("ZT_TEST_COMMAND_LOG");
         if (!logPath.isEmpty()) {

@@ -7,7 +7,8 @@
 #include <QString>
 #include <functional>
 
-class QWidget;
+class QQuickItem;
+class QQmlEngine;
 
 namespace vusiif::ztgui::api {
 
@@ -21,8 +22,9 @@ struct PluginInfo {
     int apiMinor = ApiMinor;
 };
 
-// A factory must return a new widget owned by parent. It runs on the GUI thread.
-using PageFactory = std::function<QWidget *(QWidget *parent)>;
+// Runs on the GUI thread. Return a new Quick item with both its QObject parent
+// and visual parent set to parent. The engine is borrowed from the host.
+using PageFactory = std::function<QQuickItem *(QQmlEngine *engine, QQuickItem *parent)>;
 
 struct MenuContribution {
     QString id; // Local to the plugin; the host builds pluginId/menuId.
@@ -67,7 +69,7 @@ struct Result {
 };
 
 struct PageResult {
-    QWidget *page = nullptr;
+    QQuickItem *page = nullptr;
     Result result;
 };
 

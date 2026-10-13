@@ -3,8 +3,10 @@
 #include <ztgui/PluginLifecycle.h>
 #include <ztgui/PluginFiles.h>
 #include <ztgui/ZeroTierService.h>
+#include <ztprotocol/NetworkAddress.h>
 #include <type_traits>
-#include <QLabel>
+#include <QQuickItem>
+#include <QQmlEngine>
 
 static_assert(vusiif::ztgui::api::ApiMajor == 0);
 static_assert(vusiif::ztgui::api::ApiMinor == 3);
@@ -43,13 +45,15 @@ void consumeNetworkTools(vusiif::ztgui::util::ZeroTierService &service, QObject 
 
 int main()
 {
+    const auto endpoint = vusiif::ztgui::protocol::serverEndpoint("example.com");
+    if (!endpoint.valid() || endpoint.port != 18100) return 2;
     using namespace vusiif::ztgui::api;
     PluginDefinition plugin;
     plugin.info = {"example.sdk", "SDK consumer", "0.0.1"};
     MenuContribution menu;
     menu.id = "overview";
     menu.title = "SDK consumer";
-    menu.createPage = [](QWidget *parent) -> QWidget * { return new QLabel("SDK page", parent); };
+    menu.createPage = [](QQmlEngine *, QQuickItem *parent) -> QQuickItem * { return new QQuickItem(parent); };
     plugin.menus.append(menu);
     return isApiCompatible(plugin.info.apiMajor, plugin.info.apiMinor) && plugin.menus.size() == 1 ? 0 : 1;
 }

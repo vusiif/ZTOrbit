@@ -9,7 +9,6 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 #include <QTemporaryDir>
-#include <QWidget>
 #include <memory>
 #include <QRegularExpression>
 #if defined(Q_OS_MACOS)
@@ -384,23 +383,29 @@ void vusiif::ztgui::zerotier::command(QObject *owner, const QStringList &argumen
     timeout->start();
 }
 
-vusiif::ztgui::zerotier::JsonPoller::JsonPoller(QWidget *owner, const QString &command, bool object)
-    : QObject(owner), m_owner(owner), m_command(command), m_object(object)
+vusiif::ztgui::zerotier::JsonPoller::JsonPoller(QObject *owner, const QString &command, bool object)
+    : QObject(owner), m_command(command), m_object(object)
 {
     m_interval.setInterval(1000);
     m_timeout.setSingleShot(true);
     m_timeout.setInterval(5000);
     connect(&m_interval, &QTimer::timeout, this, &vusiif::ztgui::zerotier::JsonPoller::refresh);
     connect(&m_timeout, &QTimer::timeout, this, [this] {
+        if (!m_requestPending) return;
+        m_requestPending = false;
         m_process.kill();
         failed(QStringLiteral("ZeroTier 响应超时，正在自动重试"));
     });
-    connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
+    connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart || !m_requestPending) return;
+        m_requestPending = false;
         m_timeout.stop();
         failed(QStringLiteral("无法读取 ZeroTier，请检查安装或管理员权限"));
     });
     connect(&m_process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
             [this](int code, QProcess::ExitStatus status) {
+        if (!m_requestPending) return;
+        m_requestPending = false;
         m_timeout.stop();
         auto document = QJsonDocument::fromJson(m_process.readAllStandardOutput());
         if (code != 0 || status != QProcess::NormalExit ||
@@ -410,18 +415,24 @@ vusiif::ztgui::zerotier::JsonPoller::JsonPoller(QWidget *owner, const QString &c
         }
         if (!m_lastFailure.isEmpty()) vusiif::ztgui::util::log::write(m_command + QStringLiteral("：恢复连接"));
         m_lastFailure.clear();
+        m_failures = 0;
+        m_failurePeriod.invalidate();
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
         if (m_command == "info") macApiAvailable = true;
 #endif
         emit availabilityChanged(true, QStringLiteral("每 1 秒自动更新"));
         emit updated(document);
     });
-    m_interval.start();
-    QTimer::singleShot(0, this, &vusiif::ztgui::zerotier::JsonPoller::refresh);
+
 }
 
 void vusiif::ztgui::zerotier::JsonPoller::failed(const QString &message)
 {
+    if (!m_failurePeriod.isValid()) m_failurePeriod.start();
+    ++m_failures;
+    // Keep the last good snapshot through transient CLI/API failures. Both a
+    // retry budget and a grace period must expire before reporting offline.
+    if (m_failures < 3 || m_failurePeriod.elapsed() < 5000) return;
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
     if (m_command == "info") macApiAvailable = false;
 #endif
@@ -443,7 +454,7 @@ vusiif::ztgui::zerotier::JsonPoller::~JsonPoller()
 
 void vusiif::ztgui::zerotier::JsonPoller::refresh()
 {
-    if (!m_owner->isVisible() || m_process.state() != QProcess::NotRunning) return;
+    if (!m_active || m_process.state() != QProcess::NotRunning) return;
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
     if (!sessionReady()) { failed(QStringLiteral("等待授权读取 ZeroTier")); return; }
 #endif
@@ -452,6 +463,15 @@ void vusiif::ztgui::zerotier::JsonPoller::refresh()
         failed(QStringLiteral("未安装 ZeroTier，请在主页安装"));
         return;
     }
+    m_requestPending = true;
     m_process.start(program, cliArguments(program, {"-j", m_command}));
     m_timeout.start();
+}
+
+void vusiif::ztgui::zerotier::JsonPoller::setActive(bool active)
+{
+    if (m_active == active) return;
+    m_active = active;
+    if (active) { m_interval.start(); refresh(); }
+    else m_interval.stop();
 }

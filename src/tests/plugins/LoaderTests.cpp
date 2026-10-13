@@ -1,7 +1,8 @@
 #include "../../client/main/plugins/PluginLoader.h"
 #include "../../client/main/plugins/PluginRegistry.h"
 #include <QFile>
-#include <QLabel>
+#include <QQuickItem>
+#include <QQmlEngine>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
@@ -113,11 +114,11 @@ private slots:
         QVERIFY(QFile::copy(library, directory.filePath(QFileInfo(library).fileName())));
         auto loader = std::make_unique<PluginLoader>();
         auto registry = std::make_unique<PluginRegistry>();
-        QWidget parent;
+        QQmlEngine engine; QQuickItem parent;
         loader->scan(directory.path(), *registry);
         QCOMPARE(registry->preparationState("test.lifecycle"), PreparationState::Preparing);
         QTRY_COMPARE(registry->preparationState("test.lifecycle"), PreparationState::Ready);
-        QVERIFY(registry->page("test.lifecycle/overview", &parent).result.ok());
+        QVERIFY(registry->page("test.lifecycle/overview", &engine, &parent).result.ok());
         QVERIFY(registry->activateMenu("test.lifecycle/overview").ok());
         if (unloadFirst) {
             QVERIFY(loader->unload("test.lifecycle", *registry).ok());
@@ -165,21 +166,21 @@ private slots:
         QFETCH(QString, pluginId);
         QTemporaryDir directory; QVERIFY(directory.isValid());
         QVERIFY(QFile::copy(library, directory.filePath(QFileInfo(library).fileName())));
-        auto loader = std::make_unique<PluginLoader>(); auto registry = std::make_unique<PluginRegistry>(); QWidget parent;
+        auto loader = std::make_unique<PluginLoader>(); auto registry = std::make_unique<PluginRegistry>(); QQmlEngine engine; QQuickItem parent;
         loader->scan(directory.path(), *registry);
         QCOMPARE(registry->preparationState(pluginId), PreparationState::Preparing);
-        QCOMPARE(registry->page(pluginId + "/overview", &parent).result.error, Error::Busy);
+        QCOMPARE(registry->page(pluginId + "/overview", &engine, &parent).result.error, Error::Busy);
         int ticks = 0; QTimer heartbeat; heartbeat.setInterval(10);
         connect(&heartbeat, &QTimer::timeout, this, [&ticks] { ++ticks; }); heartbeat.start();
         QTRY_VERIFY(registry->preparationState(pluginId) != PreparationState::Preparing);
         QVERIFY(ticks > 2);
         if (success) {
             QCOMPARE(registry->preparationState(pluginId), PreparationState::Ready);
-            QVERIFY(registry->page(pluginId + "/overview", &parent).result.ok());
+            QVERIFY(registry->page(pluginId + "/overview", &engine, &parent).result.ok());
         } else {
             QCOMPARE(registry->preparationState(pluginId), PreparationState::Failed);
             QVERIFY(registry->preparationMessage(pluginId).contains("failed"));
-            QCOMPARE(registry->page(pluginId + "/overview", &parent).result.error, Error::PageCreationFailed);
+            QCOMPARE(registry->page(pluginId + "/overview", &engine, &parent).result.error, Error::PageCreationFailed);
         }
         registry.reset(); loader.reset();
     }
@@ -197,13 +198,13 @@ private slots:
         const QString library = QString::fromUtf8(FIXTURE_LIFECYCLE);
         QVERIFY(QFile::copy(library, directory.filePath(QFileInfo(library).fileName())));
         auto loader = std::make_unique<PluginLoader>(); auto registry = std::make_unique<PluginRegistry>();
-        QWidget parent;
+        QQmlEngine engine; QQuickItem parent;
         MenuContribution menu;
         menu.id = "overview"; menu.title = "Other";
-        menu.createPage = [](QWidget *owner) { QTest::qWait(300); return new QLabel("Other", owner); };
+        menu.createPage = [](QQmlEngine *, QQuickItem *owner) { QTest::qWait(300); return new QQuickItem(owner); };
         QVERIFY(registry->registerPlugin({{"test.other", "Other", "1"}, {menu}}).ok());
         loader->scan(directory.path(), *registry);
-        QVERIFY(registry->page("test.other/overview", &parent).result.ok());
+        QVERIFY(registry->page("test.other/overview", &engine, &parent).result.ok());
         QTRY_COMPARE(registry->preparationState("test.lifecycle"), PreparationState::Ready);
         registry.reset(); loader.reset();
     }
@@ -212,7 +213,7 @@ private slots:
         const auto file = directory.filePath("order.txt"); qputenv("ZTGUI_PLUGIN_LIFETIME_FILE", file.toUtf8());
         auto loader = std::make_unique<PluginLoader>();
         auto registry = std::make_unique<PluginRegistry>();
-        QWidget parent;
+        QQmlEngine engine; QQuickItem parent;
         QVERIFY(loader->scan(directory.filePath("missing"), *registry).isEmpty());
         const QString extension = QFileInfo(QString::fromUtf8(FIXTURE_GOOD)).suffix();
         QVERIFY(QFile::copy(QString::fromUtf8(FIXTURE_GOOD), directory.filePath("a." + extension)));
@@ -223,9 +224,9 @@ private slots:
         QVERIFY(log.last().contains("API version mismatch"));
         // The duplicate's root/resource are destroyed; start a fresh lifecycle trace.
         QFile trace(file); QVERIFY(trace.open(QIODevice::WriteOnly | QIODevice::Truncate)); trace.close();
-        QVERIFY(parent.findChildren<QLabel *>().isEmpty());
-        const auto page = registry->page("test.dynamic/overview", &parent);
-        QVERIFY(page.result.ok()); QCOMPARE(page.page->parentWidget(), &parent);
+        QVERIFY(parent.findChildren<QQuickItem *>().isEmpty());
+        const auto page = registry->page("test.dynamic/overview", &engine, &parent);
+        QVERIFY(page.result.ok()); QCOMPARE(page.page->parentItem(), &parent);
         registry.reset(); loader.reset();
         QVERIFY(trace.open(QIODevice::ReadOnly)); QCOMPARE(trace.readAll(), QByteArray("page\nfactory\nentry\n"));
         qunsetenv("ZTGUI_PLUGIN_LIFETIME_FILE");
@@ -247,18 +248,18 @@ private slots:
         QVERIFY(QFile::copy(library, directory.filePath(QFileInfo(library).fileName())));
         PluginRegistry registry;
         PluginLoader loader;
-        QWidget parent;
+        QQmlEngine engine; QQuickItem parent;
         MenuContribution menu;
         menu.id = "overview"; menu.title = "Other";
-        menu.createPage = [](QWidget *owner) {
+        menu.createPage = [](QQmlEngine *, QQuickItem *owner) {
             // Completion is delivered while the page factory guards reentry;
             // the loader schedules a deferred readiness update.
             QTest::qWait(300);
-            return new QLabel("Other", owner);
+            return new QQuickItem(owner);
         };
         QVERIFY(registry.registerPlugin({{"test.other", "Other", "1"}, {menu}}).ok());
         loader.scan(directory.path(), registry);
-        QVERIFY(registry.page("test.other/overview", &parent).result.ok());
+        QVERIFY(registry.page("test.other/overview", &engine, &parent).result.ok());
         QCOMPARE(registry.preparationState("test.lifecycle"), PreparationState::Preparing);
         QVERIFY(loader.unload("test.lifecycle", registry).ok());
         loader.scan(directory.path(), registry);

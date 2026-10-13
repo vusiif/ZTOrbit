@@ -4,7 +4,9 @@ param(
     [string]$OutputDirectory = 'dist/windows-x64',
     [string]$PluginOutputDirectory = 'dist/plugins',
     [switch]$RebuildApi,
-    [switch]$BuildVoicePlugin
+    [switch]$BuildVoicePlugin,
+    [switch]$IncludeOpenGLSoftware,
+    [switch]$KeepAllQmlStyles
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'PackageTools.ps1')
@@ -74,8 +76,8 @@ try {
     # Only an explicit request builds/publishes the voice plugin.
     $voiceLibrary = Join-Path $pluginOutputPath 'ztgui_voice_chat.dll'
     if ($BuildVoicePlugin) {
-        Protect-SourceBuildCache 'cmake-build-voice-client' 'src/client/plugins/voice-chat/client-plugin'
-        Invoke-Checked cmake @('-S', 'src/client/plugins/voice-chat/client-plugin', '-B', 'cmake-build-voice-client', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$apiSdk;$qtSdk")
+        Protect-SourceBuildCache 'cmake-build-voice-client' 'src/plugins/voice-chat/client'
+        Invoke-Checked cmake @('-S', 'src/plugins/voice-chat/client', '-B', 'cmake-build-voice-client', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$apiSdk;$qtSdk")
         Invoke-Checked cmake @('--build', 'cmake-build-voice-client', '--config', 'Release', '--target', 'ztgui_voice_chat', '--parallel')
         New-Item -ItemType Directory -Path $pluginOutputPath -Force | Out-Null
         Copy-Item -LiteralPath 'cmake-build-voice-client/Release/ztgui_voice_chat.dll' -Destination $voiceLibrary
@@ -89,10 +91,29 @@ try {
 
     $stagingPath = New-PackageStaging $outputPath
     Copy-Item -LiteralPath 'cmake-build-release/Release/ZTGUI.exe' -Destination $stagingPath
-    $deployArguments = @('--release', '--dir', $stagingPath, (Join-Path $stagingPath 'ZTGUI.exe'))
+    $deployArguments = @('--release', '--translations', 'en,zh_CN,zh_TW', '--skip-plugin-types', 'qmltooling', '--qmldir', (Join-Path $projectRoot 'src/client/main/qml'), '--dir', $stagingPath, (Join-Path $stagingPath 'ZTGUI.exe'))
+    # Qt Quick uses D3D11 by default on Windows. Its CPU scene graph backend
+    # does not need the separate Mesa OpenGL software renderer.
+    if (!$IncludeOpenGLSoftware) { $deployArguments += '--no-opengl-sw' }
     # An existing DLL can supply dependency information without being rebuilt or modified.
     if (Test-Path -LiteralPath $voiceLibrary) { $deployArguments += $voiceLibrary }
     Invoke-Checked $deployQt $deployArguments
+    if (!$KeepAllQmlStyles) {
+        # Generic Controls remains available to plugins and selects the host's
+        # Basic style. Trim only known unused styles in the owned staging tree.
+        $stagingRoot = [IO.Path]::GetFullPath($stagingPath).TrimEnd('\','/')
+        foreach ($style in @('Fusion','Imagine','Material','Universal','FluentWinUI3','Windows','macOS','iOS')) {
+            foreach ($relative in @("qml/QtQuick/Controls/$style", "qml/QtQuick/Dialogs/quickimpl/qml/+$style",
+                                     "Qt6QuickControls2$style.dll", "Qt6QuickControls2${style}StyleImpl.dll")) {
+                $stylePath = [IO.Path]::GetFullPath((Join-Path $stagingRoot $relative))
+                if (!$stylePath.StartsWith($stagingRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Style cleanup escaped staging directory' }
+                if (Test-Path -LiteralPath $stylePath) {
+                    if ((Get-Item -LiteralPath $stylePath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Style cleanup refuses linked paths' }
+                    Remove-Item -LiteralPath $stylePath -Recurse -Force
+                }
+            }
+        }
+    }
     $vsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
     $vsInstall = (& $vsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
     if (!$vsInstall) { throw 'Cannot locate MSVC runtime for deployment' }

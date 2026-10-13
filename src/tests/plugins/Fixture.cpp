@@ -2,7 +2,8 @@
 #include <ztgui/PluginLifecycle.h>
 #include <QThread>
 #include <QFile>
-#include <QLabel>
+#include <QQuickItem>
+#include <QQmlEngine>
 #include <QLockFile>
 #include <memory>
 static void mark(const char *text) {
@@ -18,9 +19,9 @@ static void preparationStarted() {
     if (!started.isEmpty()) { QFile file(started); if (file.open(QIODevice::WriteOnly)) file.write("started"); }
 }
 struct Resource { ~Resource() { mark("factory"); } };
-class Page : public QLabel {
+class Page : public QQuickItem {
 public:
-    explicit Page(QWidget *parent) : QLabel("dynamic fixture", parent) {}
+    explicit Page(QQuickItem *parent) : QQuickItem(parent) { setParent(parent); }
     ~Page() override { mark("page"); }
 };
 class Fixture final : public QObject, public vusiif::ztgui::api::PluginInterface
@@ -30,7 +31,7 @@ class Fixture final : public QObject, public vusiif::ztgui::api::PluginInterface
 {
     Q_OBJECT
 #ifdef FIXTURE_OBSOLETE_IID
-    Q_PLUGIN_METADATA(IID "org.ztgui.PluginInterface/1.0" FILE "fixture.json")
+    Q_PLUGIN_METADATA(IID "vusiif.ztgui.api.PluginInterface/1.0" FILE "fixture.json")
 #else
     Q_PLUGIN_METADATA(IID ZTGUI_PLUGIN_IID FILE "fixture.json")
 #endif
@@ -46,6 +47,7 @@ public:
         return [cancellation] {
             const auto id = QStringLiteral(FIXTURE_ID);
             mark(("started:" + id).toUtf8().constData());
+            preparationStarted();
 #if FIXTURE_CANCELLABLE == 2
             QThread::msleep(350); // Models a third-party call without cancellation.
 #else
@@ -103,7 +105,7 @@ public:
 #endif
         vusiif::ztgui::api::MenuContribution menu;
         menu.id = "overview"; menu.title = "Dynamic";
-        menu.createPage = [resource](QWidget *parent) -> QWidget * { return new Page(parent); };
+        menu.createPage = [resource](QQmlEngine *, QQuickItem *parent) -> QQuickItem * { return new Page(parent); };
         result.menus.append(menu); return result;
     }
 };
