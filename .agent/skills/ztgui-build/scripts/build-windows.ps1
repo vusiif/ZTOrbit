@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$QtRoot,
     [string]$ProjectDirectory = '.',
+    [string]$SodiumRoot = '',
     [string]$OutputDirectory = 'dist/windows-x64',
     [string]$PluginOutputDirectory = 'dist/plugins',
     [switch]$RebuildApi,
@@ -25,6 +26,8 @@ if ($pluginOutputPath -eq $outputPath -or
 }
 $stagingPath = $null
 $apiStaging = $null
+$sodiumConfigure = @()
+if ($SodiumRoot) { $sodiumConfigure = @('-DZTGUI_SODIUM_ROOT=' + (Resolve-Path -LiteralPath $SodiumRoot).Path.Replace('\','/')) }
 # A source move invalidates CMake's recorded source directory. Keep the old
 # cache as a backup and configure a fresh one at the normal build path.
 function Protect-SourceBuildCache([string]$BuildPath, [string]$SourcePath) {
@@ -41,14 +44,18 @@ function Protect-SourceBuildCache([string]$BuildPath, [string]$SourcePath) {
 Push-Location -LiteralPath $projectRoot
 try {
     # Build this target only, even if this build tree also has src/tests/plugins configured.
-    Invoke-Checked cmake @('-S', '.', '-B', 'cmake-build-release', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$qtSdk")
+    Invoke-Checked cmake (@('-S', '.', '-B', 'cmake-build-release', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$qtSdk") + $sodiumConfigure)
     Invoke-Checked cmake @('--build', 'cmake-build-release', '--config', 'Release', '--target', 'zerotier_gui', '--parallel')
 
     # The API is a header-only SDK. Configuration, clean installation and ZIP creation
     # are necessary only when its inputs or installed contents changed.
     $apiVersion = ((Get-Content VERSION -Raw).Trim().Split('.')[0..1] -join '.')
     $apiSdk = Resolve-PackageDirectory $projectRoot "dist/ZTGUI-api-v$apiVersion"
-    $apiFingerprint = $apiVersion + ':' + (Get-DirectoryFingerprint (Join-Path $projectRoot 'src/client/api')) + ':' + (Get-DirectoryFingerprint (Join-Path $projectRoot 'src/shared/include'))
+    $apiFingerprint = $apiVersion + ':' + (Get-DirectoryFingerprint (Join-Path $projectRoot 'src/client/api')) + ':' + (Get-DirectoryFingerprint (Join-Path $projectRoot 'src/shared/include')) + ':' + (Get-DirectoryFingerprint (Join-Path $projectRoot 'src/shared/package')) + ':' + (Get-FileHash -LiteralPath (Join-Path $projectRoot 'src/shared/CMakeLists.txt') -Algorithm SHA256).Hash
+    foreach ($configuration in @('Release','Debug')) {
+        $contract=Get-Content -LiteralPath (Join-Path $projectRoot "cmake-build-release/src/client/api/host-runtime-contract/$configuration.json") -Raw | ConvertFrom-Json
+        $apiFingerprint+=':'+$contract.qtBuildId
+    }
     $apiStatePath = Join-Path $projectRoot 'cmake-build-api/package-state.json'
     $apiState = $null
     if (Test-Path -LiteralPath $apiStatePath) {
@@ -58,9 +65,10 @@ try {
     $apiChanged = $RebuildApi -or !$apiState -or $apiState.inputs -ne $apiFingerprint -or $apiState.sdk -ne $sdkFingerprint
     if ($apiChanged) {
         Protect-SourceBuildCache 'cmake-build-api' 'src/client/api'
-        Invoke-Checked cmake @('-S', 'src/client/api', '-B', 'cmake-build-api', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$qtSdk")
+        Invoke-Checked cmake (@('-S', 'src/client/api', '-B', 'cmake-build-api', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$qtSdk") + $sodiumConfigure)
+        Invoke-Checked cmake @('--build', 'cmake-build-api', '--config', 'Release', '--target', 'ztplugin_pack', '--parallel')
         $apiStaging = New-PackageStaging $apiSdk
-        Invoke-Checked cmake @('--install', 'cmake-build-api', '--prefix', $apiStaging)
+        Invoke-Checked cmake @('--install', 'cmake-build-api', '--config', 'Release', '--prefix', $apiStaging)
         Publish-PackageDirectory $apiStaging $apiSdk
         $apiStaging = $null
         $sdkFingerprint = Get-DirectoryFingerprint $apiSdk
@@ -74,30 +82,25 @@ try {
         ConvertTo-Json | Set-Content -LiteralPath $apiStatePath -Encoding UTF8
 
     # Only an explicit request builds/publishes the voice plugin.
-    $voiceLibrary = Join-Path $pluginOutputPath 'ztgui_voice_chat.dll'
     if ($BuildVoicePlugin) {
-        Protect-SourceBuildCache 'cmake-build-voice-client' 'src/plugins/voice-chat/client'
-        Invoke-Checked cmake @('-S', 'src/plugins/voice-chat/client', '-B', 'cmake-build-voice-client', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$apiSdk;$qtSdk")
-        Invoke-Checked cmake @('--build', 'cmake-build-voice-client', '--config', 'Release', '--target', 'ztgui_voice_chat', '--parallel')
-        New-Item -ItemType Directory -Path $pluginOutputPath -Force | Out-Null
-        Copy-Item -LiteralPath 'cmake-build-voice-client/Release/ztgui_voice_chat.dll' -Destination $voiceLibrary
-        $opusSource = Join-Path $projectRoot 'cmake-build-voice-client/_deps/opus-src'
-        $override = Get-Content -LiteralPath 'cmake-build-voice-client/CMakeCache.txt' |
-            Where-Object { $_ -match '^FETCHCONTENT_SOURCE_DIR_OPUS:[^=]+=' } | Select-Object -First 1
-        if ($override -and $override.Split('=', 2)[1]) { $opusSource = $override.Split('=', 2)[1] }
-        Copy-Item -LiteralPath (Join-Path $opusSource 'COPYING') -Destination (Join-Path $pluginOutputPath 'ztgui_voice_chat-LICENSE.txt')
-        Write-Host "Created $voiceLibrary"
+        & (Join-Path $PSScriptRoot 'build-plugin-windows.ps1') -PluginDirectory 'src/plugins/voice-chat/client' -Target ztgui_voice_chat -QtRoot $qtSdk -ApiSdk $apiSdk -ProjectDirectory $projectRoot -OutputDirectory $pluginOutputPath
     } else { Write-Host 'Plugin compilation skipped (not requested)' }
 
     $stagingPath = New-PackageStaging $outputPath
+    Copy-Item -LiteralPath 'cmake-build-release/Release/libsodium.dll' -Destination $stagingPath
+    New-Item -ItemType Directory -Path (Join-Path $stagingPath 'licenses') -Force | Out-Null
+    Copy-Item -LiteralPath 'src/shared/package/libsodium-LICENSE.txt' -Destination (Join-Path $stagingPath 'licenses')
     Copy-Item -LiteralPath 'cmake-build-release/Release/ZTGUI.exe' -Destination $stagingPath
     $deployArguments = @('--release', '--translations', 'en,zh_CN,zh_TW', '--skip-plugin-types', 'qmltooling', '--qmldir', (Join-Path $projectRoot 'src/client/main/qml'), '--dir', $stagingPath, (Join-Path $stagingPath 'ZTGUI.exe'))
     # Qt Quick uses D3D11 by default on Windows. Its CPU scene graph backend
     # does not need the separate Mesa OpenGL software renderer.
     if (!$IncludeOpenGLSoftware) { $deployArguments += '--no-opengl-sw' }
-    # An existing DLL can supply dependency information without being rebuilt or modified.
-    if (Test-Path -LiteralPath $voiceLibrary) { $deployArguments += $voiceLibrary }
     Invoke-Checked $deployQt $deployArguments
+    $forbidden=Get-ChildItem -LiteralPath $stagingPath -File -Recurse | Where-Object {
+        $_.Name -match '^(Qt6Multimedia|avcodec-|avformat-|avutil-|swresample-|swscale-)' -or
+        $_.Extension -eq '.ztplugin' -or $_.Directory.Name -eq 'multimedia'
+    }
+    if ($forbidden) { throw 'Application deployment contains plugin media dependencies' }
     if (!$KeepAllQmlStyles) {
         # Generic Controls remains available to plugins and selects the host's
         # Basic style. Trim only known unused styles in the owned staging tree.

@@ -15,7 +15,7 @@ import shutil
 OPTIONS = None
 
 
-ROUTE = b"org.ztgui.voice-chat"
+ROUTE = b"voice-chat"
 def envelope(payload):
     return b"ZTS1" + bytes([1, len(ROUTE)]) + ROUTE + payload
 def frame(payload):
@@ -99,7 +99,7 @@ class ServerTests(unittest.TestCase):
             self.directory = tempfile.TemporaryDirectory()
             root = Path(self.directory.name)
             (root/"plugins").mkdir()
-            for plugin in (Path(OPTIONS.binary).resolve().parent/"plugins").glob("*.so"):
+            for plugin in (Path(OPTIONS.binary).resolve().parent/"plugins").glob("*.ztplugin"):
                 shutil.copyfile(plugin,root/"plugins"/plugin.name)
             config = root/"plugins-data"/"语音聊天"
             config.mkdir(parents=True)

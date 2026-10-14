@@ -23,7 +23,10 @@ public:
         deafened = value; outputPending.clear();
         if (sink) sink->setVolume(value ? 0.0f : 1.0f);
     }
-    void setVolume(float value) { volume = std::clamp(value, 0.0f, 1.0f); }
+    void setVolume(float value) { volume = std::clamp(value, 0.0f, 2.0f); }
+    void setInputVolume(float value) { inputVolume=std::clamp(value,0.0f,2.0f); }
+    void setMemberVolume(quint32 member,float value) { memberVolumes[member]=std::clamp(value,0.0f,2.0f); }
+    void clearMemberVolumes() { memberVolumes.clear(); }
 signals:
     void encoded(const QByteArray &data);
     void notice(const QString &message);
@@ -35,7 +38,8 @@ private:
     OpusEncoder *encoder = nullptr;
     QTimer *playTimer;
     bool muted = false, deafened = false;
-    float volume = 0.8f;
+    float volume = 0.8f, inputVolume = 1.0f;
+    std::map<quint32,float> memberVolumes;
     QByteArray inputPending, outputPending;
     QVector<float> capturePending;
     Resampler inputResampler, outputResampler;

@@ -1,5 +1,6 @@
 qt_add_executable(zt-server main.cpp ServerHost.cpp ServerHost.h PluginServices.cpp PluginServices.h ZeroTierQueries.cpp ZeroTierQueries.h AppLog.cpp AppLog.h)
-target_link_libraries(zt-server PRIVATE ZTServer::Api)
+ztgui_embed_host_contract(zt-server "${ZTGUI_SERVER_CONTRACT_DIRECTORY}")
+target_link_libraries(zt-server PRIVATE ZTServer::Api ztgui_network ztgui_package)
 target_compile_definitions(zt-server PRIVATE ZEROTIER_GUI_VERSION="${ZEROTIER_VERSION}")
 set_target_properties(zt-server PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 qt_add_resources(zt-server installer PREFIX "/installer" BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources" FILES resources/zt-installer.sh)

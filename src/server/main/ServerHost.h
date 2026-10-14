@@ -12,6 +12,9 @@
 #include <memory>
 #include <vector>
 #include <future>
+#include "NetworkTransport.h"
+#include "PluginPackage.h"
+#include <QLockFile>
 namespace vusiif::ztgui::server {
 class PluginServices;
 class ServerHost final : public QObject {
@@ -20,6 +23,7 @@ public:
     ~ServerHost() override;
     bool start(const QHostAddress &, quint16);
     void stop();
+    network::NetworkTransport &transport() { return m_transport; }
     quint16 port() const { return m_tcp.serverPort(); }
     QHostAddress peerAddress(api::ConnectionId) const;
     bool sendTcp(const QString &, api::ConnectionId, const QByteArray &);
@@ -36,6 +40,8 @@ private:
         util::CancellationSource cancellation;
         std::future<api::StartResult> task;
         bool ready = false;
+        std::unique_ptr<QTemporaryDir> cache;
+        std::unique_ptr<QLockFile> cacheLock;
     };
     QString m_directory;
     QTcpServer m_tcp;
@@ -44,6 +50,10 @@ private:
     std::vector<Plugin> m_plugins;
     api::ConnectionId m_next = 1;
     ZeroTierQueries m_queries;
+    network::NetworkTransport m_transport{true};
+    QString m_node;
+    bool m_networkPollPending = false;
+    qint64 m_networkPolledAt = 0;
     QTimer m_timer;
     bool m_stopping = false;
     void scan();

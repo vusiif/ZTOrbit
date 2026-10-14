@@ -20,6 +20,17 @@ using namespace vusiif::ztgui;
 class VoiceUiTests : public QObject {
     Q_OBJECT
 private slots:
+    void independentInputAndOutputPreferences() {
+        QTemporaryDir directory;
+        QCoreApplication::setOrganizationName("ZTGUI-Voice-UI"); QCoreApplication::setApplicationName("VoiceUI");
+        QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
+        QSettings().setValue("voice-chat/volume",80);
+        { voice_chat::VoiceController c(nullptr,std::make_shared<voice_chat::AudioDeviceCache>());
+          QCOMPARE(c.volume(),80); QCOMPARE(c.inputVolume(),100); c.setInputVolume(150); c.setVolume(200);
+          QCOMPARE(c.inputVolume(),150); QCOMPARE(c.volume(),200); c.setMemberVolume(1,0); QCOMPARE(c.memberVolume(1),100); }
+        { voice_chat::VoiceController c(nullptr,std::make_shared<voice_chat::AudioDeviceCache>());
+          QCOMPARE(c.inputVolume(),150); QCOMPARE(c.volume(),200); c.setInputVolume(900); QCOMPARE(c.inputVolume(),200); c.setVolume(-1); QCOMPARE(c.volume(),0); }
+    }
     void endpointParsing() {
         QCOMPARE(protocol::serverEndpoint("example.com").port, quint16(18100));
         QCOMPARE(protocol::serverEndpoint("127.0.0.1:19000").port, quint16(19000));
@@ -68,7 +79,7 @@ private slots:
         const auto hello=QJsonDocument::fromJson(packet.payload).object();
         const QJsonArray rooms{QJsonObject{{"id",1},{"name","Room A"},{"members",1},{"capacity",10}},QJsonObject{{"id",2},{"name","Room B"},{"members",2},{"capacity",10}}};
         const QJsonObject reply{{"v",1},{"id",hello["id"]},{"ok",true},{"data",QJsonObject{{"session",1},{"udpPort",18100},{"rooms",rooms}}}};
-        socket->write(protocol::frame("org.ztgui.voice-chat",QJsonDocument(reply).toJson(QJsonDocument::Compact)));
+        socket->write(protocol::frame("voice-chat",QJsonDocument(reply).toJson(QJsonDocument::Compact)));
         QTRY_VERIFY(controller.connected()); QTRY_COMPARE(controller.rooms().size(),2);
         page->setProperty("selectedRoom",1); QTest::qWait(220);
         QVERIFY(window->grabWindow().save(dark?"screenshots/voice-rooms-dark.png":"screenshots/voice-rooms-light.png"));

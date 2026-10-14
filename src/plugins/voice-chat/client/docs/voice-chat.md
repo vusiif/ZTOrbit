@@ -6,7 +6,7 @@
 
 页面由 `VoicePage.qml` 展示、页面持有的 `VoiceController` 注入状态和操作，网络／音频仍在 `VoiceSession` 工作线程运行。QML资源随DLL部署，不依赖宿主内部QML组件。页面销毁同步停止线程后才允许卸载DLL。
 
-2026-10-13 客户端UI优化后的DLL使用SDK0.3、动态Qt6.8.3和MSVC2022/x64独立构建，发布到 `dist/plugins/ztgui_voice_chat.dll`。Windows原生平台验证动态加载、页面／音频浮窗、显式地址端口连接、断开、卸载与重载；音频测试通过。主程序运行包保留Multimedia／FFmpeg依赖，DLL仍须放入 `ZTGUI.exe` 旁的 `plugins/`。本轮未连接真实服务器或进行多人听感验证。
+2026-10-13 客户端UI优化后的DLL使用SDK0.3、动态Qt6.8.3和MSVC2022/x64独立构建，发布到 `dist/plugins/ztgui_voice_chat.dll`。Windows原生平台验证动态加载、页面／音频浮窗、显式地址端口连接、断开、卸载与重载；音频测试通过。这是分离前的验证记录；当前媒体依赖随 v2 `.ztplugin` 交付。本轮未连接真实服务器或进行多人听感验证。
 
 客户端首次地址为空。服务器地址未写端口时使用 TCP `18100`，支持 `域名:端口`、`IPv4:端口`、`[IPv6]:端口` 与裸 IPv6；UDP 使用服务器握手返回的端口。地址解析共用公开SDK的 `protocol::serverEndpoint`，旧独立端口偏好不再覆盖默认值。打开面板或填写地址均不联网；点击连接后才建立会话。上次地址、昵称和设备偏好会保存，但不会自动连接。当前部署目标 `10.10.10.1` 不写入客户端默认值。TCP 和 UDP 均直接连接，不使用系统 HTTP/SOCKS 代理。
 
@@ -24,7 +24,7 @@ Windows x64 / Qt6.8.3 本机诊断记录：旧实现DLL加载约3 ms，首次页
 
 新实现通过实际宿主加载器再次测量：启动预处理约4495 ms，期间10 ms的GUI心跳触发448次，首次页面创建约10 ms，第二次约4 ms。耗时已移出GUI线程，初始化成本仍存在，完成前菜单暂不可点击。
 
-运行期间仍不扫描或热增删插件，安装、移除和更新需退出后调整 `plugins/`，再重启。
+客户端插件菜单支持运行时加载／卸载；卸载后持久禁用并保留数据，服务端仍启动加载。正式安装文件使用 `.ztplugin`，裸动态库只作为编译中间产物。
 
 ## 独立构建与打包
 
@@ -33,15 +33,16 @@ Windows 宿主和插件需要匹配的动态 Qt 6.8+（Quick、Qml、Network、M
 ```powershell
 $qtSdk = 'C:/Qt/6.8.3/msvc2022_64'
 cmake -S src/client/api -B cmake-build-api -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$qtSdk"
-cmake --install cmake-build-api --prefix dist/ZTGUI-api-v0.3
-$apiSdk = (Resolve-Path dist/ZTGUI-api-v0.3).Path
+cmake --build cmake-build-api --config Release --target ztplugin_pack
+cmake --install cmake-build-api --config Release --prefix dist/ZTGUI-api-v0.4
+$apiSdk = (Resolve-Path dist/ZTGUI-api-v0.4).Path
 cmake -S src/plugins/voice-chat/client -B cmake-build-voice-client -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$apiSdk;$qtSdk"
 cmake --build cmake-build-voice-client --config Release --parallel
 ```
 
-客户端产物：`cmake-build-voice-client/Release/ztgui_voice_chat.dll`。SDK/API版本为`0.3`，插件自身版本为`0.1.0`。插件依赖固定 Opus `1.6.1` 源码下载并验证 SHA256；离线构建可传入 `-DFETCHCONTENT_SOURCE_DIR_OPUS=/path/to/opus-1.6.1`。Opus 静态链接进插件，宿主仍使用动态 Qt。
+客户端正式产物：`dist/plugins/ztgui_voice_chat.ztplugin`；裸 DLL 仅留在构建目录。SDK/API版本为`0.4`，插件自身版本为`0.1.0`。插件依赖固定 Opus `1.6.1` 源码下载并验证 SHA256；离线构建可传入 `-DFETCHCONTENT_SOURCE_DIR_OPUS=/path/to/opus-1.6.1`。Opus 静态链接进插件，宿主仍使用动态 Qt。
 
-明确要求构建语音插件时，执行 `./.agent/skills/ztgui-build/scripts/build-windows.ps1 -QtRoot $qtSdk -BuildVoicePlugin`。脚本默认只构建并压缩主程序，API 变化时更新 SDK，不自动编译插件。指定语音插件后，主程序包部署 Qt/Multimedia/FFmpeg及编译器运行依赖，插件另放在 `dist/plugins/ztgui_voice_chat.dll`，许可证为同目录的 `ztgui_voice_chat-LICENSE.txt`，没有额外嵌套目录。安装时将 DLL 复制到 `ZTGUI.exe` 旁的 `plugins/`，增减插件后重启即可；测试可执行文件和模拟 CLI 不进入发行包。
+明确要求构建语音插件时，执行 `./.agent/skills/ztgui-build/scripts/build-windows.ps1 -QtRoot $qtSdk -BuildVoicePlugin`。脚本默认只构建并压缩主程序，API 变化时更新 SDK，不自动编译插件。指定语音插件后组合入口调用独立插件脚本，主程序部署不受插件影响。语音包位于 `dist/plugins/ztgui_voice_chat.ztplugin`，可读许可证位于 `ztgui_voice_chat-licenses/`。将包导入客户端或复制到 `ZTGUI.exe` 旁的 `plugins/`，通过客户端插件菜单可运行时加载／卸载；测试可执行文件和模拟 CLI 不进入发行包。
 
 脚本先部署到干净暂存目录，完成后替换发行目录；旧目录保留为同级 `windows-x64.previous-<随机编号>` 备份，其中的日志、插件数据及额外插件不会带入新包。语音 UDP 初始化失败提示使用服务器返回的实际 UDP 端口，可据此检查自定义端口配置。
 
@@ -49,7 +50,7 @@ cmake --build cmake-build-voice-client --config Release --parallel
 
 ## 协议 v1
 
-所有消息先封装统一 `ZTS1` 外层，路由为 `org.ztgui.voice-chat`。TCP 使用四字节大端长度帧，业务负载为 UTF-8 JSON，单条最大64 KiB；不再使用换行分帧。请求形式为 `{v:1,id:<整数>,op:<操作>,data:<对象>}`；响应为 `{v:1,id:<对应值>,ok:<布尔>,data:<结果>}`，失败为 `error:<错误码>`。支持拆包和粘包。
+所有消息先封装统一 `ZTS1` 外层，路由为 `voice-chat`。TCP 使用四字节大端长度帧，业务负载为 UTF-8 JSON，单条最大64 KiB；不再使用换行分帧。请求形式为 `{v:1,id:<整数>,op:<操作>,data:<对象>}`；响应为 `{v:1,id:<对应值>,ok:<布尔>,data:<结果>}`，失败为 `error:<错误码>`。支持拆包和粘包。
 
 | 操作 | 请求 data | 成功 data |
 | --- | --- | --- |
@@ -81,7 +82,7 @@ UDP 内层业务包最大1200字节，外层总包不超过1232字节；业务�
 
 ## 验证
 
-自动化测试位于 `src/tests/plugins/` 和 `src/tests/voice-chat/`。音频测试需以 `-DVOICE_BUILD_TESTS=ON` 配置客户端，然后运行 `ctest --test-dir cmake-build-voice-client -C Release --output-on-failure`。宿主配置 `-DZEROTIER_BUILD_TESTS=ON -DZTGUI_VOICE_PLUGIN_PATH=/absolute/path/to/ztgui_voice_chat.dll` 可测试真实插件面板；`ZTGUI_LIVE_VOICE_HOST` 可指定已部署服务测试真实房间操作，测试以麦克风静音运行。
+自动化测试位于 `src/tests/plugins/` 和 `src/tests/voice-chat/`。音频测试需以 `-DVOICE_BUILD_TESTS=ON` 配置客户端，然后运行 `ctest --test-dir cmake-build-voice-client -C Release --output-on-failure`。宿主配置 `-DZEROTIER_BUILD_TESTS=ON -DZTGUI_VOICE_PLUGIN_PATH=/absolute/path/to/ztgui_voice_chat.ztplugin` 可测试真实插件面板；`ZTGUI_LIVE_VOICE_HOST` 可指定已部署服务测试真实房间操作，测试以麦克风静音运行。
 
 ```bash
 python3 src/tests/voice-chat/ServerTests.py --binary /path/to/zt-server
@@ -89,3 +90,19 @@ python3 src/tests/voice-chat/ServerTests.py --host 10.10.10.1 --port 18100
 ```
 
 独立服务测试包括容量和15秒超时清理；已部署服务测试只创建临时测试房间，不修改容量和服务状态。音频测试验证合成音频、PCM转换、流式重采样、序号回绕、乱序和丢包。真实麦克风/耳机通话效果及macOS仍需实机验收。
+
+## 音量与新封装
+
+客户端输入、总输出及其他成员的本机播放音量支持 0–200%；输入和成员默认100%，总输出迁移既有80%设置。输入在编码前增益，成员在混音前增益，总输出在混音后增益并最后限幅；静音优先，不修改系统音量。输入和总输出持久化，成员音量只对本机、当前房间会话有效，退房清空，切换设备保留。
+
+两端技术 ID 为 `voice-chat`，显示名和数据目录仍为“语音聊天”。协议业务版本仍为1，路由 ID 同步改变；客户端入口／生命周期 IID 为 /3.0，服务端 /2.0，两端旧动态库需重编。SDK CMake 辅助函数构建后生成 `ztgui_voice_chat.ztplugin` 或 `ztserver_voice_chat.ztplugin`，正式宿主只加载该封装包；没有接入多中转音频传输。
+
+2026-10-14：语音客户端及Linux服务端已重新编译为API0.3的加密 .ztplugin，分别发布到 dist/plugins/ztgui_voice_chat.ztplugin 和 dist/server-plugins/ztserver_voice_chat.ztplugin。Windows使用安装后的客户端SDK、Qt6.8.3/MSVC2022/x64 Release；真实封装包的动态加载、页面创建、音频设置、连接／断开、异步卸载和再次加载通过，音频／页面源码测试两组通过。Linux Qt6.4.2服务端插件的5项隔离语音集成全部通过，涵盖容量、超时、UDP隔离、静音和过期凭据。未连接已部署服务器，未进行真实多人麦克风／耳机听感验收。
+
+## 媒体库随包交付
+
+安装更新后的 API 0.4 SDK 后，可仅执行 `.agent/skills/ztgui-build/scripts/build-plugin-windows.ps1 -PluginDirectory src/plugins/voice-chat/client -Target ztgui_voice_chat -QtRoot $qtSdk -ApiSdk dist/ZTGUI-api-v0.4`。默认输出单个 v2 `.ztplugin`，包含 Multimedia、Kit 默认媒体后端、实际 FFmpeg 和 Qt/FFmpeg/Opus 许可证。基础 Qt 由宿主共享、Opus 静态链接。Kit 需匹配宿主 qtBuildId；Linux 客户端/macOS 媒体部署未验证。加载寿命和 Kit 许可证要求见[运行依赖分离](../../../../../docs/plugin-runtime-separation.md)。
+
+2026-10-14 运行依赖分离验收：v2 正式产物、独立 SDK 构建、实际加载结果和明确未验证的平台/听感项目统一记录在[本轮验收](../../../../../docs/plugin-runtime-separation.md#验证记录)，其中客户端完成真实设备零增益回送及20轮热卸载。
+
+2026-10-14 版本升级：宿主0.4.1、SDK0.4，当前插件须使用API0.4重编；客户端/3.0和服务端/2.0 IID保持不变，上方API0.3记录为历史验证。

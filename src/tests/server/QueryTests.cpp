@@ -12,7 +12,7 @@ class QueryTests : public QObject {
     Q_OBJECT
 private slots:
     void wireLimitsAndFragmentation() {
-        auto bytes=protocol::frame("test.echo",QByteArray("a\0b",3));
+        auto bytes=protocol::frame("test-echo",QByteArray("a\0b",3));
         QByteArray input=bytes.left(5); protocol::Packet packet;
         QCOMPARE(protocol::takeFrame(input,packet),protocol::ReadResult::Incomplete);
         input += bytes.mid(5)+bytes;
@@ -20,7 +20,7 @@ private slots:
         QCOMPARE(packet.payload,QByteArray("a\0b",3));
         QCOMPARE(protocol::takeFrame(input,packet),protocol::ReadResult::Packet); QVERIFY(input.isEmpty());
         QVERIFY(protocol::encode("../bad",{}).isEmpty());
-        QVERIFY(protocol::encode("test.echo",QByteArray(protocol::MaxTcpBytes,'x')).isEmpty());
+        QVERIFY(protocol::encode("test-echo",QByteArray(protocol::MaxTcpBytes,'x')).isEmpty());
         input=QByteArray::fromHex("00100001");
         QCOMPARE(protocol::takeFrame(input,packet),protocol::ReadResult::Invalid);
         QVERIFY(!protocol::decode("ZTS1\1\0",packet));

@@ -21,8 +21,12 @@ public:
     void getZTNetworks(QObject *context, JsonCallback completed) override;
     void getZTMoons(QObject *context, JsonCallback completed) override;
     void sendDataTo(const QString &, const QString &, const QByteArray &, QObject *, SendCallback) override;
-    void broadcastDataTo(const QString &, const QByteArray &, QObject *, SendCallback) override;
+    void broadcastDataTo(const QString &, const QStringList &, const QByteArray &, QObject *, SendCallback) override;
+    void broadcastDataBalancedTo(const QString &, const QStringList &, const QByteArray &, QObject *, SendCallback) override;
+    void getNetworkRelays(const QString &, QObject *, RelayCallback) override;
+    NetworkSubscription *subscribeNetworkData(const QString &, QObject *, NetworkCallback) override;
     void stopRequests();
+    bool hasCallbacks() const { return m_callbacks.use_count()>1; }
 private:
     QString m_sharedDataRoot;
     QString m_pluginName;
@@ -31,8 +35,9 @@ private:
     QFile m_logFile;
     QObject m_requests;
     bool m_stopped = false;
+    std::shared_ptr<int> m_callbacks=std::make_shared<int>(0);
     QString filePath(const QString &relativePath, bool writing, QString &error) const;
     void query(const QString &command, bool object, QObject *context, JsonCallback completed);
-    void sendNetwork(const QString &, const QString &, const QByteArray &, QObject *, SendCallback);
+    void sendNetwork(const QString &, const QStringList &, const QByteArray &, bool, QObject *, SendCallback);
 };
 }

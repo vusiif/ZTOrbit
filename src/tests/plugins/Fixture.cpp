@@ -1,6 +1,9 @@
 #include <ztgui/PluginInterface.h>
 #include <ztgui/PluginLifecycle.h>
 #include <QThread>
+#include <QElapsedTimer>
+#include <QCoreApplication>
+#include <stdexcept>
 #include <QFile>
 #include <QQuickItem>
 #include <QQmlEngine>
@@ -39,6 +42,7 @@ class Fixture final : public QObject, public vusiif::ztgui::api::PluginInterface
 #if defined(FIXTURE_LIFECYCLE) || defined(FIXTURE_CANCELLABLE)
     Q_INTERFACES(vusiif::ztgui::api::PluginLifecycleInterface)
 #endif
+    vusiif::ztgui::util::HostServices *borrowed=nullptr;
 public:
 #ifdef FIXTURE_CANCELLABLE
     vusiif::ztgui::api::CreateTask onCreate(vusiif::ztgui::util::HostServices &,
@@ -69,7 +73,7 @@ public:
 #ifdef FIXTURE_LIFECYCLE
     vusiif::ztgui::api::CreateTask onCreate(vusiif::ztgui::util::HostServices &services,
                                           const vusiif::ztgui::util::CancellationToken &) override {
-        mark("create");
+        mark("create"); borrowed=&services;
         services.files().readFile("fixture/missing.txt");
 #ifdef FIXTURE_LEGACY_API
         services.zeroTier().getZTInfo(this, [](const vusiif::ztgui::util::JsonResult &) { mark("legacy-query"); });
@@ -83,9 +87,15 @@ public:
     }
 #endif
 #if defined(FIXTURE_LIFECYCLE) || defined(FIXTURE_CANCELLABLE)
-    void onDestroy() override { mark("destroy"); }
+    void onDestroy() override { mark("destroy"); if(qEnvironmentVariableIsSet("ZTGUI_PLUGIN_DESTROY_THROWS")) throw std::runtime_error("fixture cleanup error"); }
     void onEnteredFrom(const vusiif::ztgui::api::MenuLocation &previous) override {
         mark(("entered:" + previous.menu.id).toUtf8().constData());
+        if(borrowed && qEnvironmentVariableIsSet("ZTGUI_PLUGIN_NESTED_CALLBACK"))
+            borrowed->zeroTier().getNetworkRelays("0123456789abcdef",this,[](const vusiif::ztgui::util::RelayResult &) {
+                mark("callback-start"); QElapsedTimer elapsed; elapsed.start();
+                while(elapsed.elapsed()<250) { QCoreApplication::processEvents(); QThread::msleep(1); }
+                mark("callback-end");
+            });
     }
     void onExitedTo(const vusiif::ztgui::api::MenuLocation &next) override {
         mark(("exited:" + next.menu.id).toUtf8().constData());
@@ -95,9 +105,9 @@ public:
     vusiif::ztgui::api::PluginDefinition definition() override {
         auto resource = std::make_shared<Resource>();
         vusiif::ztgui::api::PluginDefinition result;
-        result.info = {"test.dynamic", "Dynamic", "1"};
+        result.info = {"test-dynamic", "Dynamic", "1"};
 #ifdef FIXTURE_LIFECYCLE
-        result.info.id = "test.lifecycle";
+        result.info.id = "test-lifecycle";
 #endif
 #ifdef FIXTURE_CANCELLABLE
         result.info.id = QStringLiteral(FIXTURE_ID);

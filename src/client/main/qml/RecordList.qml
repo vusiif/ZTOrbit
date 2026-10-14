@@ -211,7 +211,8 @@ ColumnLayout {
                         Layout.leftMargin: 46
                         Layout.preferredHeight: 28
                         Label { text: "名称"; color: Theme.muted; font.pixelSize: 12; Layout.preferredWidth: 180 }
-                        Label { text: "内网 IP ▴"; color: Theme.muted; font.pixelSize: 12 }
+                        Label { text: "内网 IP ▴"; color: Theme.muted; font.pixelSize: 12; Layout.preferredWidth: 240 }
+                        Label { text: "延迟"; color: Theme.muted; font.pixelSize: 12 }
                     }
                 Repeater {
                     model: record.members
@@ -220,6 +221,7 @@ ColumnLayout {
                         objectName: "networkMemberRow"
                         required property string rowId
                         required property string name
+                        required property var details
                         required property var cells
                         property bool editing: false
                         Layout.fillWidth: true
@@ -244,7 +246,15 @@ ColumnLayout {
                                     Keys.onEscapePressed: { member.editing = false; root.forceActiveFocus() }
                                 }
                             }
-                            Label { text: member.cells[0] || "—"; color: Theme.muted; elide: Text.ElideRight; Layout.maximumWidth: member.width * 0.5 }
+                            Label { text: member.cells[0] || "—"; Layout.preferredWidth: 240; color: Theme.muted; elide: Text.ElideRight; Layout.maximumWidth: member.width * 0.5 }
+                            Label {
+                                id: memberLatency
+                                text: member.cells.length > 1 ? member.cells[1] : "—"
+                                color: Theme.muted
+                                Layout.preferredWidth: 110
+                                HoverHandler { id: latencyHover }
+                                AppToolTip { parent: memberLatency; visible: latencyHover.hovered; text: member.details.latencySource || "" }
+                            }
                             Item { Layout.fillWidth: true }
                         }
                         LazyPopup {

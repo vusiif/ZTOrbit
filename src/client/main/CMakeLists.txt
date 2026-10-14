@@ -1,6 +1,6 @@
 set(ZTGUI_MAIN_SOURCES
     AppController.cpp RecordModel.cpp SystemOperations.cpp AppLog.cpp SingleInstance.cpp PluginImport.cpp
-    ZeroTierClient.cpp NetworkMembers.cpp NetworkBundle.cpp MacPlatform.cpp
+    ClientNetworkService.cpp ZeroTierClient.cpp NetworkMembers.cpp NetworkBundle.cpp MacPlatform.cpp
     plugins/PluginRegistry.cpp plugins/PluginLoader.cpp plugins/HostServicesImpl.cpp)
 set(ZTGUI_MAIN_HEADERS
     AppController.h RecordModel.h SystemOperations.h AppLog.h SingleInstance.h PluginImport.h ZeroTierClient.h
@@ -12,7 +12,11 @@ set(ZTGUI_MAIN_HEADERS "${ZTGUI_MAIN_HEADERS}" PARENT_SCOPE)
 
 # Shared build settings, with separate compilations for production and tests.
 function(ztgui_configure_host target)
-    target_link_libraries(${target} PRIVATE ZTGUI::Api Qt6::Concurrent Qt6::Network Qt6::QuickControls2)
+    ztgui_embed_host_contract(${target} "${ZTGUI_CLIENT_CONTRACT_DIRECTORY}")
+    foreach(module IN LISTS ZTGUI_CLIENT_HOST_QT_MODULES)
+        target_link_libraries(${target} PRIVATE Qt6::${module})
+    endforeach()
+    target_link_libraries(${target} PRIVATE ztgui_network ztgui_package ZTGUI::Api Qt6::Concurrent Qt6::Network Qt6::QuickControls2)
     target_include_directories(${target} PRIVATE "${ZTGUI_ROOT_DIR}/src/client/main")
     target_compile_definitions(${target} PRIVATE ZEROTIER_GUI_VERSION="${ZEROTIER_VERSION}")
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}")
@@ -40,7 +44,7 @@ function(ztgui_add_qml_ui target)
         list(APPEND qml_options NO_CACHEGEN)
     endif()
     set(qml_sources)
-    foreach(name Main Theme ActionButton RecordList Guide StartupError LazyPopup AppPopup AppDialog AppMenu AppMenuItem BoundedScrollView GearButton GearIcon ThemeToggle)
+    foreach(name SettingsPage AppToolTip Main Theme ActionButton RecordList Guide StartupError LazyPopup AppPopup AppDialog AppMenu AppMenuItem BoundedScrollView GearButton GearIcon ThemeToggle)
         set(source "${ZTGUI_ROOT_DIR}/src/client/main/qml/${name}.qml")
         set_source_files_properties("${source}" PROPERTIES QT_RESOURCE_ALIAS "qml/${name}.qml")
         list(APPEND qml_sources "${source}")
@@ -70,4 +74,11 @@ endif()
 if(MSVC)
     target_compile_options(zerotier_gui PRIVATE $<$<CONFIG:Release>:/O1 /GL /Gy>)
     target_link_options(zerotier_gui PRIVATE $<$<CONFIG:Release>:/LTCG /OPT:REF /OPT:ICF>)
+endif()
+
+if(WIN32)
+    foreach(app zerotier_gui)
+        add_custom_command(TARGET ${app} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:ztgui_sodium>" "$<TARGET_FILE_DIR:${app}>")
+    endforeach()
 endif()

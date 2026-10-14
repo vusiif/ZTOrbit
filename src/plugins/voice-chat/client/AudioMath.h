@@ -10,6 +10,14 @@
 #include <Protocol.h>
 namespace vusiif::ztgui::voice_chat {
 inline float clampSample(float value) { return std::isfinite(value) ? std::clamp(value, -1.0f, 1.0f) : 0.0f; }
+inline void applyGain(QVector<float> &samples, float gain) {
+    gain=std::isfinite(gain)?std::clamp(gain,0.0f,2.0f):0.0f;
+    for(auto &sample:samples) sample=clampSample(sample*gain);
+}
+inline void mixStream(QVector<float> &mixed,const QVector<float> &frame,float gain) {
+    gain=std::isfinite(gain)?std::clamp(gain,0.0f,2.0f):0.0f;
+    for(qsizetype i=0;i<std::min(mixed.size(),frame.size());++i) mixed[i]+=frame[i]*gain;
+}
 class Resampler {
     QVector<float> samples;
     double position = 0;

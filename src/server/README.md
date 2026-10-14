@@ -14,7 +14,7 @@ cmake -S src/server -B cmake-build-server -DZTSERVER_BUILD_VOICE_PLUGIN=ON
 cmake --build cmake-build-server --target ztserver_voice_chat --parallel
 ```
 
-`bash scripts/build-linux.sh --build-voice-plugin` 生成 `dist/linux-x64.tar.gz`、条件更新的 `dist/ZTServer-api-v0.3.zip`，以及独立 `dist/server-plugins/ztserver_voice_chat.so`。不带插件开关只编译宿主。运行包不携带测试、插件或运行数据，目标机器需安装匹配的动态 Qt Core/Network 运行库（Ubuntu24.04：`libqt6core6t64 libqt6network6t64`）。
+`bash scripts/build-linux.sh --build-voice-plugin` 生成 `dist/linux-x64.tar.gz`、条件更新的 `dist/ZTServer-api-v0.4.zip`，以及独立 `dist/server-plugins/ztserver_voice_chat.ztplugin`。不带插件开关只编译宿主。运行包不携带测试、插件或运行数据，目标机器需安装匹配的动态 Qt Core/Network 运行库（Ubuntu24.04：`libqt6core6t64 libqt6network6t64`）。
 
 ## 启动
 

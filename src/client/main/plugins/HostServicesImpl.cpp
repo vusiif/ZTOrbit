@@ -1,4 +1,6 @@
 #include "HostServicesImpl.h"
+#include "ClientNetworkService.h"
+#include "NetworkTransport.h"
 #include "../ZeroTierClient.h"
 #include "../NetworkMembers.h"
 #include "../AppLog.h"
@@ -155,9 +157,9 @@ void HostServicesImpl::query(const QString &command, bool object, QObject *conte
     connect(context, &QObject::destroyed, request, [request] { delete request; });
     const QPointer<QObject> target(context);
     // Even missing CLI/authorization errors must complete asynchronously.
-    QTimer::singleShot(0, request, [request, target, command, object, completed = std::move(completed)] {
+    QTimer::singleShot(0, request, [request, target, command, object, completed = std::move(completed),lease=m_callbacks] {
         vusiif::ztgui::zerotier::command(request, {"-j", command},
-            [request, target, object, completed](bool success, const QString &text) {
+            [request, target, object, completed,lease](bool success, const QString &text) {
                 JsonResult result;
                 if (!success) result.error = text;
                 else {
@@ -184,41 +186,31 @@ void HostServicesImpl::getZTMoons(QObject *context, JsonCallback completed)
 { query("listmoons", false, context, std::move(completed)); }
 void HostServicesImpl::sendDataTo(const QString &network, const QString &member, const QByteArray &data,
                                   QObject *context, SendCallback completed)
-{
-    if (member.isEmpty()) {
-        if (m_stopped || !context || !completed || QThread::currentThread() != thread() || context->thread() != thread()) return;
-        auto *job = new QObject(&m_requests);
-        connect(context, &QObject::destroyed, job, [job] { delete job; });
-        QTimer::singleShot(0, job, [job, completed] {
-            job->deleteLater();
-            completed({0, QStringLiteral("成员 ID 不能为空")});
-        });
-        return;
-    }
-    sendNetwork(network, member, data, context, std::move(completed));
-}
-void HostServicesImpl::broadcastDataTo(const QString &network, const QByteArray &data,
+{ sendNetwork(network, {member}, data, false, context, std::move(completed)); }
+void HostServicesImpl::broadcastDataTo(const QString &network, const QStringList &members, const QByteArray &data,
                                        QObject *context, SendCallback completed)
-{ sendNetwork(network, {}, data, context, std::move(completed)); }
-void HostServicesImpl::sendNetwork(const QString &network, const QString &member, const QByteArray &data,
+{ sendNetwork(network, members, data, false, context, std::move(completed)); }
+void HostServicesImpl::broadcastDataBalancedTo(const QString &network, const QStringList &members, const QByteArray &data,
+                                               QObject *context, SendCallback completed)
+{ sendNetwork(network, members, data, true, context, std::move(completed)); }
+void HostServicesImpl::sendNetwork(const QString &network, const QStringList &members, const QByteArray &data, bool balanced,
                                     QObject *context, SendCallback completed)
 {
-    if (m_stopped || !context || !completed || QThread::currentThread() != thread() || context->thread() != thread()) return;
-    auto *job = new QObject(&m_requests);
-    connect(context, &QObject::destroyed, job, [job] { delete job; });
-    getZTNetworks(job, [this, job, network, member, data, completed](const JsonResult &networks) {
-        const auto finish = [job, completed](SendResult result) { job->deleteLater(); completed(result); };
-        if (!networks.ok()) { finish({0, networks.error}); return; }
-        QHostAddress server;
-        for (const auto &value : networks.document.array()) {
-            const auto object = value.toObject();
-            if (object.value("nwid").toString(object.value("id").toString()).compare(network, Qt::CaseInsensitive) == 0)
-                server = protocol::networkServer(object);
-        }
-        zerotier::requestMembers(job, server, network, [this, member, data, finish](const JsonResult &members) {
-            if (!members.ok()) { finish({0, members.error}); return; }
-            finish(sendNetworkData(members.document.array(), member, m_pluginId.toLatin1(), data));
-        });
-    });
+    if (m_stopped || !context || !completed || QThread::currentThread()!=thread() || context->thread()!=thread()) return;
+    auto *job=new QObject(&m_requests);
+    connect(context,&QObject::destroyed,job,[job] { delete job; });
+    network::ClientNetworkService::instance().transport().send(m_pluginId,network,members,data,balanced,job,
+        [job,completed=std::move(completed),lease=m_callbacks](const SendResult &result) { job->deleteLater(); completed(result); });
+}
+void HostServicesImpl::getNetworkRelays(const QString &networkId,QObject *context,RelayCallback completed) {
+    if(m_stopped || !context || !completed || QThread::currentThread()!=thread() || context->thread()!=thread()) return;
+    auto *job=new QObject(&m_requests); connect(context,&QObject::destroyed,job,[job] { delete job; });
+    network::ClientNetworkService::instance().transport().relays(networkId,job,[job,completed=std::move(completed),lease=m_callbacks](const RelayResult &r) { job->deleteLater(); completed(r); });
+}
+NetworkSubscription *HostServicesImpl::subscribeNetworkData(const QString &networkId,QObject *context,NetworkCallback callback) {
+    if(m_stopped || !context || QThread::currentThread()!=thread() || context->thread()!=thread()) return nullptr;
+    auto *sub=network::ClientNetworkService::instance().transport().subscribe(m_pluginId,networkId,context,[callback=std::move(callback),lease=m_callbacks](const NetworkMessage &message) { if(callback) callback(message); });
+    if(sub) { auto *guard=new QObject(&m_requests); connect(guard,&QObject::destroyed,sub,[sub] { sub->cancel(); }); }
+    return sub;
 }
 }

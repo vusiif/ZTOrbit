@@ -58,6 +58,10 @@ ApplicationWindow {
         NumberAnimation { target: pageHost; property: "opacity"; to: 1; duration: 140; easing.type: Easing.OutCubic }
     }
     NumberAnimation { id: pageReveal; target: pageHost; property: "opacity"; from: 0; to: 1; duration: 140 }
+    function pluginStatus(value) {
+        const labels = {"Ready": "已加载", "Preparing": "准备中…", "Stopping": "正在卸载…", "Disabled": "已禁用"}
+        return labels[value] || value || "已加载"
+    }
     function showDetails(kind, id, name) {
         detailKind = kind; detailId = id
         detailLoader.ensure().title = "详细信息 — " + name
@@ -118,7 +122,7 @@ ApplicationWindow {
                         Behavior on color { enabled: !Theme.transitioning; ColorAnimation { duration: 140 } }
                     }
                     Label { text: "ZTGUI"; font.pixelSize: 24; font.bold: true; color: Theme.accent; Layout.fillWidth: true }
-                    Label { text: "v" + backend.version; font.pixelSize: 11; color: Theme.muted }
+                    Label { objectName: "sidebarVersionLabel"; text: "v" + backend.version; font.pixelSize: 11; color: Theme.muted }
                 }
                 ListView {
                     id: navigation
@@ -148,11 +152,14 @@ ApplicationWindow {
                             color: parent.highlighted ? Theme.selection : parent.hovered ? Theme.hover : "transparent"
                             Rectangle { visible: parent.parent.highlighted; width: 3; height: 22; anchors.verticalCenter: parent.verticalCenter; color: Theme.accent }
                         }
-                        ToolTip.visible: hovered && (modelData.message !== "" || (modelData.toolTip || "") !== "")
-                        ToolTip.text: modelData.message || modelData.toolTip || ""
+                        AppToolTip {
+                            parent: navigationItem
+                            visible: navigationItem.hovered && ((navigationItem.modelData.message || "") !== "" || (navigationItem.modelData.toolTip || "") !== "")
+                            text: navigationItem.modelData.message || navigationItem.modelData.toolTip || ""
+                        }
                     }
                 }
-                GearButton { objectName: "settingsButton"; Layout.alignment: Qt.AlignLeft; onClicked: settingsLoader.open() }
+                GearButton { objectName: "settingsButton"; Layout.alignment: Qt.AlignLeft; selected: backend.activeMenu === "builtin/settings"; onClicked: window.navigateTo("builtin/settings") }
             }
         }
         Item {
@@ -283,7 +290,14 @@ ApplicationWindow {
                     Item { Layout.preferredHeight: 24 }
                 }
             }
-            Item { id: pluginContainer; objectName: "pluginContainer"; anchors.fill: parent; visible: backend.activeMenu !== "builtin/zerotier" }
+            SettingsPage {
+                anchors.fill: parent
+                visible: backend.activeMenu === "builtin/settings"
+                backend: window.backend
+                onOpenPlugins: pluginLoader.open()
+                onOpenAbout: aboutLoader.open()
+            }
+            Item { id: pluginContainer; objectName: "pluginContainer"; anchors.fill: parent; visible: backend.activeMenu !== "builtin/zerotier" && backend.activeMenu !== "builtin/settings" }
         }
     }
     footer: Pane {
@@ -294,71 +308,6 @@ ApplicationWindow {
             anchors.fill: parent
             BusyIndicator { running: backend.busy || backend.closing; visible: running; implicitWidth: 24; implicitHeight: 24 }
             Label { text: backend.closing ? backend.shutdownMessage : backend.feedback || "正在执行操作…"; wrapMode: Text.Wrap; color: Theme.text; Layout.fillWidth: true }
-        }
-    }
-    LazyPopup {
-        id: settingsLoader
-        sourceComponent: AppPopup {
-            id: settingsPopup
-            objectName: "settingsPopup"
-            width: Math.min(320, window.width - 40)
-            x: 20
-            y: Math.max(0, window.height - height - 70)
-            padding: 20
-            focus: true
-            ColumnLayout {
-                width: settingsPopup.availableWidth
-                spacing: 14
-                Label { text: "设置"; font.pixelSize: 18; font.bold: true }
-                RowLayout {
-                    Label { text: "主题" }
-                    ThemeToggle {
-                        objectName: "themeSelector"
-                        checked: backend.dark
-                        onClicked: backend.theme = checked ? "dark" : "light"
-                    }
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "禁止GPU加速"; Layout.fillWidth: true }
-                    Switch {
-                        id: gpuAccelerationSwitch
-                        objectName: "disableGpuAccelerationSwitch"
-                        Accessible.name: "禁止GPU加速"
-                        implicitWidth: 52
-                        implicitHeight: 32
-                        checked: backend.gpuAccelerationForcedOff || backend.disableGpuAcceleration
-                        enabled: !backend.gpuAccelerationForcedOff
-                        onClicked: backend.disableGpuAcceleration = checked
-                        indicator: Rectangle {
-                            anchors.centerIn: parent
-                            width: 48; height: 28; radius: 14
-                            color: gpuAccelerationSwitch.checked ? Theme.accent : Theme.button
-                            border.color: gpuAccelerationSwitch.activeFocus ? Theme.accent : Theme.border
-                            opacity: gpuAccelerationSwitch.enabled ? 1 : 0.6
-                            Rectangle {
-                                width: 22; height: 22; radius: 11; y: 3
-                                x: gpuAccelerationSwitch.checked ? parent.width - width - 3 : 3
-                                color: gpuAccelerationSwitch.checked ? Theme.window : Theme.text
-                                Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.InOutCubic } }
-                            }
-                        }
-                        HoverHandler { cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
-                    }
-                }
-                Label {
-                    objectName: "gpuAccelerationHint"
-                    Layout.fillWidth: true
-                    text: backend.gpuAccelerationForcedOff
-                        ? "本次启动已由启动参数禁用GPU加速。"
-                        : "开启后使用CPU绘制。\n完全退出并重启程序后生效。"
-                    wrapMode: Text.Wrap
-                    color: Theme.muted
-                }
-                ActionButton { text: "插件"; Layout.fillWidth: true; onClicked: { settingsLoader.close(); pluginLoader.open() } }
-                ActionButton { text: "关于"; Layout.fillWidth: true; onClicked: { settingsLoader.close(); aboutLoader.open() } }
-                ActionButton { text: "退出"; Layout.fillWidth: true; onClicked: backend.requestQuit() }
-            }
         }
     }
     LazyPopup {
@@ -509,7 +458,7 @@ ApplicationWindow {
             closePolicy: Popup.CloseOnEscape
             ColumnLayout {
                 anchors.fill: parent
-                Label { text: "增减插件后重启 ZTGUI 生效。"; wrapMode: Text.Wrap; Layout.fillWidth: true; color: Theme.muted }
+                Label { text: "可以运行时加载或卸载插件；卸载保留插件文件和数据。"; wrapMode: Text.Wrap; Layout.fillWidth: true; color: Theme.muted }
                 ListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -519,13 +468,13 @@ ApplicationWindow {
                     delegate: ItemDelegate {
                         required property var modelData
                         width: ListView.view.width
-                        text: modelData.name + "  v" + modelData.version + (modelData.message ? "  " + modelData.message : "")
+                        text: modelData.name + "  v" + modelData.version + "  " + window.pluginStatus(modelData.message)
                         onClicked: { window.aboutPlugin = modelData; pluginAboutLoader.open() }
                         TapHandler { acceptedButtons: Qt.RightButton; onTapped: pluginMenu.popup() }
                         AppMenu {
                             id: pluginMenu
-                            AppMenuItem { text: "加载"; enabled: false }
-                            AppMenuItem { text: "卸载"; enabled: false }
+                            AppMenuItem { text: "加载"; enabled: modelData.loadable && !modelData.loaded && !modelData.stopping; onTriggered: backend.loadPlugin(modelData.id) }
+                            AppMenuItem { text: "卸载"; enabled: modelData.loaded && !modelData.stopping; onTriggered: backend.unloadPlugin(modelData.id) }
                             AppMenuItem { text: "关于"; onTriggered: { window.aboutPlugin = modelData; pluginAboutLoader.open() } }
                         }
                     }
@@ -556,7 +505,7 @@ ApplicationWindow {
                 Label { text: "插件 ID：" + (window.aboutPlugin.id || ""); wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Label { text: "版本：" + (window.aboutPlugin.version || "") }
                 Label { text: "API：" + (window.aboutPlugin.api || "") }
-                Label { text: "加载状态：" + (window.aboutPlugin.message || "已加载") }
+                Label { text: "加载状态：" + window.pluginStatus(window.aboutPlugin.message) }
             }
         }
     }
@@ -564,6 +513,7 @@ ApplicationWindow {
         id: aboutLoader
         sourceComponent: AppDialog {
             id: aboutDialog
+            objectName: "aboutDialog"
             title: "关于"
             anchors.centerIn: parent
             standardButtons: Dialog.Close
@@ -571,7 +521,7 @@ ApplicationWindow {
                 anchors.fill: parent
                 spacing: 12
                 Label { text: "ZTGUI"; font.pixelSize: 24; font.bold: true }
-                Label { text: "v" + backend.version }
+                Label { objectName: "aboutVersionLabel"; text: "v" + backend.version }
                 Label { text: "API " + backend.apiVersion }
                 Label { text: "Qt " + backend.qtVersion }
             }
@@ -611,7 +561,7 @@ ApplicationWindow {
     }
     LazyPopup {
         id: pluginFileLoader
-        sourceComponent: FileDialog { id: pluginFile; title: "导入插件"; nameFilters: ["插件 (*.dll *.dylib *.so)"]; onAccepted: backend.importPlugin(selectedFile) }
+        sourceComponent: FileDialog { id: pluginFile; title: "导入插件"; nameFilters: ["插件 (*.ztplugin)"]; onAccepted: backend.importPlugin(selectedFile) }
 
     }
 }

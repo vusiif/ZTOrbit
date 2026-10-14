@@ -33,7 +33,7 @@ void requestMembers(QObject *context, const QHostAddress &server, const QString 
     QObject::connect(socket, &QTcpSocket::disconnected, job, [done] { done({{}, QStringLiteral("服务器已断开连接")}); });
     QObject::connect(socket, &QTcpSocket::connected, job, [socket, networkId] {
         const QJsonObject request{{"v", 1}, {"id", 1}, {"op", "controller.members"},
-                                  {"data", QJsonObject{{"networkId", networkId.toLower()}}}};
+                                  {"data", QJsonObject{{"networkId", networkId.toLower()},{"purpose","ui-members"}}}};
         socket->write(protocol::frame("builtin", QJsonDocument(request).toJson(QJsonDocument::Compact)));
     });
     QObject::connect(socket, &QTcpSocket::readyRead, job, [done, socket, input] {

@@ -33,7 +33,7 @@ void RecordModel::update(const QString &id, const QVariantMap &fields)
                 for (const auto &value : it.value().toList()) {
                     const auto member = value.toMap();
                     members.append({{"rowId", member.value("id")}, {"name", member.value("name")},
-                        {"cells", QStringList{member.value("ip").toString()}}});
+                        {"cells", QStringList{member.value("ip").toString(),member.value("latency").toString()}}, {"details",QVariantMap{{"latencySource",member.value("latencySource")}}}});
                 }
                 auto *model = m_memberModels.value(id);
                 if (!model && !members.isEmpty()) {

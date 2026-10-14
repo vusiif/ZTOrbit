@@ -21,7 +21,7 @@ def fingerprint(path):
         if file.is_file():
             digest.update(file.relative_to(path).as_posix().encode()); digest.update(file.read_bytes())
     return digest.hexdigest()
-inputs=version+':'+fingerprint(root/'src/server/api')+':'+fingerprint(root/'src/shared/include')+':'+hashlib.sha256((root/'cmake/Version.cmake').read_bytes()).hexdigest()
+inputs=version+':'+fingerprint(root/'src/server/api')+':'+fingerprint(root/'src/shared/include')+':'+fingerprint(root/'src/shared/package')+':'+hashlib.sha256((root/'src/shared/CMakeLists.txt').read_bytes()).hexdigest()+':'+hashlib.sha256((root/'cmake/Version.cmake').read_bytes()).hexdigest()
 try: state=json.loads(state_file.read_text())
 except (OSError,ValueError): state={}
 changed=not sdk.is_dir() or not (sdk/'lib/cmake/ZTServerPluginApi/ZTServerPluginApiTargets.cmake').is_file() or state.get('inputs')!=inputs or state.get('sdk')!=fingerprint(sdk)
@@ -32,6 +32,7 @@ if changed:
         if homes and Path(homes[0]).resolve() != (root/'src/server/api').resolve():
             build.rename(build.with_name(build.name+f'.previous-{time.time_ns()}'))
     subprocess.run(['cmake','-S',str(root/'src/server/api'),'-B',str(build),'-DCMAKE_INSTALL_LIBDIR:STRING=lib'],check=True)
+    subprocess.run(['cmake','--build',str(build),'--target','ztplugin_pack','--parallel'],check=True)
     root.joinpath('dist').mkdir(exist_ok=True)
     staging=Path(tempfile.mkdtemp(prefix='.ztserver-api-',dir=root/'dist'))
     subprocess.run(['cmake','--install',str(build),'--prefix',str(staging)],check=True)

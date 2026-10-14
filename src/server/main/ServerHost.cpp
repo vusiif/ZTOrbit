@@ -13,6 +13,9 @@
 #include <stdexcept>
 #include <QDebug>
 #include <limits>
+#include "PluginPackage.h"
+#include "PluginRuntime.h"
+#include <QFile>
 namespace vusiif::ztgui::server {
 namespace wire = protocol;
 ServerHost::ServerHost(QString directory) : m_directory(std::move(directory)), m_queries(this) {
@@ -25,25 +28,43 @@ ServerHost::~ServerHost() { stop(); }
 bool ServerHost::start(const QHostAddress &address, quint16 port) {
     if (!m_tcp.listen(address, port)) { qCritical() << "TCP bind failed:" << m_tcp.errorString(); return false; }
     if (!m_udp.bind(address, m_tcp.serverPort())) { qCritical() << "UDP bind failed:" << m_udp.errorString(); m_tcp.close(); return false; }
+    QFile configuration(QDir(m_directory).filePath("relays.json"));
+    if(configuration.open(QIODevice::ReadOnly)) m_transport.setRelayConfig(QJsonDocument::fromJson(configuration.read(65536)).object());
+    connect(&m_transport,&network::NetworkTransport::received,this,[this](const QString &route,const util::NetworkMessage &message) {
+        auto *entry=plugin(route); if(!entry||!entry->ready) return;
+        try { entry->entry->onUdpPacket({{},protocol::ClientNetworkPort},message.data); }
+        catch(...) { qWarning()<<"Plugin delivery callback failed"<<route; }
+    });
     scan(); m_timer.start(100);
     qInfo() << "zt-server listening" << address << "TCP/UDP" << m_tcp.serverPort(); return true;
 }
 void ServerHost::scan() {
+    package::cleanStaleCache();
     const QDir directory(QDir(m_directory).filePath("plugins"));
-    for (const auto &file : directory.entryInfoList({"*.so"}, QDir::Files | QDir::NoSymLinks, QDir::Name)) {
-        Plugin loaded; loaded.library = std::make_unique<QPluginLoader>(file.absoluteFilePath());
+    for (const auto &file : directory.entryInfoList({"*.ztplugin"}, QDir::Files | QDir::NoSymLinks, QDir::Name)) {
+        Plugin loaded; const auto pkg=package::inspect(file.absoluteFilePath());
+        QString error=pkg.error; if(error.isEmpty()) error=package::validate(pkg.info,"server",api::ApiVersion,ZTSERVER_PLUGIN_IID);
+        if(error.isEmpty()&&plugin(pkg.info["id"].toString())) error="Duplicate plugin ID";
+        if(error.isEmpty()) for(const auto &registered:m_plugins) if(registered.info.name.compare(pkg.info["name"].toString(),Qt::CaseInsensitive)==0) error="Duplicate plugin data directory/name";
+        QString library; if(error.isEmpty()) error=package::extract(pkg,loaded.cache,library,loaded.cacheLock);
+        if(!error.isEmpty()) { qWarning()<<"Rejected package"<<file.fileName()<<error; continue; }
+        loaded.library = std::make_unique<QPluginLoader>();
         loaded.library->setLoadHints(QLibrary::ResolveAllSymbolsHint);
+        loaded.library->setFileName(library);
         const auto metadata = loaded.library->metaData();
         if (metadata.value("IID").toString() != QLatin1String(ZTSERVER_PLUGIN_IID) ||
             metadata.value("MetaData").toObject().value("apiVersion").toString() != QLatin1String(api::ApiVersion)) {
             qWarning() << "Rejected plugin metadata" << file.fileName(); continue;
         }
+        error=package::activateRuntime(pkg,loaded.cache->path());
+        if(!error.isEmpty()) { qWarning()<<"Rejected runtime"<<file.fileName()<<error; continue; }
         try {
             loaded.entry = qobject_cast<api::PluginInterface *>(loaded.library->instance());
             if (!loaded.entry) throw std::runtime_error("plugin entry unavailable");
             loaded.info = loaded.entry->info();
             const auto &info = loaded.info;
             if (!wire::validId(info.id.toLatin1()) || info.id.toLatin1() != info.id.toUtf8() || info.id == "builtin" ||
+                info.id!=pkg.info["id"].toString() || info.name!=pkg.info["name"].toString() || info.version!=pkg.info["version"].toString() ||
                 info.apiMajor != api::ApiMajor || info.apiMinor != api::ApiMinor || info.name.trimmed().isEmpty() ||
                 plugin(info.id)) throw std::runtime_error("invalid, duplicate or incompatible plugin");
             loaded.services = std::make_unique<PluginServices>(*this, info.id, info.name, m_directory);
@@ -68,7 +89,7 @@ void ServerHost::scan() {
     }
 }
 ServerHost::Plugin *ServerHost::plugin(const QString &id) {
-    for (auto &entry : m_plugins) if (entry.info.id == id) return &entry;
+    for (auto &entry : m_plugins) if (entry.info.id.compare(id,Qt::CaseInsensitive)==0) return &entry;
     return nullptr;
 }
 void ServerHost::poll() {
@@ -77,6 +98,16 @@ void ServerHost::poll() {
         if (!result.success) qWarning() << "Plugin initialization failed" << entry.info.id << result.message;
     }
     const auto now = QDateTime::currentMSecsSinceEpoch();
+    if(!m_networkPollPending && now-m_networkPolledAt>=2000) {
+        m_networkPollPending=true; m_networkPolledAt=now;
+        m_queries.query("info",{},this,[this](const api::JsonResult &info) {
+            if(!info.ok()) { m_networkPollPending=false; return; }
+            m_node=info.document.object()["address"].toString();
+            m_queries.query("networks",{},this,[this](const api::JsonResult &networks) {
+                m_networkPollPending=false; if(networks.ok()) m_transport.setNetworks(m_node,networks.document.array());
+            });
+        });
+    }
     for (const auto id : m_connections.keys()) if (now - m_connections.value(id).lastSeen > 30000) disconnect(id);
 }
 void ServerHost::accept() {
@@ -131,6 +162,9 @@ void ServerHost::datagrams() {
         if (m_stopping || datagram.data().size() > wire::MaxUdpBytes) continue;
         wire::Packet packet;
         if (!wire::decode(datagram.data(), packet)) continue;
+        if(packet.plugin=="builtin") {
+            m_transport.datagram(datagram.senderAddress(),quint16(datagram.senderPort()),packet.payload); continue;
+        }
         auto *entry = plugin(QString::fromLatin1(packet.plugin));
         if (!entry || !entry->ready) continue;
         try { entry->entry->onUdpPacket({datagram.senderAddress(), quint16(datagram.senderPort())}, packet.payload); }
@@ -144,6 +178,12 @@ void ServerHost::builtin(api::ConnectionId id, const QByteArray &payload) {
     if (parse.error != QJsonParseError::NoError || !document.isObject() || request.value("v").toInt() != 1 || !request.contains("id")) { disconnect(id); return; }
     const auto it = m_connections.find(id);
     if (it == m_connections.end()) return;
+    if(request["op"].toString().startsWith("network.")) {
+        m_transport.builtin(it->socket->peerAddress(),request,it->socket,[this,id,serial=request["id"]](QJsonObject response) {
+            response["v"]=1; response["id"]=serial;
+            sendTcp("builtin",id,QJsonDocument(response).toJson(QJsonDocument::Compact));
+        }); return;
+    }
     m_queries.query(request.value("op").toString(), request.value("data").toObject(), it->socket,
         [this, id, serial = request.value("id")](const api::JsonResult &result) {
             QJsonObject response{{"v",1},{"id",serial},{"ok",result.ok()}};
@@ -190,7 +230,13 @@ void ServerHost::stop() {
         // Consume the future so plugin-owned task captures die before unloading.
         if (entry.task.valid()) entry.task.get();
         try { entry.entry->onStop(); } catch (...) { qWarning() << "Plugin stop failed" << entry.info.id; }
-        entry.library->unload(); entry.services.reset();
+        if((!entry.library->unload()&&entry.library->isLoaded()) || package::businessLibraryMapped(entry.library->fileName())) {
+            qWarning()<<"Plugin library failed to unload"<<entry.info.id<<entry.library->errorString();
+            entry.cache->setAutoRemove(false); entry.library.release(); entry.cacheLock.release();
+        }
+        entry.library.reset(); entry.cacheLock.reset();
+        if(!entry.cache || entry.cache->autoRemove()) package::discardCache(entry.cache);
+        entry.services.reset();
     }
     m_plugins.clear();
 }

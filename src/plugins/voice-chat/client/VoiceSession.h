@@ -20,6 +20,8 @@ public:
     void configure(const QByteArray &input, const QByteArray &output, bool allowed);
     void mute(bool value);
     void deafen(bool value) { audio->setDeafened(value); }
+    void inputVolume(int value) { audio->setInputVolume(value/100.0f); }
+    void memberVolume(quint32 id,int value) { if(members.count(id)) audio->setMemberVolume(id,value/100.0f); }
     void volume(int value) { audio->setVolume(value / 100.0f); }
 signals:
     void notice(const QString &message);

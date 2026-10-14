@@ -11,7 +11,7 @@ inline bool validId(const QByteArray &id) {
     if (id.isEmpty() || id.size() > 128) return false;
     for (int i = 0; i < id.size(); ++i) {
         const auto c = id[i];
-        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || (i > 0 && (c == '.' || c == '_' || c == '-')))) return false;
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-')) return false;
     }
     return true;
 }

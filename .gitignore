@@ -9,3 +9,6 @@ screenshots/
 .tmp/
 __pycache__/
 *.pyc
+
+# Generated plugin UI test capture
+/voice-qml.png

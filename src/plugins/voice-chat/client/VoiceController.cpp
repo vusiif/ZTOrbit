@@ -13,7 +13,8 @@ VoiceController::VoiceController(QObject *parent, std::shared_ptr<AudioDeviceCac
 {
     QSettings settings;
     m_address = settings.value("voice-chat/address").toString(); m_nickname = settings.value("voice-chat/nickname").toString();
-    m_volume = std::clamp(settings.value("voice-chat/volume", 80).toInt(), 0, 100);
+    m_volume = std::clamp(settings.value("voice-chat/volume", 80).toInt(), 0, 200);
+    m_inputVolume=std::clamp(settings.value("voice-chat/inputVolume",100).toInt(),0,200);
     m_muted = settings.value("voice-chat/muted", false).toBool(); m_deafened = settings.value("voice-chat/deafened", false).toBool();
     m_input = settings.value("voice-chat/input").toByteArray(); m_output = settings.value("voice-chat/output").toByteArray();
     refreshDevices();
@@ -26,11 +27,16 @@ VoiceController::VoiceController(QObject *parent, std::shared_ptr<AudioDeviceCac
     connect(m_session, &VoiceSession::roomsChanged, this, [this](const QJsonArray &list) { m_rooms = list.toVariantList(); emit roomsChanged(); });
     connect(m_session, &VoiceSession::roomChanged, this, [this](const QJsonObject &value) {
         m_inRoom = !value.isEmpty(); m_currentRoom = m_inRoom ? value["name"].toString() : QStringLiteral("尚未加入房间");
-        m_members = value["members"].toArray().toVariantList(); emit stateChanged();
+        if(!m_inRoom) m_memberVolumes.clear();
+        m_members = value["members"].toArray().toVariantList();
+        QSet<quint32> present;
+        for(auto &v:m_members) { auto row=v.toMap(); const auto id=quint32(row["id"].toUInt()); present.insert(id); row["volume"]=memberVolume(id); v=row; }
+        for(auto i=m_memberVolumes.begin();i!=m_memberVolumes.end();) i=present.contains(i.key())?++i:m_memberVolumes.erase(i);
+        emit stateChanged();
     });
     m_thread.start(); configureAudio();
     if (m_cache->snapshot().ready) monitorDevices();
-    requestDeviceRefresh(); setMuted(m_muted); setDeafened(m_deafened); setVolume(m_volume);
+    requestDeviceRefresh(); setMuted(m_muted); setDeafened(m_deafened); setVolume(m_volume); setInputVolume(m_inputVolume);
 }
 VoiceController::~VoiceController()
 {
@@ -44,8 +50,19 @@ void VoiceController::setAddress(const QString &value) { if (m_connected || m_bu
 void VoiceController::setNickname(const QString &value) { if (m_connected || m_busy) return; m_nickname = value.left(64); save(); emit stateChanged(); }
 void VoiceController::setVolume(int value)
 {
-    m_volume = std::clamp(value, 0, 100); save(); emit stateChanged();
+    m_volume = std::clamp(value, 0, 200); save(); emit stateChanged();
     QMetaObject::invokeMethod(m_session, [worker = m_session, value = m_volume] { worker->volume(value); });
+}
+void VoiceController::setInputVolume(int value) {
+    m_inputVolume=std::clamp(value,0,200); save(); emit stateChanged();
+    QMetaObject::invokeMethod(m_session,[worker=m_session,value=m_inputVolume] { worker->inputVolume(value); });
+}
+void VoiceController::setMemberVolume(quint32 member,int value) {
+    if(!m_inRoom) return;
+    bool found=false; value=std::clamp(value,0,200);
+    for(auto &v:m_members) { auto row=v.toMap(); if(row["id"].toUInt()!=member || row["self"].toBool()) continue; row["volume"]=value; v=row; found=true; }
+    if(!found) return; m_memberVolumes[member]=value; emit stateChanged();
+    QMetaObject::invokeMethod(m_session,[worker=m_session,member,value] { worker->memberVolume(member,value); });
 }
 void VoiceController::setMuted(bool value) { m_muted = value; save(); emit stateChanged(); QMetaObject::invokeMethod(m_session, [worker = m_session, value] { worker->mute(value); }); }
 void VoiceController::setDeafened(bool value) { m_deafened = value; save(); emit stateChanged(); QMetaObject::invokeMethod(m_session, [worker = m_session, value] { worker->deafen(value); }); }
@@ -110,6 +127,7 @@ void VoiceController::save()
     QSettings settings;
     settings.setValue("voice-chat/address", m_address.trimmed()); settings.remove("voice-chat/port");
     settings.setValue("voice-chat/nickname", m_nickname.trimmed()); settings.setValue("voice-chat/input", m_input); settings.setValue("voice-chat/output", m_output);
+    settings.setValue("voice-chat/inputVolume",m_inputVolume);
     settings.setValue("voice-chat/volume", m_volume); settings.setValue("voice-chat/muted", m_muted); settings.setValue("voice-chat/deafened", m_deafened);
 }
 void VoiceController::withPermission(std::function<void()> action)

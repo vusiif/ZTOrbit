@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QThread>
 #include <QVariantList>
+#include <QHash>
 #include <memory>
 #include <functional>
 class QMediaDevices;
@@ -12,6 +13,8 @@ class VoiceController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString address READ address WRITE setAddress NOTIFY stateChanged)
     Q_PROPERTY(QString nickname READ nickname WRITE setNickname NOTIFY stateChanged)
+    Q_PROPERTY(int inputVolume READ inputVolume WRITE setInputVolume NOTIFY stateChanged)
+    Q_PROPERTY(int outputVolume READ volume WRITE setVolume NOTIFY stateChanged)
     Q_PROPERTY(int volume READ volume WRITE setVolume NOTIFY stateChanged)
     Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY stateChanged)
     Q_PROPERTY(bool deafened READ deafened WRITE setDeafened NOTIFY stateChanged)
@@ -31,6 +34,7 @@ public:
     ~VoiceController() override;
     QString address() const { return m_address; }
     QString nickname() const { return m_nickname; }
+    int inputVolume() const { return m_inputVolume; }
     int volume() const { return m_volume; }
     bool muted() const { return m_muted; }
     bool deafened() const { return m_deafened; }
@@ -48,6 +52,9 @@ public:
     void setAddress(const QString &value);
     void setNickname(const QString &value);
     void setVolume(int value);
+    void setInputVolume(int value);
+    Q_INVOKABLE void setMemberVolume(quint32 member,int value);
+    Q_INVOKABLE int memberVolume(quint32 member) const { return m_memberVolumes.value(member,100); }
     void setMuted(bool value);
     void setDeafened(bool value);
     void setInput(const QString &value);
@@ -66,7 +73,8 @@ private:
     std::shared_ptr<AudioDeviceCache> m_cache;
     QMediaDevices *m_devices;
     QString m_address, m_nickname, m_status = QStringLiteral("未连接"), m_currentRoom = QStringLiteral("尚未加入房间");
-    int m_volume = 80;
+    int m_volume = 80, m_inputVolume = 100;
+    QHash<quint32,int> m_memberVolumes;
     bool m_connected = false, m_busy = false, m_inRoom = false, m_muted = false, m_deafened = false, m_recordAllowed = true;
     bool m_monitoring = false, m_refreshPending = false;
     QByteArray m_input, m_output;

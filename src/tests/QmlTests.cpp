@@ -115,14 +115,35 @@ private slots:
         QVERIFY(m_window->grabWindow().save("screenshots/qml-small.png"));
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
+    void applicationVersionLabelsMatchRootVersion() {
+        QFile versionFile(QString::fromUtf8(ZTGUI_SOURCE_VERSION_FILE));
+        QVERIFY(versionFile.open(QIODevice::ReadOnly));
+        const auto expectedVersion = QString::fromUtf8(versionFile.readAll().trimmed());
+        QVERIFY(!expectedVersion.isEmpty());
+        openWindow();
+        QCOMPARE(m_controller->version(), expectedVersion);
+        auto *sidebarVersion = object("sidebarVersionLabel"); QVERIFY(sidebarVersion);
+        QCOMPARE(sidebarVersion->property("text").toString(), "v" + expectedVersion);
+        click("settingsButton"); QTest::qWait(180);
+        click("aboutButton");
+        QTRY_VERIFY(object("aboutDialog") && object("aboutDialog")->property("visible").toBool());
+        auto *aboutVersion = object("aboutVersionLabel"); QVERIFY(aboutVersion);
+        QCOMPARE(aboutVersion->property("text").toString(), "v" + expectedVersion);
+        QTest::qWait(180);
+        QVERIFY(m_window->grabWindow().save("screenshots/qml-application-version.png"));
+        m_controller->setTheme("dark"); QTest::qWait(200);
+        QCOMPARE(sidebarVersion->property("text").toString(), "v" + expectedVersion);
+        QCOMPARE(aboutVersion->property("text").toString(), "v" + expectedVersion);
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
+    }
     void themeToggleAndMoonPopupHaveUsableGeometry() {
         openWindow();
         QTRY_VERIFY(m_controller->service()["available"].toBool());
         QVERIFY(object("serviceStatusDot"));
-        click("settingsButton"); QTRY_VERIFY(object("settingsPopup"));
+        click("settingsButton"); QTRY_VERIFY(object("settingsPage"));
         QTest::qWait(220); click("themeSelector"); QTRY_VERIFY(m_controller->dark());
         QTest::qWait(250); QVERIFY(m_window->grabWindow().save("screenshots/qml-settings-dark.png"));
-        QTest::keyClick(m_window,Qt::Key_Escape); QTest::qWait(180);
+        m_controller->navigate(ZeroTierMenuId,qobject_cast<QQuickItem *>(object("pluginContainer"))); QTest::qWait(180);
         const auto dir=QDir(vusiif::ztgui::zerotier::moonDirectory()); QVERIFY(QDir().mkpath(dir.path()));
         QFile file(dir.filePath("0000000123456789.moon")); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("moon"); file.close();
         click("moonsButton"); QTRY_VERIFY(m_controller->moonsActive());
@@ -149,7 +170,7 @@ private slots:
         click("settingsButton"); QTest::qWait(220);
         QVERIFY(object("disableGpuAccelerationSwitch")->property("checked").toBool());
         m_controller->setTheme("dark"); m_window->resize(720,480); QTest::qWait(300);
-        auto *popup = object("settingsPopup"); QVERIFY(popup);
+        auto *popup = object("settingsPage"); QVERIFY(popup);
         QVERIFY(popup->property("y").toReal() + popup->property("height").toReal() <= m_window->height());
         QVERIFY(m_window->grabWindow().save("screenshots/qml-gpu-settings-dark-small.png"));
         click("disableGpuAccelerationSwitch"); QTRY_VERIFY(!m_controller->disableGpuAcceleration());
@@ -220,24 +241,36 @@ private slots:
         int creations=0;
         MenuContribution menu; menu.id="overview"; menu.title="Test";
         menu.createPage=[&](QQmlEngine *,QQuickItem *owner){ ++creations; return new QQuickItem(owner); };
-        QVERIFY(registry.registerPlugin({{"test.quick","Quick","1"},{menu}}).ok());
-        auto page=registry.page("test.quick/overview",&engine,&parent);
+        QVERIFY(registry.registerPlugin({{"test-quick","Quick","1"},{menu}}).ok());
+        auto page=registry.page("test-quick/overview",&engine,&parent);
         QVERIFY(page.result.ok()); QVERIFY(page.page); QCOMPARE(page.page->parentItem(),&parent); QCOMPARE(page.page->parent(),&parent);
-        QCOMPARE(registry.page("test.quick/overview",&engine,&parent).page,page.page); QCOMPARE(creations,1);
-        QPointer<QQuickItem> alive=page.page; QVERIFY(registry.unregisterPlugin("test.quick").ok()); QVERIFY(alive.isNull());
+        QCOMPARE(registry.page("test-quick/overview",&engine,&parent).page,page.page); QCOMPARE(creations,1);
+        QPointer<QQuickItem> alive=page.page; QVERIFY(registry.unregisterPlugin("test-quick").ok()); QVERIFY(alive.isNull());
         auto *borrowed=new QQuickItem(&parent); menu.createPage=[borrowed](QQmlEngine *,QQuickItem *) { return borrowed; };
-        QVERIFY(registry.registerPlugin({{"test.borrowed","Borrowed","1"},{menu}}).ok());
-        QCOMPARE(registry.page("test.borrowed/overview",&engine,&parent).result.error,Error::PageCreationFailed); QVERIFY(borrowed->parent()==&parent);
+        QVERIFY(registry.registerPlugin({{"test-borrowed","Borrowed","1"},{menu}}).ok());
+        QCOMPARE(registry.page("test-borrowed/overview",&engine,&parent).result.error,Error::PageCreationFailed); QVERIFY(borrowed->parent()==&parent);
+    }
+    void settingsIsMenuAndTooltipWaitsBeforeShowing() {
+        openWindow(); auto *container=qobject_cast<QQuickItem *>(object("pluginContainer")); QVERIFY(container);
+        QVERIFY(m_controller->navigate(SettingsMenuId,container)); QCOMPARE(m_controller->activeMenu(),QString(SettingsMenuId));
+        QVERIFY(object("settingsPage")->property("visible").toBool()); QVERIFY(!object("zeroTierScroll")->property("visible").toBool());
+        for(const auto &value:m_controller->menus()) QVERIFY(value.toMap()["id"].toString()!=QString(SettingsMenuId));
+        auto *gear=qobject_cast<QQuickItem *>(object("settingsButton")); QVERIFY(gear);
+        QTest::mouseMove(m_window,gear->mapToScene(QPointF(gear->width()/2,gear->height()/2)).toPoint());
+        auto *tip=object("settingsTooltip"); QVERIFY(tip); QTest::qWait(1000); QVERIFY(!tip->property("visible").toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(tip->property("visible").toBool(),1500);
+        QTest::mouseMove(m_window,QPoint(m_window->width()-20,20)); QTRY_VERIFY(!tip->property("visible").toBool());
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
     void navigationCreatesQuickPagesLazily() {
         openWindow(); int created=0; MenuContribution menu; menu.id="page"; menu.title="Plugin";
         menu.createPage=[&](QQmlEngine *,QQuickItem *owner) { ++created; auto *item=new QQuickItem(owner); item->setObjectName("testPluginPage"); return item; };
-        QVERIFY(m_controller->pluginRegistry()->registerPlugin({{"test.page","Page","1"},{menu}}).ok());
+        QVERIFY(m_controller->pluginRegistry()->registerPlugin({{"test-page","Page","1"},{menu}}).ok());
         QCOMPARE(created,0); auto *container=qobject_cast<QQuickItem *>(object("pluginContainer")); QVERIFY(container);
-        QVERIFY(m_controller->navigate("test.page/page",container)); QCOMPARE(created,1); QVERIFY(object("testPluginPage"));
+        QVERIFY(m_controller->navigate("test-page/page",container)); QCOMPARE(created,1); QVERIFY(object("testPluginPage"));
         QVERIFY(m_controller->navigate("builtin/zerotier",container)); QVERIFY(!object("testPluginPage")->property("visible").toBool());
-        QVERIFY(m_controller->navigate("test.page/page",container)); QCOMPARE(created,1);
-        QVERIFY(m_controller->pluginRegistry()->unregisterPlugin("test.page").ok()); QCOMPARE(m_controller->activeMenu(),QString("builtin/zerotier"));
+        QVERIFY(m_controller->navigate("test-page/page",container)); QCOMPARE(created,1);
+        QVERIFY(m_controller->pluginRegistry()->unregisterPlugin("test-page").ok()); QCOMPARE(m_controller->activeMenu(),QString("builtin/zerotier"));
     }
     void confirmationCancelsWithoutMutation() {
         DeferredOperations operations; AppController controller(nullptr,{},&operations);
@@ -272,7 +305,7 @@ private slots:
             connect(socket,&QTcpSocket::readyRead,socket,[&,socket,input] {
                 *input+=socket->readAll(); vusiif::ztgui::protocol::Packet packet;
                 if (vusiif::ztgui::protocol::takeFrame(*input,packet)!=vusiif::ztgui::protocol::ReadResult::Packet) return;
-                const auto request=QJsonDocument::fromJson(packet.payload).object(); ++requests;
+                const auto request=QJsonDocument::fromJson(packet.payload).object(); if(request["data"].toObject()["purpose"]=="ui-members") ++requests;
                 const QJsonArray members{
                     QJsonObject{{"nodeId","012345678b"},{"ipAssignments",QJsonArray{"12.34.56.100"}}},
                     QJsonObject{{"nodeId","012345678a"},{"ipAssignments",QJsonArray{"12.34.56.10"}}},
@@ -317,7 +350,7 @@ private slots:
         openWindow(directory.path()); QTRY_VERIFY(QFileInfo::exists(marker));
         QSignalSpy exited(m_controller.get(),&AppController::exitFinished);
         int heartbeats=0; QTimer timer; connect(&timer,&QTimer::timeout,this,[&] { ++heartbeats; }); timer.start(10);
-        m_controller->requestQuit(); QTRY_COMPARE_WITH_TIMEOUT(exited.size(),1,2000); QVERIFY(heartbeats>0); QVERIFY(m_controller->closing());
+        QElapsedTimer elapsed; elapsed.start(); m_controller->requestQuit(); QVERIFY(elapsed.elapsed()<50); QTRY_COMPARE_WITH_TIMEOUT(exited.size(),1,2000); if(library==QString::fromUtf8(FIXTURE_CANCELLABLE_BLOCKED)) QVERIFY(heartbeats>0); QVERIFY(m_controller->closing());
         qunsetenv("ZTGUI_PLUGIN_PREPARATION_STARTED_FILE"); qunsetenv("ZTGUI_PLUGIN_CREATE_STEPS");
         m_engine.reset(); m_window=nullptr; m_controller.reset();
     }

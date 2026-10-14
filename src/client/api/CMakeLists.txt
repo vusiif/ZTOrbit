@@ -11,7 +11,10 @@ endif()
 set(ZTGUI_API_VERSION "0.${CMAKE_MATCH_1}")
 project(ZTGUIPluginApi VERSION "${ZTGUI_API_VERSION}" LANGUAGES CXX)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Quick Qml Network)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/package/HostRuntimeContract.cmake")
+find_package(Qt6 6.8 REQUIRED COMPONENTS ${ZTGUI_CLIENT_HOST_QT_MODULES})
+ztgui_host_runtime_contract(client ZTGUI_HOST_CONTRACT_DIRECTORY)
+set(ZTGUI_CLIENT_CONTRACT_DIRECTORY "${ZTGUI_HOST_CONTRACT_DIRECTORY}" CACHE INTERNAL "" FORCE)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -55,3 +58,28 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/include/ztgui/ApiVersion.h"
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/ZTGUIPluginApiConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/ZTGUIPluginApiConfigVersion.cmake"
     DESTINATION "${ZTGUI_API_CMAKE_DIR}")
+
+if(NOT TARGET ztgui_package)
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared" "${CMAKE_CURRENT_BINARY_DIR}/shared-tools")
+endif()
+install(TARGETS ztplugin_pack RUNTIME DESTINATION bin)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/package/PackagePlugin.cmake" DESTINATION "${ZTGUI_API_CMAKE_DIR}")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/package/CollectPluginRuntime.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/package/CollectPluginRuntime.ps1"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/package/RuntimeTools.ps1"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/package/GenerateHostContract.ps1"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/package/HostRuntimeContract.cmake" DESTINATION "${ZTGUI_API_CMAKE_DIR}")
+install(DIRECTORY "${ZTGUI_HOST_CONTRACT_DIRECTORY}/" DESTINATION "${ZTGUI_API_CMAKE_DIR}/contracts")
+install(FILES "${ZTGUI_HOST_CONTRACT_DIRECTORY}/Release.json" DESTINATION . RENAME host-runtime-contract.json)
+if(WIN32)
+    install(FILES "$<TARGET_FILE:ztgui_sodium>" DESTINATION bin)
+    install(FILES "$<TARGET_FILE:Qt6::Core>" DESTINATION bin)
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION bin)
+    include(InstallRequiredSystemLibraries)
+endif()
+
+set(ZTGUI_PACKAGE_TOOL "$<TARGET_FILE:ztplugin_pack>")
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/package/PackagePlugin.cmake")
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/package/libsodium-LICENSE.txt" DESTINATION licenses)
+ztgui_install_sdk_metadata(client)

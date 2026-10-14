@@ -32,8 +32,8 @@ class IntegrationTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         (self.root/"plugins").mkdir()
-        for source in Path(OPTIONS.fixtures).glob("*.so"):
-            name = "zz_duplicate.so" if "duplicate" in source.name else source.name
+        for source in Path(OPTIONS.fixtures).glob("*.ztplugin"):
+            name = "zz_duplicate.ztplugin" if "duplicate" in source.name else source.name
             shutil.copyfile(source,self.root/"plugins"/name)
         with socket.socket() as probe:
             probe.bind(("127.0.0.1",0)); self.port = probe.getsockname()[1]
@@ -54,37 +54,37 @@ class IntegrationTests(unittest.TestCase):
             self.process.terminate(); self.process.wait(timeout=5)
         self.temp.cleanup()
     def test_tcp_routes_split_and_coalesced(self):
-        message = frame("test.echo",b"binary\0payload")
+        message = frame("test-echo",b"binary\0payload")
         self.connection.sendall(message[:3]); self.connection.sendall(message[3:])
-        self.assertEqual(read_frame(self.reader),("test.echo",b"binary\0payload"))
-        self.connection.sendall(frame("test.other",b"other")+frame("test.echo",b"echo"))
-        self.assertEqual(read_frame(self.reader),("test.other",b"other"))
-        self.assertEqual(read_frame(self.reader),("test.echo",b"echo"))
-        self.connection.sendall(frame("test.failed",b"no"))
+        self.assertEqual(read_frame(self.reader),("test-echo",b"binary\0payload"))
+        self.connection.sendall(frame("test-other",b"other")+frame("test-echo",b"echo"))
+        self.assertEqual(read_frame(self.reader),("test-other",b"other"))
+        self.assertEqual(read_frame(self.reader),("test-echo",b"echo"))
+        self.connection.sendall(frame("test-failed",b"no"))
         route,body=read_frame(self.reader)
         self.assertEqual(route,"builtin"); self.assertFalse(json.loads(body)["ok"])
     def test_udp_limits_and_isolation(self):
         with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as udp:
             udp.settimeout(.2); destination=("127.0.0.1",self.port)
-            udp.sendto(packet("test.other",b"datagram"),destination)
-            self.assertEqual(udp.recvfrom(1233)[0],packet("test.other",b"datagram"))
-            for route,body in [("unknown",b"no"),("builtin",b"no"),("test.echo",b"x"*1233)]:
+            udp.sendto(packet("test-other",b"datagram"),destination)
+            self.assertEqual(udp.recvfrom(1233)[0],packet("test-other",b"datagram"))
+            for route,body in [("unknown",b"no"),("builtin",b"no"),("test-echo",b"x"*1233)]:
                 udp.sendto(packet(route,body),destination)
                 with self.assertRaises(socket.timeout): udp.recvfrom(1233)
-            udp.sendto(packet("test.echo",b"still-alive"),destination)
-            self.assertEqual(udp.recvfrom(1233)[0],packet("test.echo",b"still-alive"))
+            udp.sendto(packet("test-echo",b"still-alive"),destination)
+            self.assertEqual(udp.recvfrom(1233)[0],packet("test-echo",b"still-alive"))
     def test_rejections_cleanup_and_dual_logs(self):
-        self.connection.sendall(frame("test.echo",b"hello")); read_frame(self.reader)
+        self.connection.sendall(frame("test-echo",b"hello")); read_frame(self.reader)
         self.connection.close(); self.reader.close()
         self.process.terminate(); self.process.wait(timeout=5)
-        data=self.root/"plugins-data"/"test.echo"
+        data=self.root/"plugins-data"/"test-echo"
         self.assertEqual((data/"stopped").read_bytes(),b"yes")
         self.assertTrue((data/"closed").is_file())
         main="".join(p.read_text() for p in (self.root/"logs").glob("*.log"))
         plugin="".join(p.read_text() for p in (data/"logs").glob("*.log"))
         self.assertIn("fixture-start",main); self.assertIn("fixture-start",plugin)
-        self.assertIn("Rejected plugin metadata",main); self.assertIn("duplicate",main)
-        pending=self.root/"plugins-data"/"test.cancellable"
+        self.assertIn("Rejected package",main); self.assertIn("duplicate",main)
+        pending=self.root/"plugins-data"/"test-cancellable"
         self.assertEqual((pending/"cancelled").read_bytes(),b"yes")
         self.assertEqual((pending/"capture-destroyed").read_bytes(),b"yes")
         self.assertEqual((pending/"stopped").read_bytes(),b"yes")

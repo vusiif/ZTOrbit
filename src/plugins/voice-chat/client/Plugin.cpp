@@ -20,7 +20,7 @@ public:
     }
     vusiif::ztgui::api::PluginDefinition definition() override {
         vusiif::ztgui::api::PluginDefinition result;
-        result.info = {"org.ztgui.voice-chat", QStringLiteral("语音聊天"), "0.1.0"};
+        result.info = {"voice-chat", QStringLiteral("语音聊天"), "0.1.0"};
         vusiif::ztgui::api::MenuContribution menu;
         menu.id = "rooms"; menu.title = QStringLiteral("语音聊天");
         menu.toolTip = QStringLiteral("连接语音服务器并加入房间");

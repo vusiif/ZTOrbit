@@ -1,4 +1,4 @@
-# 插件 API（开发代际 0.3）
+# 插件 API（开发代际 0.4）
 
 公开 SDK 位于 `src/client/api/`，不依赖 `src/client/main/`。插件通过菜单定义和 Qt Quick/QML 页面工厂接入宿主，可选生命周期负责初始化、导航通知和资源释放；文件与 ZeroTier 工具由宿主注入。
 
@@ -20,7 +20,7 @@
 
 页面可通过 `<ztgui/PluginPage.h>` 的 `createQmlPage(engine,parent,source,initialProperties)` 从插件自己的资源创建。C++控制器通过required属性注入，由页面持有；页面先于工厂和DLL销毁，宿主清理引擎组件缓存后才卸载库。插件不能注册DLL所有的全局QML类型或单例，也不能依赖宿主内部QML模块。可使用Qt Quick Controls并继承应用窗口palette。
 
-本次迁移保持根 `VERSION` 与API数字，由新入口／生命周期IID `/2.0` 区分页面ABI。旧 `/1.0` Widgets DLL在实例化前拒绝，必须迁移页面工厂并重编。SDK依赖Qt Quick/Qml，已移除Widgets依赖；应用保留Widgets仅供Windows原生托盘菜单后备实现。
+本次迁移保持根 `VERSION` 与API数字，由新入口／生命周期IID `/3.0` 区分页面ABI。旧 `/1.0`、`/2.0` DLL在实例化前拒绝，必须迁移页面工厂并重编。SDK依赖Qt Quick/Qml，已移除Widgets依赖；应用保留Widgets仅供Windows原生托盘菜单后备实现。
 
 ## 当前入口与生命周期
 
@@ -97,7 +97,7 @@ api::CreateTask onCreate(util::HostServices &services,
 | `PageResult` | `QQuickItem *page`, `Result result` | 失败时page为空 |
 | `PageFactory` | `std::function<QQuickItem *(QQmlEngine *engine, QQuickItem *parent)>` | 在GUI线程返回新建、QObject parent与parentItem均为parent的可视项 |
 
-插件ID与本地菜单ID匹配 `[a-z0-9][a-z0-9._-]{0,127}`。`builtin` 为保留插件ID，内置ZeroTier始终位于首项；插件菜单按order再按全局ID排序。
+插件 ID 匹配 `[A-Za-z0-9_-]{1,128}` 且冲突不区分大小写；本地菜单 ID 匹配 `[a-z0-9][a-z0-9._-]{0,127}`。`builtin` 为保留插件ID，内置ZeroTier始终位于首项；插件菜单按order再按全局ID排序。
 
 注册不创建页面，首次访问才调用工厂，一个菜单缓存一个页面。切换菜单保留输入及滚动状态；缓存页面销毁后可重建。工厂不能返回父项、借用已有可视项或与其他菜单共用页面，不能跨宿主复用。工厂失败保留原页面和选中菜单，下次访问可重试。页面析构先同步停止自己的线程，随后才释放工厂捕获和插件库。
 
@@ -132,7 +132,7 @@ void getZTNetworks(QObject *context, JsonCallback completed);
 void getZTMoons(QObject *context, JsonCallback completed);
 void sendDataTo(const QString &networkId, const QString &memberId, const QByteArray &data,
                 QObject *context, SendCallback completed);
-void broadcastDataTo(const QString &networkId, const QByteArray &data,
+void broadcastDataTo(const QString &networkId, const QStringList &memberIds, const QByteArray &data,
                      QObject *context, SendCallback completed);
 ```
 
@@ -142,11 +142,23 @@ void broadcastDataTo(const QString &networkId, const QByteArray &data,
 
 插件运行在宿主进程中，不提供权限隔离。SDK不提供任意命令或管理员脚本接口。语音、桌面共享、文件传输的开发条件和待补充公共能力见[插件能力评估](plugin-api-assessment.md)。
 
-数据发送同样通过 `host->zeroTier()` 调用，要求 GUI 线程与有效上下文；销毁上下文或卸载取消尚未完成的查询。网络 ID 是 16 位十六进制，成员 ID 是 10 位。先读取本机指定网络的 IPv4，以 /24 的 `.1:18100` 为服务器，通过 `builtin/controller.members` 获取该网络成员；仅向已授权且有 IPv4 地址的成员发送。`sendDataTo` 选择一个成员，`broadcastDataTo` 向所有可发送成员逐个单播，并去重目标 IP。
+数据接口由宿主绑定调用插件 ID，接收只分发给本机同 ID 插件；禁止不同插件互相依赖、引用或调用。ZeroTier 查询均为只读，不开放网络加入、授权、配置修改等操作。原生插件不构成权限沙箱。
+
+```cpp
+void broadcastDataBalancedTo(const QString &networkId, const QStringList &memberIds,
+                             const QByteArray &data, QObject *context, SendCallback completed);
+void getNetworkRelays(const QString &networkId, QObject *context, RelayCallback completed);
+NetworkSubscription *subscribeNetworkData(const QString &networkId, QObject *context, NetworkCallback received);
+```
+
+`broadcastDataTo` 固定走指定网络 `.1:18100` 的 ZTServer；`broadcastDataBalancedTo` 在控制端登记的多中转间低延迟优先、按目标成员稳定分配。两者目标 ID 列表去重，空列表零发送；`sendDataTo` 复用单中转路径。中转不可用时按有效已授权成员地址直发，不能解析地址则返回错误，不假定数据已送达。
+
+`RelayResult` 包含中转节点 ID、Moon ID、虚拟 IP、服务端口、最近 10 次成功 RTT 的平均、上次 RTT、采样时间、可用状态与负载；延迟未知为 -1。`SendResult` 包含排入队列的成员数、失败成员 ID 和错误，不代表远端交付确认。`NetworkMessage` 提供网络 ID、发送成员 ID、二进制数据。订阅句柄由上下文持有，调用 `cancel()` 停止接收；上下文销毁或卸载自动取消，回调均在宿主事件线程执行。
+
+共享交付包仍封装 ZTS1，总长上限 1232，负载上限由 `<ztprotocol/NetworkDelivery.h>` 的 `maxNetworkDataBytes(pluginId)` 返回，即 `1232-52-插件 ID ASCII 字节数`。本次不支持分片、重传或顺序保证。客户端宿主在本机 ZeroTier IPv4 的 UDP 18101 接收，服务端使用 18100；网络、发送与目标成员及消息 ID 由宿主校验，同一消息 30 秒内去重。部署与中转配置见[多中转通信](network-relays.md)。
 
 插件自行连接服务器时使用 `<ztprotocol/NetworkAddress.h>` 的 `protocol::serverEndpoint(address)`：接受域名、IPv4、裸IPv6及 `host:port`／`[IPv6]:port`，未指定端口统一使用 `protocol::NetworkPort`（18100），非法地址／端口的结果 `valid()` 为false。独立端口偏好不能覆盖省略端口的默认值；UDP端口仍可由服务器协议协商。
 
-发送采用 UDP 18100，包为 `ZTS1`，路由 ID 由宿主绑定为调用插件 ID，负载原样保留二进制。包总长最多 1232 字节，数据上限为 `1232 - 6 - 插件ID的ASCII字节数`。接收端插件需使用相同路由，并在成员设备上监听 UDP 18100；服务端宿主已经提供该监听与路由，客户端自定义业务由插件负责接收。`SendResult` 包含 `recipients/error/ok()`，成功仅代表本地 UDP 套接字已接收发送数据，不代表远端收到；需要可靠性时由业务协议提供确认、重传或另选 TCP。无匹配授权成员、无 IPv4、过大负载或查询失败均异步返回错误。UDP 工具不代替网络或业务层身份验证。
 
 ## 独立构建与兼容边界
 
@@ -154,16 +166,17 @@ void broadcastDataTo(const QString &networkId, const QByteArray &data,
 
 ```powershell
 cmake -S src/client/api -B cmake-build-api -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64"
-cmake --install cmake-build-api --prefix dist/ZTGUI-api-v0.3
+cmake --build cmake-build-api --config Release --target ztplugin_pack
+cmake --install cmake-build-api --config Release --prefix dist/ZTGUI-api-v0.4
 ```
 
-独立插件使用 `find_package(ZTGUIPluginApi 0.3 EXACT CONFIG REQUIRED)` 并链接 `ZTGUI::Api`，只需安装后的SDK和匹配工具链，不需要宿主源码。API常量及包版本从根 `VERSION` 前两段生成；JSON使用 `{"apiVersion":"@ZTGUI_API_VERSION@"}`，不硬编码另一份版本。
+独立插件使用 `find_package(ZTGUIPluginApi 0.4 EXACT CONFIG REQUIRED)` 并链接 `ZTGUI::Api`，只需安装后的SDK和匹配工具链，不需要宿主源码。API常量及包版本从根 `VERSION` 前两段生成；JSON使用 `{"apiVersion":"@ZTGUI_API_VERSION@"}`，不硬编码另一份版本。
 
-应用版本为 `0.3.3`，API代际从 `VERSION` 派生为 `0.3`。此前重构改变命名空间及生命周期签名，旧插件须使用API 0.3重新编译。入口IID为 `vusiif.ztgui.api.PluginInterface/2.0`，生命周期IID为 `vusiif.ztgui.api.PluginLifecycleInterface/2.0`；旧IID不会实例化，API 0.2也不再兼容。本次补丁版本更新不改变 API 代际，程序版本由开发者指定。
+应用版本为 `0.4.1`，API代际从 `VERSION` 派生为 `0.4`。API 0.3及更早插件须使用API 0.4重新编译。入口IID为 `vusiif.ztgui.api.PluginInterface/3.0`，生命周期IID为 `vusiif.ztgui.api.PluginLifecycleInterface/3.0`；旧IID不会实例化，API 0.2也不再兼容。本次核心代际升级由开发者明确指定；IID不因版本数字变化而机械调整。
 
 统一使用动态Qt，宿主与插件须匹配Qt、编译器、架构、运行库及构建模式。Qt类型和std::function属于进程内C++接口，不承诺跨工具链ABI或跨进程协议。
 
-启动扫描程序旁 `plugins/` 的直接子文件，按文件名排序，先检查IID和API数字，再实例化并注册。Windows为 `ZTGUI.exe` 同级plugins；macOS为 `ZTGUI.app/Contents/MacOS/plugins/`。缺失目录正常启动，其他库忽略，失败记日志并继续。更新插件退出后替换并重启，运行依赖须与发行包共同部署。
+启动扫描程序旁 `plugins/` 的直接子文件，按文件名排序，先检查IID和API数字，再实例化并注册。Windows为 `ZTGUI.exe` 同级plugins；macOS为 `ZTGUI.app/Contents/MacOS/plugins/`。缺失目录正常启动，其他库忽略，失败记日志并继续。客户端可在完成异步卸载后替换业务包并重载；同名不兼容的运行依赖需要重启。
 
 最小独立插件、完整构建及部署流程见[插件开发技能](../.agent/skills/ztgui-plugin-dev/SKILL.md)。插件自身文档由其项目的docs目录维护。
 
@@ -176,3 +189,15 @@ cmake --install cmake-build-api --prefix dist/ZTGUI-api-v0.3
 通过 `HostServices::logs()` 获取借用的 `PluginLogger`，调用 `write(LogLevel,message)` 显式双写主程序日志和 `plugins-data/<PluginInfo.name>/logs/YYMMDD-N.log`。级别为 Debug/Info/Warning/Error，UTF-8 记录包含时间、级别和插件 ID；支持后台线程，生命周期与其他宿主工具相同。返回 `LogResult::hostError/pluginError`，一处失败仍尝试另一处；失败不递归写 Qt 日志。普通 `qInfo/qWarning` 仍只写宿主日志。新增服务放在原宿主服务虚函数之后，并以旧布局编译的插件验证了原文件/查询入口。
 
 SDK 安装 `ztprotocol/` 的共享公开头文件，`ZTGUI::Protocol` 依赖 Qt Core/Network，提供路由编解码、/24 服务器地址推导与网络数据发送工具。协议版本独立于 SDK 版本；服务端插件使用独立 SDK 与 IID，详见[服务端 API](server-api.md)。
+
+## 加密包与运行时管理
+
+客户端入口／生命周期 IID 为 `vusiif.ztgui.api.PluginInterface/3.0` 和 `vusiif.ztgui.api.PluginLifecycleInterface/3.0`。API 数字仍从 VERSION 派生，旧 ABI 必须重编。插件 `id` 匹配 `[A-Za-z0-9_-]{1,128}`，保留字 `builtin` 不可用，ID 冲突不区分大小写；`name` 为可中文的显示名，菜单 ID 独立于插件 ID。显示名对应既有数据目录，因此也禁止冲突，避免两个插件共享文件。
+
+SDK 包含 `bin/ztplugin_pack` 和 `ztgui_package_plugin()` CMake 函数，编译后生成 `.ztplugin`；正式宿主仅扫描该后缀。包基本信息可读，包含宿主类型、版本、IID、平台、架构与 Qt/编译器兼容信息。宿主先检查信息、全包认证、逐文件 SHA-256、路径与运行契约，再按块提取到私有目录。加载后核对插件定义；业务目录在实际卸载成功后清理，进程级运行依赖、DLL 搜索路径与 Qt 后端路径保持到退出。共享格式密钥只用于封装、防随意查看，不能证明发行者身份；不包含用户密钥或授权发行体系。
+
+启动和运行时加载共用 onCreate；初始化准备期间菜单禁用，失败也配对清理。运行时卸载先切回 ZeroTier、调用 onExitedTo，再取消任务和请求，异步等待初始化结束，释放页面／工厂／回调后调用 onDestroy，最后卸载动态库。卸载失败保留句柄与临时库，不报告成功。卸载保留包和数据，按 ID 持久化禁用；手动加载成功恢复启动自动加载。
+
+## v2 多文件包与运行库
+
+SDK helper 新增 RUNTIME_QT_MODULES、RUNTIME_FILES、LICENSE_FILES 及显式 `<target>_package`；默认写 v2，宿主兼容读取 v1。Windows 媒体依赖随插件包交付，宿主基础库不可覆盖；普通插件维持 Qt 主次兼容，私有 Qt/后端匹配完整 Kit 契约。格式、许可证导出、冲突与卸载约束见[运行依赖分离](plugin-runtime-separation.md)。

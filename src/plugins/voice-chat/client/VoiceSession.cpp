@@ -28,7 +28,7 @@ VoiceSession::VoiceSession(std::shared_ptr<AudioDeviceCache> cache, QObject *par
     connect(audio, &AudioEngine::notice, this, &VoiceSession::notice);
     connect(audio, &AudioEngine::encoded, this, [this](const QByteArray &data) {
         if (udpReady && room && !muted)
-            udp->writeDatagram(protocol::encode("org.ztgui.voice-chat", encodePacket({Audio, token, session, sequence++, data})), tcp->peerAddress(), udpPort);
+            udp->writeDatagram(protocol::encode("voice-chat", encodePacket({Audio, token, session, sequence++, data})), tcp->peerAddress(), udpPort);
     });
 }
 void VoiceSession::refreshDevices() {
@@ -61,7 +61,7 @@ void VoiceSession::request(const QString &operation, const QJsonObject &data)
     const int id = nextRequest++;
     if (nextRequest == std::numeric_limits<int>::max()) nextRequest = 1;
     pending.insert(id, operation);
-    tcp->write(protocol::frame("org.ztgui.voice-chat", QJsonDocument(QJsonObject{{"v", ProtocolVersion}, {"id", id}, {"op", operation}, {"data", data}}).toJson(QJsonDocument::Compact)));
+    tcp->write(protocol::frame("voice-chat", QJsonDocument(QJsonObject{{"v", ProtocolVersion}, {"id", id}, {"op", operation}, {"data", data}}).toJson(QJsonDocument::Compact)));
 }
 void VoiceSession::create(const QString &name) {
     if (!ready || room || roomPending) return;
@@ -86,7 +86,7 @@ void VoiceSession::mute(bool value) {
     if (ready && room) request("mute", {{"muted", value}});
 }
 void VoiceSession::clearRoom() {
-    audio->stop(); registration->stop(); token.clear(); members.clear();
+    audio->stop(); audio->clearMemberVolumes(); registration->stop(); token.clear(); members.clear();
     room = 0; udpReady = false; sequence = 0; emit roomChanged({});
 }
 void VoiceSession::updateRoom(const QJsonObject &value) {
@@ -96,7 +96,10 @@ void VoiceSession::updateRoom(const QJsonObject &value) {
         const auto id = quint32(entry.toObject().value("id").toDouble());
         if (id != session) members.insert(id);
     }
-    audio->retain(members); emit roomChanged(value);
+    audio->retain(members);
+    auto snapshot=value; auto rows=value["members"].toArray();
+    for(qsizetype i=0;i<rows.size();++i) { auto row=rows[i].toObject(); row["self"]=quint32(row["id"].toDouble())==session; rows[i]=row; }
+    snapshot["members"]=rows; emit roomChanged(snapshot);
 }
 void VoiceSession::read()
 {
@@ -105,7 +108,7 @@ void VoiceSession::read()
         protocol::Packet packet;
         const auto result = protocol::takeFrame(incoming,packet);
         if (result == protocol::ReadResult::Incomplete) break;
-        if (result == protocol::ReadResult::Invalid || packet.plugin != "org.ztgui.voice-chat" || packet.payload.size() > MaxControlBytes) {
+        if (result == protocol::ReadResult::Invalid || packet.plugin != "voice-chat" || packet.payload.size() > MaxControlBytes) {
             close(); emit notice(QStringLiteral("服务器协议无效")); return;
         }
         QJsonParseError parseError;
@@ -160,14 +163,14 @@ void VoiceSession::sendRegistration() {
         emit notice(QStringLiteral("语音 UDP 通道不可达，请检查 UDP %1 端口后退房重试").arg(udpPort));
         return;
     }
-    udp->writeDatagram(protocol::encode("org.ztgui.voice-chat", encodePacket({Register, token, session, 0, {}})), tcp->peerAddress(), udpPort);
+    udp->writeDatagram(protocol::encode("voice-chat", encodePacket({Register, token, session, 0, {}})), tcp->peerAddress(), udpPort);
 }
 void VoiceSession::datagrams() {
     while (udp->hasPendingDatagrams()) {
         const auto datagram = udp->receiveDatagram(protocol::MaxUdpBytes + 1);
         Packet p; protocol::Packet packet;
         if (!room || datagram.senderAddress() != tcp->peerAddress() || datagram.senderPort() != udpPort
-            || !protocol::decode(datagram.data(), packet) || packet.plugin != "org.ztgui.voice-chat" || !decodePacket(packet.payload, p) || p.token != token) continue;
+            || !protocol::decode(datagram.data(), packet) || packet.plugin != "voice-chat" || !decodePacket(packet.payload, p) || p.token != token) continue;
         if (p.type == Registered && p.sender == session && !udpReady) {
             udpReady = true; registration->stop(); emit notice(QStringLiteral("语音通道已就绪"));
             audio->start(inputId, outputId, recordAllowed); audio->setMuted(muted);

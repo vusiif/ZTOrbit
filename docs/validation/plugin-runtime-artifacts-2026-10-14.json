@@ -1,0 +1,26 @@
+{
+  "dist/windows-x64.zip": {
+    "bytes": 26346612,
+    "sha256": "a10c44da3dca0df2bab42642a7271197855b535aac20c82f83cab88f0377766f"
+  },
+  "dist/ZTGUI-api-v0.3.zip": {
+    "bytes": 3472132,
+    "sha256": "bd61797bed907d32113fa12705dfed927527bd46db73cb1cfe8bbc76c75db62a"
+  },
+  "dist/ZTServer-api-v0.3.zip": {
+    "bytes": 93923,
+    "sha256": "4c9818b6f86b8a92f642abd03e9b821983729cae7c92eeb686eb4eb55b31e422"
+  },
+  "dist/linux-x64.tar.gz": {
+    "bytes": 277508,
+    "sha256": "6712865a2fbd699c6cb72e81d403e7245b90bc3a221b4e062ec607c6bacee694"
+  },
+  "dist/plugins/ztgui_voice_chat.ztplugin": {
+    "bytes": 20908606,
+    "sha256": "756b148889106ddd5a490a5ac261c54d376636df5b86fad80d8df50514191dae"
+  },
+  "dist/server-plugins/ztserver_voice_chat.ztplugin": {
+    "bytes": 98370,
+    "sha256": "837fe2e88d2747a158b1b365ea957d1896dbcebe1f2bebff61cb6d4a5f484dfa"
+  }
+}

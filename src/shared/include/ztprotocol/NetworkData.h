@@ -11,6 +11,7 @@ namespace vusiif::ztgui::util {
 struct SendResult {
     int recipients = 0;
     QString error;
+    QStringList failedMembers;
     // Success means queued to the local UDP socket, not remote delivery.
     bool ok() const { return error.isEmpty(); }
 };

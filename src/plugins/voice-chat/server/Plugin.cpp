@@ -30,7 +30,7 @@ class VoiceServerPlugin final : public QObject, public api::PluginInterface {
     Q_PLUGIN_METADATA(IID ZTSERVER_PLUGIN_IID FILE "plugin.json")
     Q_INTERFACES(vusiif::ztgui::server::api::PluginInterface)
 public:
-    api::PluginInfo info() const override { return {"org.ztgui.voice-chat", QStringLiteral("语音聊天"), "0.1.0"}; }
+    api::PluginInfo info() const override { return {"voice-chat", QStringLiteral("语音聊天"), "0.1.0"}; }
     api::StartTask onStart(api::HostServices &host, const util::CancellationToken &) override {
         services = &host;
         const auto config = host.files().readFile("settings.json");

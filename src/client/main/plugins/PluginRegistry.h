@@ -10,7 +10,7 @@
 
 namespace vusiif::ztgui::plugins {
 
-enum class PreparationState { Ready, Preparing, Failed };
+enum class PreparationState { Ready, Preparing, Failed, Stopping };
 
 class PluginRegistry final : public QObject {
     Q_OBJECT

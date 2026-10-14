@@ -9,8 +9,9 @@
 #include <QQmlEngine>
 
 static_assert(vusiif::ztgui::api::ApiMajor == 0);
-static_assert(vusiif::ztgui::api::ApiMinor == 3);
-static_assert(vusiif::ztgui::api::isApiCompatible(0, 3));
+static_assert(vusiif::ztgui::api::ApiMinor == 4);
+static_assert(vusiif::ztgui::api::isApiCompatible(0, 4));
+static_assert(!vusiif::ztgui::api::isApiCompatible(0, 3));
 static_assert(!vusiif::ztgui::api::isApiCompatible(0, 2));
 static_assert(std::is_abstract_v<vusiif::ztgui::util::HostServices>);
 static_assert(std::is_abstract_v<vusiif::ztgui::util::PluginFiles>);
@@ -39,8 +40,12 @@ void consumeNetworkTools(vusiif::ztgui::util::ZeroTierService &service, QObject 
 {
     service.sendDataTo("0123456789000000", "0123456789", QByteArray("binary\0data", 11), context,
         [](const vusiif::ztgui::util::SendResult &) {});
-    service.broadcastDataTo("0123456789000000", "broadcast", context,
+    service.broadcastDataTo("0123456789000000", {"0123456789"}, "broadcast", context,
         [](const vusiif::ztgui::util::SendResult &) {});
+    service.broadcastDataBalancedTo("0123456789000000", {"0123456789"}, "data", context, [](const vusiif::ztgui::util::SendResult &) {});
+    service.getNetworkRelays("0123456789000000", context, [](const vusiif::ztgui::util::RelayResult &) {});
+    if(auto *sub=service.subscribeNetworkData("0123456789000000", context, [](const vusiif::ztgui::util::NetworkMessage &) {})) sub->cancel();
+
 }
 
 int main()
@@ -49,7 +54,7 @@ int main()
     if (!endpoint.valid() || endpoint.port != 18100) return 2;
     using namespace vusiif::ztgui::api;
     PluginDefinition plugin;
-    plugin.info = {"example.sdk", "SDK consumer", "0.0.1"};
+    plugin.info = {"example-sdk", "SDK consumer", "0.0.1"};
     MenuContribution menu;
     menu.id = "overview";
     menu.title = "SDK consumer";

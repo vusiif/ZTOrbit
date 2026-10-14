@@ -25,5 +25,5 @@ public:
     virtual void onStop() {}
 };
 }
-#define ZTSERVER_PLUGIN_IID "vusiif.ztgui.server.api.PluginInterface/1.0"
+#define ZTSERVER_PLUGIN_IID "vusiif.ztgui.server.api.PluginInterface/2.0"
 Q_DECLARE_INTERFACE(vusiif::ztgui::server::api::PluginInterface, ZTSERVER_PLUGIN_IID)

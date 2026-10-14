@@ -218,7 +218,18 @@ Pane {
                             boundsBehavior: Flickable.StopAtBounds
                             model: controller.members
                             ScrollBar.vertical: ScrollBar {}
-                            delegate: ItemDelegate { required property var modelData; width: ListView.view.width; text: modelData.nickname + (modelData.muted ? "（静音）" : "") }
+                            delegate: ColumnLayout {
+                                required property var modelData
+                                width: ListView.view.width
+                                spacing: 4
+                                Label { text: modelData.nickname + (modelData.self ? "（自己）" : "") + (modelData.muted ? "（静音）" : ""); elide: Text.ElideRight; Layout.fillWidth: true }
+                                RowLayout {
+                                    visible: !modelData.self
+                                    Layout.fillWidth: true
+                                    Slider { objectName: "voiceMemberVolume"; from: 0; to: 200; value: modelData.volume === undefined ? 100 : modelData.volume; onMoved: controller.setMemberVolume(modelData.id,Math.round(value)); Layout.fillWidth: true }
+                                    Label { text: (modelData.volume === undefined ? 100 : modelData.volume)+"%"; Layout.preferredWidth: 48 }
+                                }
+                            }
                         }
                     }
                 }
@@ -259,8 +270,13 @@ Pane {
                     CheckBox { text: "麦克风静音"; checked: controller.muted; onToggled: controller.muted = checked }
                     CheckBox { text: "耳机静音"; checked: controller.deafened; onToggled: controller.deafened = checked }
                     RowLayout {
-                        Label { text: "音量" }
-                        Slider { from: 0; to: 100; value: controller.volume; onMoved: controller.volume = Math.round(value); Layout.fillWidth: true }
+                        Label { text: "输入音量" }
+                        Slider { objectName: "voiceInputVolume"; from: 0; to: 200; value: controller.inputVolume; onMoved: controller.inputVolume=Math.round(value); Layout.fillWidth: true }
+                        Label { text: controller.inputVolume+"%"; Layout.preferredWidth: 48 }
+                    }
+                    RowLayout {
+                        Label { text: "总输出" }
+                        Slider { from: 0; to: 200; value: controller.volume; onMoved: controller.volume = Math.round(value); Layout.fillWidth: true }
                         Label { text: controller.volume + "%"; Layout.preferredWidth: 40 }
                     }
                     VoiceButton { text: "关闭"; Layout.alignment: Qt.AlignRight; onClicked: audioPopup.close() }

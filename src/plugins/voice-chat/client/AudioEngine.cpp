@@ -73,7 +73,8 @@ void AudioEngine::captured()
     if (capturePending.size() > FrameSamples * 5) capturePending.remove(0, capturePending.size() - FrameSamples * 5);
     while (capturePending.size() >= FrameSamples) {
         QByteArray encodedFrame(MaxDatagramBytes - HeaderBytes, '\0');
-        const int size = opus_encode_float(encoder, capturePending.constData(), FrameSamples,
+        auto frame=capturePending.mid(0,FrameSamples); applyGain(frame,inputVolume);
+        const int size = opus_encode_float(encoder, frame.constData(), FrameSamples,
             reinterpret_cast<unsigned char *>(encodedFrame.data()), int(encodedFrame.size()));
         capturePending.remove(0, FrameSamples);
         if (size > 0) { encodedFrame.resize(size); emit encoded(encodedFrame); }
@@ -87,6 +88,8 @@ void AudioEngine::receive(quint32 sender, quint32 sequence, const QByteArray &da
 }
 void AudioEngine::retain(const std::set<quint32> &members)
 {
+    for(auto i=memberVolumes.begin();i!=memberVolumes.end();)
+        if(!members.count(i->first)) i=memberVolumes.erase(i); else ++i;
     for (auto i = streams.begin(); i != streams.end(); )
         if (!members.count(i->first)) i = streams.erase(i); else ++i;
 }
@@ -95,10 +98,11 @@ void AudioEngine::play()
     QVector<float> mix(FrameSamples, 0);
     for (auto &entry : streams) {
         const auto frame = entry.second->pull();
-        if (!deafened) for (int i = 0; i < FrameSamples; ++i) mix[i] += frame[i];
+        const auto gain=memberVolumes.count(entry.first)?memberVolumes[entry.first]:1.0f;
+        if(!deafened) mixStream(mix,frame,gain);
     }
     if (!playback || !sink) return;
-    for (auto &sample : mix) sample = clampSample(sample);
+    // Apply total output gain before the final PCM limiter.
     const auto converted = outputResampler.process(mix, 48000, outputFormat.sampleRate());
     outputPending += encodePcm(converted, outputFormat, volume);
     const auto maximum = outputFormat.bytesForDuration(100000);

@@ -1,4 +1,5 @@
 #include "PluginRegistry.h"
+#include <ztprotocol/NetworkDelivery.h>
 
 #include <QGuiApplication>
 #include <QDebug>
@@ -50,13 +51,15 @@ Result PluginRegistry::registerPlugin(PluginDefinition definition, PluginLifecyc
 {
     if (const auto result = checkMutation(); !result.ok()) return result;
     const auto &info = definition.info;
-    if (!validId(info.id) || info.id == "builtin" || info.name.trimmed().isEmpty()
+    if (!protocol::validPluginId(info.id) || info.id == "builtin" || info.name.trimmed().isEmpty()
         || info.version.trimmed().isEmpty())
         return {Error::InvalidPlugin, QStringLiteral("插件 ID、名称或版本无效")};
     if (!isApiCompatible(info.apiMajor, info.apiMinor))
         return {Error::IncompatibleApi, QStringLiteral("插件要求的 API 版本不兼容")};
-    if (m_plugins.contains(info.id))
+    if (std::any_of(m_plugins.cbegin(),m_plugins.cend(),[&](const api::PluginDefinition &p) { return p.info.id.compare(info.id,Qt::CaseInsensitive)==0; }))
         return {Error::DuplicatePlugin, QStringLiteral("插件 ID 已注册：%1").arg(info.id)};
+    for(const auto &registered:m_plugins) if(registered.info.name.compare(info.name,Qt::CaseInsensitive)==0)
+        return {Error::DuplicatePlugin,QStringLiteral("插件显示名对应的数据目录已被使用")};
     if (definition.menus.isEmpty())
         return {Error::InvalidMenu, QStringLiteral("插件至少需要声明一个菜单")};
     QSet<QString> ids;
@@ -206,6 +209,9 @@ MenuLocation PluginRegistry::location(const QString &menuId) const
     if (menuId == QLatin1String(ZeroTierMenuId))
         return {{"builtin", QStringLiteral("ZeroTier"), QCoreApplication::applicationVersion()},
                 {ZeroTierMenuId, "builtin", "zerotier", QStringLiteral("ZeroTier"), {}, {}, 0}, true};
+    if (menuId == QLatin1String(SettingsMenuId))
+        return {{"builtin", QStringLiteral("设置"), QCoreApplication::applicationVersion()},
+                {SettingsMenuId,"builtin","settings",QStringLiteral("设置"),{},{},0},true};
     for (const auto &menu : menus()) {
         if (menu.id == menuId) return {m_plugins.value(menu.pluginId).info, menu, false};
     }

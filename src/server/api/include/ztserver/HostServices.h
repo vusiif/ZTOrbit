@@ -2,6 +2,8 @@
 #include <ztprotocol/PluginLogger.h>
 #include <ztprotocol/PluginFiles.h>
 #include <ztprotocol/NetworkData.h>
+#include <ztprotocol/NetworkService.h>
+#include <ztprotocol/NetworkDelivery.h>
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -42,7 +44,11 @@ public:
     virtual qint64 queuedTcpBytes(ConnectionId connection) const = 0;
     virtual void sendDataTo(const QString &networkId, const QString &memberId, const QByteArray &data,
                             QObject *context, util::SendCallback completed) = 0;
-    virtual void broadcastDataTo(const QString &networkId, const QByteArray &data,
+    virtual void broadcastDataTo(const QString &networkId, const QStringList &memberIds, const QByteArray &data,
                                  QObject *context, util::SendCallback completed) = 0;
+    virtual void broadcastDataBalancedTo(const QString &networkId, const QStringList &memberIds, const QByteArray &data,
+                                         QObject *context, util::SendCallback completed) = 0;
+    virtual void getNetworkRelays(const QString &networkId, QObject *context, util::RelayCallback completed) = 0;
+    virtual util::NetworkSubscription *subscribeNetworkData(const QString &networkId, QObject *context, util::NetworkCallback received) = 0;
 };
 }

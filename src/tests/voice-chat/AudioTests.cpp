@@ -13,6 +13,15 @@ private slots:
         auto bytes = encodePacket(input); bytes[4] = 2; QVERIFY(!decodePacket(bytes, output));
         QVERIFY(encodePacket({Audio, "short", 1, 1, "x"}).isEmpty());
     }
+    void independentGainsAndFinalLimiter() {
+        QVector<float> input{0.2f,0.8f,-0.8f}; applyGain(input,2); QCOMPARE(input,QVector<float>({0.4f,1.f,-1.f}));
+        QVector<float> mixed(3,0); mixStream(mixed,{0.2f,0.8f,-0.8f},0.5f); mixStream(mixed,{0.2f,0.8f,-0.8f},2.f);
+        QAudioFormat format; format.setSampleRate(48000); format.setChannelCount(1); format.setSampleFormat(QAudioFormat::Float);
+        auto pcm=encodePcm(mixed,format,0.25f); const auto output=decodePcm(pcm,format);
+        QCOMPARE(output,QVector<float>({0.125f,0.5f,-0.5f}));
+        pcm=encodePcm(mixed,format,2.f); QCOMPARE(decodePcm(pcm,format),QVector<float>({1.f,1.f,-1.f}));
+        applyGain(input,0); QCOMPARE(input,QVector<float>({0.f,0.f,0.f}));
+    }
     void pcmConversion() {
         for (auto type : {QAudioFormat::UInt8, QAudioFormat::Int16, QAudioFormat::Int32, QAudioFormat::Float}) {
             QAudioFormat format; format.setSampleRate(48000); format.setChannelCount(2); format.setSampleFormat(type);

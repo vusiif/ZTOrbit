@@ -1,4 +1,7 @@
 #include "AppController.h"
+#include "ClientNetworkService.h"
+#include "NetworkTransport.h"
+#include "PluginPackage.h"
 #include "AppLog.h"
 #include "NetworkBundle.h"
 #include "NetworkMembers.h"
@@ -71,8 +74,10 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
       m_pluginDirectory(pluginDirectory.isEmpty() ? QCoreApplication::applicationDirPath() + "/plugins" : pluginDirectory)
 {
     m_serviceStatus.known = false;
+    connect(&m_loader,&plugins::PluginLoader::stateChanged,this,&AppController::menusChanged);
+    network::ClientNetworkService::instance();
     connect(&m_registry, &plugins::PluginRegistry::menusChanged, this, [this] {
-        bool exists = m_activeMenu == QLatin1String(api::ZeroTierMenuId);
+        bool exists = m_activeMenu == QLatin1String(api::ZeroTierMenuId) || m_activeMenu == QLatin1String(api::SettingsMenuId);
         for (const auto &menu : m_registry.menus()) exists |= menu.id == m_activeMenu;
         if (exists) emit menusChanged();
         else { m_activeMenu = QString::fromLatin1(api::ZeroTierMenuId); emit activeMenuChanged(); emit menusChanged(); updatePolling(); }
@@ -100,13 +105,16 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
         }
         m_networks.updateRows(rows);
         for (const auto &id : m_memberRequests.keys()) if (m_networks.record(id).isEmpty()) delete m_memberRequests.take(id).data();
+        for(const auto &id:m_memberProbeContexts.keys()) if(m_networks.record(id).isEmpty()) delete m_memberProbeContexts.take(id).data();
     });
     connect(m_peerPoller, &zerotier::JsonPoller::updated, this, [this](const QJsonDocument &doc) {
+        m_peerLatencies.clear();
         QList<QVariantMap> rows;
         for (const auto &value : doc.array()) {
             const auto object = value.toObject();
             const auto role = object["role"].toString();
             const int latency = object["latency"].toInt(-1);
+            m_peerLatencies[object["address"].toString().toLower()]=latency;
             if (role == "LEAF" && latency < 0) continue;
             bool direct = false;
             QStringList ips;
@@ -228,14 +236,7 @@ QVariantList AppController::menus() const
     }
     return result;
 }
-QVariantList AppController::plugins() const
-{
-    QVariantList result;
-    for (const auto &plugin : m_registry.plugins()) result.append(QVariantMap{{"id", plugin.id}, {"name", plugin.name},
-        {"version", plugin.version}, {"api", QStringLiteral("%1.%2").arg(plugin.apiMajor).arg(plugin.apiMinor)},
-        {"message", m_registry.preparationMessage(plugin.id)}, {"loaded", true}});
-    return result;
-}
+QVariantList AppController::plugins() const { return m_loader.catalog(); }
 void AppController::setWindow(QQuickWindow *window)
 {
     m_window = window;
@@ -276,7 +277,7 @@ bool AppController::navigate(const QString &menuId, QQuickItem *container)
 {
     if (m_closing || !container) return false;
     QQuickItem *next = nullptr;
-    if (menuId != QLatin1String(api::ZeroTierMenuId)) {
+    if (menuId != QLatin1String(api::ZeroTierMenuId) && menuId != QLatin1String(api::SettingsMenuId)) {
         auto *engine = qmlEngine(container);
         const auto page = m_registry.page(menuId, engine, container);
         if (!page.result.ok()) { feedback(page.result.message); return false; }
@@ -370,7 +371,7 @@ void AppController::leaveNetwork(const QString &id)
 void AppController::setExpanded(const QString &id, bool expanded)
 {
     m_networks.update(id, {{"expanded", expanded}});
-    if (!expanded) delete m_memberRequests.take(id).data(); else refreshMembers();
+    if (!expanded) { delete m_memberRequests.take(id).data(); delete m_memberProbeContexts.take(id).data(); } else refreshMembers();
 }
 void AppController::refreshMembers()
 {
@@ -391,7 +392,15 @@ void AppController::refreshMembers()
                 const auto object = value.toObject(); const auto memberId = object["nodeId"].toString().toLower();
                 if (!QRegularExpression("^[0-9a-f]{10}$").match(memberId).hasMatch() || seen.contains(memberId)) continue;
                 seen.insert(memberId); const auto ips = addresses(object["ipAssignments"].toArray());
-                members.append(QVariantMap{{"id", memberId}, {"name", localName("peers", memberId)}, {"ip", ips.isEmpty() ? QStringLiteral("—") : ips.join(", ")}});
+                const int peer=m_peerLatencies.value(memberId,-1);
+                const bool self=memberId==m_info["address"].toString();
+                QString latency=self?"0 ms":peer>=0?QString::number(peer)+" ms":QStringLiteral("—");
+                QString latencySource=self?QStringLiteral("本机"):peer>=0?QStringLiteral("ZeroTier peers 延迟"):QStringLiteral("尚无有效延迟");
+                for(const auto &old:current["members"].toList()) if(old.toMap()["id"].toString()==memberId && old.toMap()["latencySource"].toString()==QStringLiteral("虚拟 IP 应用 RTT")) {
+                    latency=old.toMap()["latency"].toString(); latencySource=old.toMap()["latencySource"].toString();
+                }
+                members.append(QVariantMap{{"id",memberId},{"name",localName("peers",memberId)},{"ip",ips.isEmpty()?QStringLiteral("—"):ips.join(", ")},
+                    {"latency",latency},{"latencySource",latencySource}});
             }
             const auto ipKey = [](const QVariant &member) {
                 const auto text = member.toMap()["ip"].toString().section(',', 0, 0).trimmed();
@@ -404,6 +413,21 @@ void AppController::refreshMembers()
                 return ipKey(a) == ipKey(b) ? a.toMap()["id"].toString() < b.toMap()["id"].toString() : ipKey(a) < ipKey(b);
             });
             m_networks.update(id, {{"members", members}, {"memberStatus", members.isEmpty() ? QStringLiteral("暂无网络成员") : QString()}});
+            auto *probes=m_memberProbeContexts.value(id).data();
+            if(!probes) { probes=new QObject(this); m_memberProbeContexts[id]=probes; }
+            for(const auto &value:members) {
+                const auto target=value.toMap()["id"].toString();
+                network::ClientNetworkService::instance().transport().probeMember(id,target,probes,[this,id,target](double rtt) {
+                    const auto current=m_networks.record(id); if(!current["expanded"].toBool()) return;
+                    auto rows=current["members"].toList();
+                    for(auto &value:rows) { auto row=value.toMap(); if(row["id"].toString()!=target) continue;
+                        const int peer=m_peerLatencies.value(target,-1);
+                        row["latency"]=rtt>=0?QString::number(rtt,'f',rtt==0?0:1)+" ms":peer>=0?QString::number(peer)+" ms":QStringLiteral("不可达");
+                        row["latencySource"]=rtt>=0?QStringLiteral("虚拟 IP 应用 RTT"):peer>=0?QStringLiteral("ZeroTier peers 延迟"):QStringLiteral("应用探测超时或目标未提供接收服务"); value=row;
+                    }
+                    m_networks.update(id,{{"members",rows}});
+                });
+            }
         });
     }
 }
@@ -547,13 +571,27 @@ void AppController::importPlugin(const QUrl &source)
 {
     if (m_closing || !source.isLocalFile()) return;
     const auto error = plugins::importPlugin(source.toLocalFile(), m_pluginDirectory);
-    feedback(error.isEmpty() ? QStringLiteral("插件已导入，重启 ZTGUI 后加载。") : error);
+    if(!error.isEmpty()) { feedback(error); return; }
+    const auto path=QDir(m_pluginDirectory).filePath(QFileInfo(source.toLocalFile()).fileName());
+    const auto result=m_loader.loadFile(path,m_registry); feedback(result.ok()?QString():result.message);
+}
+void AppController::loadPlugin(const QString &id) {
+    if(m_closing) return;
+    for(const auto &value:m_loader.catalog()) if(value.toMap()["id"].toString()==id && value.toMap()["loadable"].toBool()) {
+        const auto result=m_loader.loadFile(value.toMap()["path"].toString(),m_registry); feedback(result.ok()?QString():result.message); return;
+    }
+}
+void AppController::unloadPlugin(const QString &id) {
+    if(m_closing) return;
+    if(m_activeMenu.startsWith(id+"/") && m_page) navigate(api::ZeroTierMenuId,m_page->parentItem());
+    const auto result=m_loader.unload(id,m_registry); feedback(result.ok()?QString():result.message);
 }
 void AppController::requestQuit()
 {
     if (m_closing) return;
     m_closing = true; m_confirmation = {}; updatePolling();
     for (auto context : m_memberRequests) delete context.data(); m_memberRequests.clear();
+    for(auto context:m_memberProbeContexts) delete context.data(); m_memberProbeContexts.clear();
     m_shutdownMessage = QStringLiteral("正在退出，正在等待操作与插件结束…"); emit stateChanged();
     m_loader.requestShutdown();
 }

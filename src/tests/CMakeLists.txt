@@ -1,4 +1,18 @@
 find_package(Qt6 REQUIRED COMPONENTS Test)
+add_executable(plugin_package_tests PluginPackageTests.cpp)
+add_library(zt_runtime_probe SHARED plugins/RuntimeFixture.cpp)
+set_target_properties(zt_runtime_probe PROPERTIES PREFIX "")
+target_link_libraries(plugin_package_tests PRIVATE ztgui_package Qt6::Test ZTGUI::Api)
+ztgui_embed_host_contract(plugin_package_tests "${ZTGUI_CLIENT_CONTRACT_DIRECTORY}")
+target_compile_definitions(plugin_package_tests PRIVATE
+    FIXTURE_LIBRARY="$<TARGET_FILE:plugin_fixture_good>"
+    RUNTIME_LIBRARY="$<TARGET_FILE:zt_runtime_probe>"
+    FIXTURE_PACKAGE="$<TARGET_FILE_DIR:plugin_fixture_good>/plugin_fixture_good.ztplugin")
+add_dependencies(plugin_package_tests plugin_fixture_good zt_runtime_probe)
+if(MSVC)
+    target_compile_options(plugin_package_tests PRIVATE /utf-8)
+endif()
+add_test(NAME plugin_package_container COMMAND plugin_package_tests)
 add_executable(network_tests NetworkTests.cpp "${ZTGUI_ROOT_DIR}/src/client/main/NetworkMembers.cpp")
 target_include_directories(network_tests PRIVATE "${ZTGUI_ROOT_DIR}/src/client/main")
 target_link_libraries(network_tests PRIVATE ZTGUI::Api Qt6::Test)
@@ -34,8 +48,10 @@ target_link_libraries(zerotier_gui_tests PRIVATE Qt6::Test Qt6::Widgets)
 ztgui_add_qml_ui(zerotier_gui_tests)
 qt_add_resources(zerotier_gui_tests test_app_icon PREFIX "/" BASE "${ZTGUI_ROOT_DIR}/src/client"
     FILES "${ZTGUI_ROOT_DIR}/src/client/assets/app-icon.png")
-target_compile_definitions(zerotier_gui_tests PRIVATE ZEROTIER_TESTING)
-add_dependencies(zerotier_gui_tests fake_zerotier_cli app_log_probe)
+target_compile_definitions(zerotier_gui_tests PRIVATE ZEROTIER_TESTING
+    ZTGUI_SOURCE_VERSION_FILE="${ZTGUI_ROOT_DIR}/VERSION")
+# Keep the launchable application current when building its UI regressions.
+add_dependencies(zerotier_gui_tests zerotier_gui fake_zerotier_cli app_log_probe)
 add_dependencies(zerotier_gui_tests instance_probe)
 if(MSVC)
     target_compile_options(fake_zerotier_cli PRIVATE /utf-8)
@@ -81,13 +97,30 @@ foreach(kind good bad obsolete legacy lifecycle lifecycle_failed cancellable can
     elseif(kind STREQUAL "lifecycle_failed")
         target_compile_definitions(plugin_fixture_${kind} PRIVATE FIXTURE_LIFECYCLE=2)
     elseif(kind MATCHES "^cancellable")
-        target_compile_definitions(plugin_fixture_${kind} PRIVATE FIXTURE_ID="test.${kind}")
+        target_compile_definitions(plugin_fixture_${kind} PRIVATE FIXTURE_ID="test-${kind}")
         if(kind STREQUAL "cancellable_blocked")
             target_compile_definitions(plugin_fixture_${kind} PRIVATE FIXTURE_CANCELLABLE=2)
         else()
             target_compile_definitions(plugin_fixture_${kind} PRIVATE FIXTURE_CANCELLABLE=1)
         endif()
     endif()
+    set(pack_id "test-dynamic")
+    set(pack_name "Dynamic")
+    if(kind MATCHES "^lifecycle" OR kind STREQUAL "legacy")
+        set(pack_id "test-lifecycle")
+    elseif(kind MATCHES "^cancellable")
+        set(pack_id "test-${kind}")
+        set(pack_name "test-${kind}")
+    endif()
+    set(pack_iid "vusiif.ztgui.api.PluginInterface/3.0")
+    if(kind STREQUAL "obsolete" OR kind STREQUAL "legacy")
+        set(pack_iid "vusiif.ztgui.api.PluginInterface/2.0")
+    endif()
+    add_custom_command(TARGET plugin_fixture_${kind} POST_BUILD
+        COMMAND "$<TARGET_FILE:ztplugin_pack>" --library "$<TARGET_FILE:plugin_fixture_${kind}>"
+            --output "$<TARGET_FILE_DIR:plugin_fixture_${kind}>/plugin_fixture_${kind}.ztplugin"
+            --host client --id "${pack_id}" --name "${pack_name}" --version 1 --apiVersion "${FIXTURE_API_VERSION}" --iid "${pack_iid}" VERBATIM)
+    add_dependencies(plugin_fixture_${kind} ztplugin_pack)
 endforeach()
 qt_add_executable(plugin_loader_tests plugins/LoaderTests.cpp
     "${ZTGUI_ROOT_DIR}/src/client/main/plugins/PluginLoader.cpp" "${ZTGUI_ROOT_DIR}/src/client/main/plugins/PluginRegistry.cpp")
@@ -97,6 +130,7 @@ target_link_libraries(plugin_loader_tests PRIVATE ZTGUI::Api Qt6::Test Qt6::Conc
 function(ztgui_add_plugin_tools_test target)
     target_sources(${target} PRIVATE
         "${ZTGUI_ROOT_DIR}/src/client/main/plugins/HostServicesImpl.cpp"
+        "${ZTGUI_ROOT_DIR}/src/client/main/ClientNetworkService.cpp"
         "${ZTGUI_ROOT_DIR}/src/client/main/ZeroTierClient.cpp"
         "${ZTGUI_ROOT_DIR}/src/client/main/NetworkMembers.cpp"
         "${ZTGUI_ROOT_DIR}/src/client/main/AppLog.cpp"
@@ -106,15 +140,15 @@ function(ztgui_add_plugin_tools_test target)
 endfunction()
 ztgui_add_plugin_tools_test(plugin_loader_tests)
 target_compile_definitions(plugin_loader_tests PRIVATE
-    FIXTURE_LEGACY="$<TARGET_FILE:plugin_fixture_legacy>"
-    FIXTURE_GOOD="$<TARGET_FILE:plugin_fixture_good>" FIXTURE_BAD="$<TARGET_FILE:plugin_fixture_bad>"
-    FIXTURE_OBSOLETE="$<TARGET_FILE:plugin_fixture_obsolete>"
-    FIXTURE_LIFECYCLE="$<TARGET_FILE:plugin_fixture_lifecycle>"
-    FIXTURE_LIFECYCLE_FAILED="$<TARGET_FILE:plugin_fixture_lifecycle_failed>"
-    FIXTURE_CANCELLABLE="$<TARGET_FILE:plugin_fixture_cancellable>"
-    FIXTURE_CANCELLABLE_SECOND="$<TARGET_FILE:plugin_fixture_cancellable_second>"
-    FIXTURE_CANCELLABLE_QUEUED="$<TARGET_FILE:plugin_fixture_cancellable_queued>"
-    FIXTURE_CANCELLABLE_BLOCKED="$<TARGET_FILE:plugin_fixture_cancellable_blocked>")
+    FIXTURE_LEGACY="$<TARGET_FILE_DIR:plugin_fixture_legacy>/plugin_fixture_legacy.ztplugin"
+    FIXTURE_GOOD="$<TARGET_FILE_DIR:plugin_fixture_good>/plugin_fixture_good.ztplugin" FIXTURE_BAD="$<TARGET_FILE_DIR:plugin_fixture_bad>/plugin_fixture_bad.ztplugin"
+    FIXTURE_OBSOLETE="$<TARGET_FILE_DIR:plugin_fixture_obsolete>/plugin_fixture_obsolete.ztplugin"
+    FIXTURE_LIFECYCLE="$<TARGET_FILE_DIR:plugin_fixture_lifecycle>/plugin_fixture_lifecycle.ztplugin"
+    FIXTURE_LIFECYCLE_FAILED="$<TARGET_FILE_DIR:plugin_fixture_lifecycle_failed>/plugin_fixture_lifecycle_failed.ztplugin"
+    FIXTURE_CANCELLABLE="$<TARGET_FILE_DIR:plugin_fixture_cancellable>/plugin_fixture_cancellable.ztplugin"
+    FIXTURE_CANCELLABLE_SECOND="$<TARGET_FILE_DIR:plugin_fixture_cancellable_second>/plugin_fixture_cancellable_second.ztplugin"
+    FIXTURE_CANCELLABLE_QUEUED="$<TARGET_FILE_DIR:plugin_fixture_cancellable_queued>/plugin_fixture_cancellable_queued.ztplugin"
+    FIXTURE_CANCELLABLE_BLOCKED="$<TARGET_FILE_DIR:plugin_fixture_cancellable_blocked>/plugin_fixture_cancellable_blocked.ztplugin")
 if(MSVC)
     target_compile_options(plugin_loader_tests PRIVATE /utf-8)
 endif()
@@ -125,8 +159,8 @@ add_dependencies(plugin_loader_tests plugin_fixture_good plugin_fixture_bad plug
 add_test(NAME dynamic_plugins COMMAND plugin_loader_tests -platform offscreen)
 
 target_compile_definitions(zerotier_gui_tests PRIVATE
-    FIXTURE_CANCELLABLE="$<TARGET_FILE:plugin_fixture_cancellable>"
-    FIXTURE_CANCELLABLE_BLOCKED="$<TARGET_FILE:plugin_fixture_cancellable_blocked>"
+    FIXTURE_CANCELLABLE="$<TARGET_FILE_DIR:plugin_fixture_cancellable>/plugin_fixture_cancellable.ztplugin"
+    FIXTURE_CANCELLABLE_BLOCKED="$<TARGET_FILE_DIR:plugin_fixture_cancellable_blocked>/plugin_fixture_cancellable_blocked.ztplugin"
     )
 add_dependencies(zerotier_gui_tests plugin_fixture_cancellable plugin_fixture_cancellable_blocked)
 
@@ -144,3 +178,8 @@ if(ZTGUI_VOICE_PLUGIN_PATH)
     add_test(NAME voice_plugin_panel COMMAND voice_plugin_tests -platform offscreen)
     set_tests_properties(voice_plugin_panel PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software")
 endif()
+
+add_executable(relay_tests RelayTests.cpp)
+target_link_libraries(relay_tests PRIVATE ztgui_network Qt6::Test)
+add_test(NAME relay_end_to_end COMMAND relay_tests)
+set_tests_properties(relay_end_to_end PROPERTIES TIMEOUT 60)

@@ -80,6 +80,8 @@ public:
     Q_INVOKABLE void importConfiguration(const QUrl &source);
     Q_INVOKABLE void importMoons(const QList<QUrl> &sources);
     Q_INVOKABLE void deleteMoon(const QString &id);
+    Q_INVOKABLE void loadPlugin(const QString &id);
+    Q_INVOKABLE void unloadPlugin(const QString &id);
     Q_INVOKABLE void importPlugin(const QUrl &source);
     Q_INVOKABLE void confirm(bool accepted);
     Q_INVOKABLE void requestQuit();
@@ -114,6 +116,8 @@ private:
     bool m_busy = false, m_closing = false, m_shutdownReady = false, m_visible = false, m_moonsActive = false, m_apiAvailable = false;
     bool m_serviceQueryPending = false, m_moonFilesPending = false, m_moonRefreshQueued = false;
     QHash<QString, QPointer<QObject>> m_memberRequests;
+    QHash<QString, QPointer<QObject>> m_memberProbeContexts;
+    QHash<QString,int> m_peerLatencies;
     std::function<void()> m_confirmation;
     void ask(const QString &title, const QString &message, const QString &acceptLabel, std::function<void()> action);
     void setBusy(bool busy);

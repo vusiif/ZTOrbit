@@ -69,16 +69,16 @@ private slots:
         const QJsonArray members{QJsonObject{{"nodeId","0123456789"},{"authorized",true},{"ipAssignments",QJsonArray{local.toString()}}},
             QJsonObject{{"nodeId","abcdef0123"},{"authorized",false},{"ipAssignments",QJsonArray{local.toString()}}}};
         const auto data = QByteArray("a\0b",3);
-        auto result = util::sendNetworkData(members, "0123456789", "test.data", data);
+        auto result = util::sendNetworkData(members, "0123456789", "test-data", data);
         QVERIFY2(result.ok(), qPrintable(result.error)); QCOMPARE(result.recipients,1);
         QTRY_VERIFY(receiver.hasPendingDatagrams());
         QByteArray packet(receiver.pendingDatagramSize(), '\0'); receiver.readDatagram(packet.data(), packet.size());
         protocol::Packet decoded; QVERIFY(protocol::decode(packet,decoded));
-        QCOMPARE(decoded.plugin,QByteArray("test.data")); QCOMPARE(decoded.payload,data);
-        QVERIFY(!util::sendNetworkData(members,"abcdef0123","test.data",data).ok());
-        QVERIFY(!util::sendNetworkData(members,"invalid","test.data",data).ok());
-        QVERIFY(!util::sendNetworkData(members,{},"test.data",QByteArray(protocol::MaxUdpBytes,'x')).ok());
-        result = util::sendNetworkData(members,{},"test.data",data);
+        QCOMPARE(decoded.plugin,QByteArray("test-data")); QCOMPARE(decoded.payload,data);
+        QVERIFY(!util::sendNetworkData(members,"abcdef0123","test-data",data).ok());
+        QVERIFY(!util::sendNetworkData(members,"invalid","test-data",data).ok());
+        QVERIFY(!util::sendNetworkData(members,{},"test-data",QByteArray(protocol::MaxUdpBytes,'x')).ok());
+        result = util::sendNetworkData(members,{},"test-data",data);
         QVERIFY(result.ok()); QCOMPARE(result.recipients,1);
     }
 };

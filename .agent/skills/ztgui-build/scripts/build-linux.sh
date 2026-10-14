@@ -27,8 +27,8 @@ tar -czf dist/linux-x64.tar.gz -C dist/linux-x64 .
 # The SDK fingerprint also includes the shared public headers.
 python3 .agent/skills/ztgui-build/scripts/package-server-sdk.py "$project_root"
 if [[ "$voice" == ON ]]; then
-    cmake --build "$build" --target ztserver_voice_chat --parallel
+    cmake --build "$build" --target ztserver_voice_chat_package --parallel
     mkdir -p dist/server-plugins
-    cp "$build/plugins/ztserver_voice_chat.so" dist/server-plugins/
+    cp "$build/plugins/ztserver_voice_chat.ztplugin" dist/server-plugins/
 fi
 echo 'Created dist/linux-x64.tar.gz (plugins published separately)'

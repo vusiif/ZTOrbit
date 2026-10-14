@@ -4,6 +4,8 @@
 #include <QString>
 #include <functional>
 #include <ztprotocol/NetworkData.h>
+#include <ztprotocol/NetworkService.h>
+#include <ztprotocol/NetworkDelivery.h>
 
 class QObject;
 
@@ -27,7 +29,11 @@ public:
     virtual void getZTMoons(QObject *context, JsonCallback completed) = 0;
     virtual void sendDataTo(const QString &networkId, const QString &memberId, const QByteArray &data,
                             QObject *context, SendCallback completed) = 0;
-    virtual void broadcastDataTo(const QString &networkId, const QByteArray &data,
+    virtual void broadcastDataTo(const QString &networkId, const QStringList &memberIds, const QByteArray &data,
                                  QObject *context, SendCallback completed) = 0;
+    virtual void broadcastDataBalancedTo(const QString &networkId, const QStringList &memberIds, const QByteArray &data,
+                                         QObject *context, SendCallback completed) = 0;
+    virtual void getNetworkRelays(const QString &networkId, QObject *context, RelayCallback completed) = 0;
+    virtual NetworkSubscription *subscribeNetworkData(const QString &networkId, QObject *context, NetworkCallback received) = 0;
 };
 }

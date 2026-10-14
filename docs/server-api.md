@@ -1,12 +1,12 @@
 # 服务端插件 API 与传输协议
 
-宿主是 `zt-server`，公开 SDK 在 `src/server/api/`，实现位于 `src/server/main/`，插件默认在 `src/plugins/<name>/server/`。客户端和服务端版本均由根 `VERSION` 派生，当前程序0.3.3 / SDK0.3；相同数字不代表两端动态库可混载。
+宿主是 `zt-server`，公开 SDK 在 `src/server/api/`，实现位于 `src/server/main/`，插件默认在 `src/plugins/<name>/server/`。客户端和服务端版本均由根 `VERSION` 派生，当前程序0.4.1 / SDK0.4；相同数字不代表两端动态库可混载。
 
 ## 独立 SDK 与插件
 
 ```bash
 cmake -S src/server/api -B cmake-build-server-api -DCMAKE_INSTALL_LIBDIR=lib
-cmake --install cmake-build-server-api --prefix "$PWD/dist/ZTServer-api-v0.3"
+cmake --install cmake-build-server-api --prefix "$PWD/dist/ZTServer-api-v0.4"
 ```
 
 第三方只需解压 SDK、匹配的动态 Qt6、编译器和运行库，不需要宿主源码。插件项目：
@@ -15,7 +15,7 @@ cmake --install cmake-build-server-api --prefix "$PWD/dist/ZTServer-api-v0.3"
 cmake_minimum_required(VERSION 3.21.1)
 project(example LANGUAGES CXX)
 set(CMAKE_AUTOMOC ON)
-find_package(ZTServerPluginApi 0.3 EXACT CONFIG REQUIRED)
+find_package(ZTServerPluginApi 0.4 EXACT CONFIG REQUIRED)
 configure_file(plugin.json.in "${CMAKE_CURRENT_BINARY_DIR}/plugin.json" @ONLY)
 qt_add_plugin(example SHARED CLASS_NAME Example)
 target_sources(example PRIVATE Plugin.cpp)
@@ -47,7 +47,7 @@ public:
 #include "Plugin.moc"
 ```
 
-插件 ID 匹配 `[a-z0-9][a-z0-9._-]{0,127}`，`builtin` 保留；重复 ID 不会覆盖先加载的插件。IID 为 `vusiif.ztgui.server.api.PluginInterface/1.0`，元数据和接口都精确匹配 API 两段版本。插件共享宿主进程，必须匹配 Linux 架构、Qt、工具链与运行库，不承诺跨工具链 ABI。
+插件 ID 匹配 `[a-z0-9][a-z0-9._-]{0,127}`，`builtin` 保留；重复 ID 不会覆盖先加载的插件。IID 为 `vusiif.ztgui.server.api.PluginInterface/2.0`，元数据和接口都精确匹配 API 两段版本。插件共享宿主进程，必须匹配 Linux 架构、Qt、工具链与运行库，不承诺跨工具链 ABI。
 
 ## 生命周期与工具
 
@@ -90,3 +90,13 @@ TCP 在整个包前加四字节大端长度，包体最大1 MiB；UDP 一个包�
 `HostServices::sendDataTo(networkId,memberId,data,context,callback)` 和 `broadcastDataTo(networkId,data,context,callback)` 在事件线程异步查询本机控制器的指定网络成员，随后通过 UDP 18100 发送给已授权成员的 IPv4。单成员接口要求 10 位成员 ID；广播逐个单播并去重 IP。数据包装为调用插件路由的 ZTS1 包，包总长不超过 1232 字节。回调类型为 `util::SendCallback`，结果含 `recipients/error/ok()`，成功只表示本地发送，不保证交付。接收方需监听 UDP 18100 并按同一插件路由接收；客户端接收由业务插件实现。上下文销毁或 `onStop` 取消未完成查询。具体限制见[客户端 API](plugin-api.md)。
 
 客户端网络成员页约定掩码 255.255.255.0；从本机分配的 IPv4 推导 `.1:18100`，使用上述 `controller.members` 请求并每 2 秒轮询。该 `.1` 节点需运行新宿主，且本机 ZeroTier 控制器应管理对应网络；其他控制器部署需自行调整部署地址。该只读接口沿用已有网络访问控制，不增加远程管理权限。
+
+## 通用网络工具和封装包
+
+HostServices 提供与客户端同参数的 `sendDataTo`、`broadcastDataTo(networkId, memberIds, data, context, callback)`、`broadcastDataBalancedTo`、`getNetworkRelays` 和 `subscribeNetworkData`。默认单中转是网络 `.1:18100`，失败本机直发；多中转按成员稳定分配，授权、接收与限制见[多中转通信](network-relays.md)。文件／日志工具仍支持后台线程，网络工具和回调限事件线程。
+
+服务端入口 IID 更新到 `/2.0`，客户端 `/3.0` 不可混载。通过已安装 SDK 的 `ztgui_package_plugin()` 生成 host=server 的 `.ztplugin`，宿主仅启动扫描封装包；原 `.so` 必须重编并封装。解密校验、私有缓存与卸载失败处理和客户端一致，不增加运行时管理界面。禁止插件互相依赖、引用；ZeroTier 操作只读。
+
+## v2 封装工具
+
+服务端 SDK 同步提供 v2 分块多文件工具、显式 `<target>_package`、Core/Network 宿主契约及工具内容指纹；宿主兼容旧 v1。Linux 语音不捆绑系统 Qt、Multimedia 或 FFmpeg；Linux 私有运行库声明明确拒绝。正式 install 只安装包和许可证。工具支持 inspect/list/许可证导出，完整规则见[运行依赖分离](plugin-runtime-separation.md)。

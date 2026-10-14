@@ -112,26 +112,26 @@ QString PluginServices::filePath(const QString &relativePath, bool writing, QStr
     }
     return path;
 }
-void PluginServices::sendDataTo(const QString &network, const QString &member, const QByteArray &data,
-                               QObject *context, util::SendCallback completed)
-{
-    m_queries.query("controller.members", {{"networkId", network}}, context,
-        [this, member, data, completed](const api::JsonResult &result) {
-            if (!completed) return;
-            if (!result.ok()) { completed({0, result.error}); return; }
-            if (member.isEmpty()) { completed({0, QStringLiteral("成员 ID 不能为空")}); return; }
-            completed(util::sendNetworkData(result.document.array(), member, m_id.toLatin1(), data));
-        });
+QObject *PluginServices::requestContext(QObject *context) {
+    if(m_stopped || !context || QThread::currentThread()!=thread() || context->thread()!=thread()) return nullptr;
+    auto *job=new QObject(&m_requests); connect(context,&QObject::destroyed,job,[job] { delete job; }); return job;
 }
-void PluginServices::broadcastDataTo(const QString &network, const QByteArray &data,
-                                    QObject *context, util::SendCallback completed)
-{
-    m_queries.query("controller.members", {{"networkId", network}}, context,
-        [this, data, completed](const api::JsonResult &result) {
-            if (!completed) return;
-            if (!result.ok()) { completed({0, result.error}); return; }
-            completed(util::sendNetworkData(result.document.array(), {}, m_id.toLatin1(), data));
-        });
+void PluginServices::sendDataTo(const QString &network,const QString &member,const QByteArray &data,QObject *context,util::SendCallback callback)
+{ broadcastDataTo(network,{member},data,context,std::move(callback)); }
+void PluginServices::broadcastDataTo(const QString &network,const QStringList &members,const QByteArray &data,QObject *context,util::SendCallback callback) {
+    if(auto *job=requestContext(context)) m_host.transport().send(m_id,network,members,data,false,job,[job,callback](const util::SendResult &r) { job->deleteLater(); if(callback) callback(r); });
+}
+void PluginServices::broadcastDataBalancedTo(const QString &network,const QStringList &members,const QByteArray &data,QObject *context,util::SendCallback callback) {
+    if(auto *job=requestContext(context)) m_host.transport().send(m_id,network,members,data,true,job,[job,callback](const util::SendResult &r) { job->deleteLater(); if(callback) callback(r); });
+}
+void PluginServices::getNetworkRelays(const QString &network,QObject *context,util::RelayCallback callback) {
+    if(auto *job=requestContext(context)) m_host.transport().relays(network,job,[job,callback](const util::RelayResult &r) { job->deleteLater(); if(callback) callback(r); });
+}
+util::NetworkSubscription *PluginServices::subscribeNetworkData(const QString &network,QObject *context,util::NetworkCallback callback) {
+    auto *guard=requestContext(context); if(!guard) return nullptr;
+    auto *sub=m_host.transport().subscribe(m_id,network,context,std::move(callback));
+    if(sub) connect(guard,&QObject::destroyed,sub,[sub] { sub->cancel(); }); else delete guard;
+    return sub;
 }
 FileResult PluginServices::readFile(const QString &relativePath)
 {

@@ -7,13 +7,7 @@
 namespace vusiif::ztgui::plugins {
 QString importPlugin(const QString &source, const QString &directory) {
     const QFileInfo input(source), targetDirectory(directory);
-#ifdef Q_OS_WIN
-    const QString extension = "dll";
-#elif defined(Q_OS_MACOS)
-    const QString extension = "dylib";
-#else
-    const QString extension = "so";
-#endif
+    const QString extension = "ztplugin";
     if (!input.isFile() || input.suffix().compare(extension, Qt::CaseInsensitive) != 0)
         return QStringLiteral("请选择有效的插件文件。");
     if (targetDirectory.isSymLink() || targetDirectory.isJunction() || (targetDirectory.exists() && !targetDirectory.isDir()))
@@ -23,7 +17,7 @@ QString importPlugin(const QString &source, const QString &directory) {
     if (!lock.tryLock()) return QStringLiteral("另一个导入操作正在进行。");
     const auto destination = QDir(directory).filePath(input.fileName());
     const QFileInfo existing(destination);
-    if (existing.exists() || existing.isSymLink()) return QStringLiteral("同名插件已存在，请退出程序后手动替换。");
+    if (existing.exists() || existing.isSymLink()) return QStringLiteral("同名插件已存在，请先卸载后移除旧文件。");
     QFile file(source);
     if (!file.open(QIODevice::ReadOnly)) return file.errorString();
     QSaveFile output(destination);

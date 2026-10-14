@@ -120,13 +120,7 @@ private slots:
     }
     void pluginImportIsAtomicAndDoesNotOverwrite() {
         QTemporaryDir directory;
-#ifdef Q_OS_WIN
-        const QString name = "example.dll";
-#elif defined(Q_OS_MACOS)
-        const QString name = "example.dylib";
-#else
-        const QString name = "example.so";
-#endif
+const QString name = "example.ztplugin";
         QFile source(directory.filePath(name));
         QVERIFY(source.open(QIODevice::WriteOnly)); source.write("plugin bytes"); source.close();
         const auto target = directory.filePath("plugins");
@@ -141,7 +135,7 @@ private slots:
 
     void pluginLogsWriteBothSinksAndReportPartialFailure() {
         QTemporaryDir directory;
-        vusiif::ztgui::util::HostServicesImpl host(QStringLiteral("测试插件"),directory.path(),"test.logger");
+        vusiif::ztgui::util::HostServicesImpl host(QStringLiteral("测试插件"),directory.path(),"test-logger");
         std::vector<std::future<bool>> tasks;
         for (int i=0;i<4;++i) tasks.push_back(std::async(std::launch::async,[&host,i] {
             for (int j=0;j<20;++j) if (!host.logs().write(vusiif::ztgui::util::LogLevel::Info,QString("concurrent-%1-%2").arg(i).arg(j)).ok()) return false;
@@ -152,10 +146,10 @@ private slots:
         QCOMPARE(logs.entryList({"*.log"},QDir::Files).size(),1);
         QFile plugin(logs.filePath(logs.entryList({"*.log"},QDir::Files).first()));
         QVERIFY(plugin.open(QIODevice::ReadOnly)); const auto entries = plugin.readAll();
-        QCOMPARE(entries.count("[test.logger]"),80);
+        QCOMPARE(entries.count("[test-logger]"),80);
         QFile main(vusiif::ztgui::util::log::path()); QVERIFY(main.open(QIODevice::ReadOnly));
-        QVERIFY(main.readAll().contains("[test.logger] concurrent-3-19"));
-        vusiif::ztgui::util::HostServicesImpl invalid("../invalid",directory.path(),"test.partial");
+        QVERIFY(main.readAll().contains("[test-logger] concurrent-3-19"));
+        vusiif::ztgui::util::HostServicesImpl invalid("../invalid",directory.path(),"test-partial");
         const auto result=invalid.logs().write(vusiif::ztgui::util::LogLevel::Warning,"partial-sink-probe");
         QVERIFY(result.hostError.isEmpty()); QVERIFY(!result.pluginError.isEmpty());
         QVERIFY(!QFileInfo::exists(directory.filePath("../invalid")));
@@ -509,7 +503,7 @@ private slots:
     void pluginRegistrationIsAtomicAndVersioned() {
         using namespace vusiif::ztgui::api;
         QCOMPARE(ApiMajor, 0);
-        QCOMPARE(ApiMinor, 3);
+        QCOMPARE(ApiMinor, 4);
         QCOMPARE(QString::fromLatin1(ApiVersion), QStringLiteral(ZEROTIER_GUI_VERSION).section('.', 0, 1));
         PluginRegistry registry;
         QSignalSpy changes(&registry, &PluginRegistry::menusChanged);
@@ -517,7 +511,7 @@ private slots:
         menu.id = "overview";
         menu.title = QStringLiteral("概览");
         menu.createPage = [](QQmlEngine *, QQuickItem *parent) { return new QQuickItem(parent); };
-        PluginDefinition plugin {{"example.alpha", "Alpha", "1.0"}, {menu}};
+        PluginDefinition plugin {{"example-alpha", "Alpha", "1.0"}, {menu}};
         auto invalid = plugin;
         invalid.menus.append(menu);
         QCOMPARE(registry.registerPlugin(invalid).error, Error::InvalidMenu);
@@ -539,7 +533,7 @@ private slots:
         invalid.menus[0].id = "../zerotier";
         QCOMPARE(registry.registerPlugin(invalid).error, Error::InvalidMenu);
         invalid = plugin;
-        invalid.info.id = "example.alpha\n";
+        invalid.info.id = "example-alpha\n";
         QCOMPARE(registry.registerPlugin(invalid).error, Error::InvalidPlugin);
         invalid = plugin;
         invalid.menus[0].createPage = {};
@@ -547,12 +541,12 @@ private slots:
         QVERIFY(registry.registerPlugin(plugin).ok());
         QCOMPARE(registry.registerPlugin(plugin).error, Error::DuplicatePlugin);
         QCOMPARE(registry.plugins().size(), 1);
-        QCOMPARE(registry.menus().first().id, QString("example.alpha/overview"));
+        QCOMPARE(registry.menus().first().id, QString("example-alpha/overview"));
         QCOMPARE(changes.count(), 1);
-        plugin.info.id = "example.beta";
+        plugin.info.id = "example-beta"; plugin.info.name="Beta";
         plugin.menus[0].order = 10;
         QVERIFY(registry.registerPlugin(plugin).ok());
-        QCOMPARE(registry.menus().first().id, QString("example.beta/overview"));
+        QCOMPARE(registry.menus().first().id, QString("example-beta/overview"));
         QCOMPARE(registry.unregisterPlugin("missing").error, Error::NotFound);
         QCOMPARE(registry.unregisterPlugin("builtin").error, Error::NotFound);
         QCOMPARE(registry.menus().size(), 2);
@@ -571,15 +565,15 @@ private slots:
             menu.id = "overview";
             menu.title = "Lifetime";
             menu.createPage = [resource](QQmlEngine *, QQuickItem *parent) { return new QQuickItem(parent); };
-            QVERIFY(registry.registerPlugin({{"example.lifetime", "Lifetime", "1.0"}, {menu}}).ok());
-            page = registry.page("example.lifetime/overview", &engine, &host).page;
+            QVERIFY(registry.registerPlugin({{"example-lifetime", "Lifetime", "1.0"}, {menu}}).ok());
+            page = registry.page("example-lifetime/overview", &engine, &host).page;
             QVERIFY(page);
         };
         {
             PluginRegistry registry;
             addPlugin(registry);
             QVERIFY(!pageWasDestroyedFirst);
-            QVERIFY(registry.unregisterPlugin("example.lifetime").ok());
+            QVERIFY(registry.unregisterPlugin("example-lifetime").ok());
             QVERIFY(pageWasDestroyedFirst);
         }
         pageWasDestroyedFirst = false;

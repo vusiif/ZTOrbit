@@ -13,6 +13,7 @@ class QQmlEngine;
 namespace vusiif::ztgui::api {
 
 inline constexpr char ZeroTierMenuId[] = "builtin/zerotier";
+inline constexpr char SettingsMenuId[] = "builtin/settings";
 
 struct PluginInfo {
     QString id;
