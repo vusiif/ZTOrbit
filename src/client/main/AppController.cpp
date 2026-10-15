@@ -75,6 +75,9 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
 {
     m_serviceStatus.known = false;
     connect(&m_loader,&plugins::PluginLoader::stateChanged,this,&AppController::menusChanged);
+    connect(&m_loader,&plugins::PluginLoader::loadFinished,this,[this](const QString &id,bool success,const QString &message) {
+        if(!success && !m_closing) feedback(QStringLiteral("插件 %1 加载失败：%2").arg(id,message));
+    });
     network::ClientNetworkService::instance();
     connect(&m_registry, &plugins::PluginRegistry::menusChanged, this, [this] {
         bool exists = m_activeMenu == QLatin1String(api::ZeroTierMenuId) || m_activeMenu == QLatin1String(api::SettingsMenuId);
@@ -232,7 +235,14 @@ QVariantList AppController::menus() const
         if (!menu.icon.isNull()) menu.icon.pixmap(20,20).save(&buffer,"PNG");
         result.append(QVariantMap{{"id", menu.id}, {"title", menu.title}, {"iconSource", icon.isEmpty() ? QString() : "data:image/png;base64," + QString::fromLatin1(icon.toBase64())},
         {"ready", m_registry.preparationState(menu.pluginId) == plugins::PreparationState::Ready},
+        {"loading", m_registry.preparationState(menu.pluginId) == plugins::PreparationState::Preparing},
         {"message", m_registry.preparationMessage(menu.pluginId)}, {"toolTip", menu.toolTip}});
+    }
+    for(const auto &value:m_loader.catalog()) {
+        const auto row=value.toMap();
+        if(!row["loading"].toBool() || row["loaded"].toBool()) continue;
+        result.append(QVariantMap{{"id",row["path"].toString()+"/loading"},{"title",row["name"].toString()},
+            {"ready",false},{"loading",true},{"message",QStringLiteral("插件加载中…")}});
     }
     return result;
 }

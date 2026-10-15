@@ -22,6 +22,7 @@ public:
     PluginLoader();
     ~PluginLoader();
     QStringList scan(const QString &directory, PluginRegistry &registry);
+    // Accepts a background load; loadFinished reports readiness or failure.
     api::Result loadFile(const QString &path, PluginRegistry &registry, bool enable = true);
     QVariantList catalog() const;
     // Requests cancellation and returns immediately; unloadFinished reports completion.
@@ -32,6 +33,7 @@ public:
     QStringList pendingInitializations() const;
 signals:
     void stateChanged();
+    void loadFinished(const QString &pluginId, bool success, const QString &message);
     void unloadFinished(const QString &pluginId, bool success, const QString &message);
     void shutdownProgress(const QStringList &pluginNames);
     void shutdownFinished();
@@ -51,6 +53,17 @@ private:
         QString releaseError;
     };
     std::vector<LoadedPlugin> m_libraries;
+    struct StagedPlugin;
+    struct Loading {
+        QString key;
+        QPointer<PluginRegistry> registry;
+        bool enable = true;
+        util::CancellationSource cancellation;
+        std::unique_ptr<QFutureWatcher<std::shared_ptr<StagedPlugin>>> watcher;
+    };
+    std::vector<Loading> m_loads;
+    QThreadPool m_loadingPool;
+    void finishLoad(QFutureWatcher<std::shared_ptr<StagedPlugin>> *watcher);
     QThreadPool m_preparationPool;
     struct Preparation {
         QPointer<PluginRegistry> registry;

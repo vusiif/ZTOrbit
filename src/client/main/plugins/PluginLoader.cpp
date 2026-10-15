@@ -17,13 +17,24 @@
 #include <QScopedValueRollback>
 #include <QCoreApplication>
 #include <QThread>
+#include <QMutex>
+#include <QMutexLocker>
 #include <algorithm>
 #include <exception>
 
 namespace vusiif::ztgui::plugins {
 using namespace vusiif::ztgui::api;
+struct PluginLoader::StagedPlugin {
+    package::PackageResult package;
+    LoadedPlugin plugin;
+    QString error;
+    bool loadable = false;
+    bool disabled = false;
+};
+
 PluginLoader::PluginLoader()
 {
+    m_loadingPool.setMaxThreadCount(1);
     m_preparationPool.setMaxThreadCount(2);
     m_shutdownCheck.setInterval(20);
     connect(&m_shutdownCheck, &QTimer::timeout, this, [this] { drainUnloads(); checkShutdown(); });
@@ -34,6 +45,18 @@ PluginLoader::~PluginLoader()
     m_busy = true;
     m_stopping = true;
     m_shutdownCheck.stop();
+    for (auto &load : m_loads) {
+        load.cancellation.requestCancellation();
+        QObject::disconnect(load.watcher.get(), nullptr, this, nullptr);
+    }
+    m_loadingPool.waitForDone();
+    for(auto &load:m_loads) {
+        auto &plugin=load.watcher->result()->plugin;
+        if(plugin.library && !plugin.library->unload() && plugin.library->isLoaded()) {
+            plugin.cache->setAutoRemove(false); plugin.library.release(); plugin.cacheLock.release();
+        }
+    }
+    m_loads.clear();
     for (const auto &plugin : m_libraries) plugin.cancellation.requestCancellation();
     for (auto &preparation : m_preparations) QObject::disconnect(preparation.watcher.get(), nullptr, this, nullptr);
     m_preparationPool.waitForDone();
@@ -49,7 +72,7 @@ QStringList PluginLoader::scan(const QString &directory, PluginRegistry &registr
     if(m_busy || m_stopping || QThread::currentThread()!=thread()) return messages;
     for(const auto &file:QDir(directory).entryInfoList({"*.ztplugin"},QDir::Files|QDir::NoSymLinks,QDir::Name)) {
         const auto result=loadFile(file.absoluteFilePath(),registry,false);
-        messages << QString("[plugin] %1: %2").arg(file.fileName(),result.ok()?"loaded or disabled":result.message);
+        messages << QString("[plugin] %1: %2").arg(file.fileName(),result.ok()?"load queued":result.message);
     }
     return messages;
 }
@@ -60,36 +83,104 @@ Result PluginLoader::loadFile(const QString &path,PluginRegistry &registry,bool 
     if(QThread::currentThread()!=thread()) return {Error::WrongThread,"Load must run on the GUI thread"};
     if(m_busy || m_stopping) return {Error::Busy,"Loader is busy or shutting down"};
     const QScopedValueRollback<bool> guard(m_busy,true);
-    auto pkg=package::inspect(path);
-    QString error=pkg.error;
-    if(error.isEmpty()) error=package::validate(pkg.info,"client",ApiVersion,ZTGUI_PLUGIN_IID);
-    if(error.isEmpty()) error=package::validateRuntime(pkg);
-    const auto id=pkg.info["id"].toString(); const auto key=id.toLower();
+    const auto absolutePath=QFileInfo(path).absoluteFilePath();
+    QString catalogKey=absolutePath;
+    for(auto it=m_catalog.cbegin();it!=m_catalog.cend();++it) {
+        if(it.value()["path"].toString()!=absolutePath) continue;
+        if(it.value()["loaded"].toBool() || it.value()["loading"].toBool() || it.value()["stopping"].toBool())
+            return {Error::DuplicatePlugin,"Plugin is loaded, loading or still stopping"};
+        catalogKey=it.key(); break;
+    }
+    auto &row=m_catalog[catalogKey];
+    if(row.isEmpty()) row={{"id",QString()},{"name",QFileInfo(path).completeBaseName()},
+                          {"version",QString()},{"api",QString()}};
+    row["path"]=absolutePath; row["loaded"]=false; row["loading"]=true;
+    row["stopping"]=false; row["loadable"]=true; row["message"]="Loading";
+    Loading request; request.key=catalogKey;
+    request.registry=&registry; request.enable=enable;
+    request.watcher=std::make_unique<QFutureWatcher<std::shared_ptr<StagedPlugin>>>();
+    auto *observer=request.watcher.get();
+    const auto cancellation=request.cancellation.token();
+    auto *guiThread=thread();
+    connect(observer,&QFutureWatcher<std::shared_ptr<StagedPlugin>>::finished,this,[this,observer] { finishLoad(observer); });
+    observer->setFuture(QtConcurrent::run(&m_loadingPool,[absolutePath,enable,cancellation,guiThread] {
+        auto staged=std::make_shared<StagedPlugin>();
+        auto &pkg=staged->package; auto &loaded=staged->plugin; auto &error=staged->error;
+        loaded.path=absolutePath;
+        const auto cancelled=[&] {
+            if(!cancellation.isCancellationRequested()) return false;
+            error=QStringLiteral("插件加载已取消"); return true;
+        };
+        try {
+            if(cancelled()) return staged;
+            pkg=package::inspect(absolutePath); error=pkg.error;
+            if(error.isEmpty()) error=package::validate(pkg.info,"client",ApiVersion,ZTGUI_PLUGIN_IID);
+            if(error.isEmpty()) error=package::validateRuntime(pkg);
+            if(!error.isEmpty() || cancelled()) return staged;
+            staged->loadable=true;
+            staged->disabled=!enable && QSettings().value("plugins/disabled/"+pkg.info["id"].toString().toLower(),false).toBool();
+            if(staged->disabled) return staged;
+            QString library;
+            error=package::extract(pkg,loaded.cache,library,loaded.cacheLock);
+            if(!error.isEmpty() || cancelled()) return staged;
+            loaded.library=std::make_unique<QPluginLoader>();
+            // Clear hints before association; instance() must still run on the GUI thread.
+            loaded.library->setLoadHints(QLibrary::LoadHints{}); loaded.library->setFileName(library);
+            const auto metadata=loaded.library->metaData();
+            if(metadata["IID"].toString()!=QLatin1String(ZTGUI_PLUGIN_IID) || metadata["MetaData"].toObject()["apiVersion"].toString()!=QLatin1String(ApiVersion))
+                error="Inner plugin metadata mismatch";
+            if(error.isEmpty() && !cancelled()) {
+                // Runtime activation mutates process-wide module/search-path state.
+                static QMutex runtimeMutex;
+                const QMutexLocker lock(&runtimeMutex);
+                if(!cancelled()) error=package::activateRuntime(pkg,loaded.cache->path());
+            }
+            if(error.isEmpty() && !cancelled() && !loaded.library->load()) error=loaded.library->errorString();
+        } catch(const std::exception &e) { error=QString::fromUtf8(e.what()); }
+        catch(...) { error="Plugin loading threw an exception"; }
+        if(loaded.library) loaded.library->moveToThread(guiThread);
+        return staged;
+    }));
+    m_loads.push_back(std::move(request));
+    emit stateChanged(); return {};
+}
+
+void PluginLoader::finishLoad(QFutureWatcher<std::shared_ptr<StagedPlugin>> *watcher) {
+    const auto request=std::find_if(m_loads.begin(),m_loads.end(),[watcher](const Loading &load) { return load.watcher.get()==watcher; });
+    if(request==m_loads.end()) return;
+    if(m_busy || (request->registry && request->registry->m_busy)) {
+        QTimer::singleShot(10,this,[this,watcher] { finishLoad(watcher); }); return;
+    }
+    const QScopedValueRollback<bool> guard(m_busy,true);
+    const auto staged=watcher->result();
+    auto loaded=std::move(staged->plugin); const auto &pkg=staged->package;
+    auto error=staged->error; const auto id=pkg.info["id"].toString(); const auto key=id.toLower();
+    auto registryTarget=request->registry; const bool enable=request->enable;
+    QString catalogKey=request->key;
+    if(m_stopping || request->cancellation.token().isCancellationRequested() || !registryTarget)
+        error=QStringLiteral("插件加载已取消");
     if(error.isEmpty()) {
-        for(const auto &loaded:m_libraries) if(loaded.id.compare(id,Qt::CaseInsensitive)==0) return {Error::DuplicatePlugin,"Plugin is loaded or still stopping"};
-        for(const auto &registered:registry.plugins()) {
-            if(registered.id.compare(id,Qt::CaseInsensitive)==0) return {Error::DuplicatePlugin,"Plugin ID already registered"};
-            if(registered.name.compare(pkg.info["name"].toString(),Qt::CaseInsensitive)==0) return {Error::DuplicatePlugin,"Plugin data directory/name already used"};
+        for(const auto &other:m_libraries) if(other.id.compare(id,Qt::CaseInsensitive)==0) error="Plugin is loaded or still stopping";
+        for(const auto &registered:registryTarget->plugins()) {
+            if(registered.id.compare(id,Qt::CaseInsensitive)==0) error="Plugin ID already registered";
+            if(registered.name.compare(pkg.info["name"].toString(),Qt::CaseInsensitive)==0) error="Plugin data directory/name already used";
         }
     }
-    QString catalogKey=key.isEmpty()?path:key;
-    if(m_catalog.contains(catalogKey) && m_catalog[catalogKey]["path"].toString()!=path) catalogKey=path;
-    auto &row=m_catalog[catalogKey];
-    row={{"id",id},{"name",pkg.info["name"].toString()},{"version",pkg.info["version"].toString()},
-         {"api",pkg.info["apiVersion"].toString()},{"path",path},{"loaded",false},{"stopping",false},{"loadable",error.isEmpty()},{"message",error}};
-    if(!error.isEmpty()) { emit stateChanged(); return {Error::InvalidPlugin,error}; }
-    if(!enable && QSettings().value("plugins/disabled/"+key,false).toBool()) { row["message"]="Disabled"; emit stateChanged(); return {}; }
-    LoadedPlugin loaded; loaded.path=path; QString library;
-    error=package::extract(pkg,loaded.cache,library,loaded.cacheLock);
-    if(error.isEmpty()) {
-        loaded.library=std::make_unique<QPluginLoader>();
-        // Qt 6.8 only ORs hints after association with a file; clear before setFileName.
-        loaded.library->setLoadHints(QLibrary::LoadHints{}); loaded.library->setFileName(library);
-        const auto metadata=loaded.library->metaData();
-        if(metadata["IID"].toString()!=QLatin1String(ZTGUI_PLUGIN_IID) || metadata["MetaData"].toObject()["apiVersion"].toString()!=QLatin1String(ApiVersion)) error="Inner plugin metadata mismatch";
+    if(!key.isEmpty() && catalogKey!=key && !m_catalog.contains(key)) {
+        m_catalog.insert(key,m_catalog.take(catalogKey)); catalogKey=key;
     }
-    if(error.isEmpty()) error=package::activateRuntime(pkg,loaded.cache->path());
+    auto &row=m_catalog[catalogKey];
+    if(!pkg.info.isEmpty()) {
+        row["id"]=id; row["name"]=pkg.info["name"].toString(); row["version"]=pkg.info["version"].toString();
+        row["api"]=pkg.info["apiVersion"].toString();
+    }
+    m_loads.erase(request);
+    if(error.isEmpty() && staged->disabled) {
+        row["loading"]=false; row["message"]="Disabled"; emit stateChanged(); return;
+    }
     if(error.isEmpty()) {
+        // Registry, plugin QObjects and lifecycle hooks remain on the GUI thread.
+        auto &registry=*registryTarget;
         try {
             auto *instance=loaded.library->instance(); auto *entry=qobject_cast<PluginInterface *>(instance);
             if(!entry) error=loaded.library->errorString();
@@ -108,8 +199,10 @@ Result PluginLoader::loadFile(const QString &path,PluginRegistry &registry,bool 
     if(!error.isEmpty()) {
         if(loaded.library && !loaded.library->unload() && loaded.library->isLoaded()) { loaded.cache->setAutoRemove(false); loaded.library.release(); loaded.cacheLock.release(); }
         else loaded.library.reset();
-        row["message"]=error; emit stateChanged(); return {Error::InvalidPlugin,error};
+        row["loading"]=false; row["loadable"]=staged->loadable; row["message"]=error;
+        emit stateChanged(); emit loadFinished(id,false,error); return;
     }
+    auto &registry=*registryTarget;
     loaded.id=id; loaded.registry=&registry;
     loaded.services=std::make_unique<util::HostServicesImpl>(pkg.info["name"].toString(),QString(),id);
     m_libraries.push_back(std::move(loaded)); auto &plugin=m_libraries.back();
@@ -119,10 +212,13 @@ Result PluginLoader::loadFile(const QString &path,PluginRegistry &registry,bool 
         if(plugin.lifecycle) task=plugin.lifecycle->onCreate(*plugin.services,plugin.cancellation.token());
     } catch(const std::exception &e) { failure=QString::fromUtf8(e.what()); }
     catch(...) { failure="onCreate threw an exception"; }
-    if(failure.isEmpty()&&!task) { registry.setPreparationState(id,PreparationState::Ready); row["message"]="Ready"; }
+    if(failure.isEmpty()&&!task) {
+        registry.setPreparationState(id,PreparationState::Ready); row["loading"]=false; row["message"]="Ready";
+        emit loadFinished(id,true,QString());
+    }
     else prepare(std::move(task),failure,id,pkg.info["name"].toString(),registry,plugin.cancellation.token());
     if(enable) QSettings().remove("plugins/disabled/"+key);
-    emit stateChanged(); return {};
+    emit stateChanged();
 }
 
 void PluginLoader::prepare(CreateTask task, const QString &failure, const QString &pluginId,
@@ -132,6 +228,8 @@ void PluginLoader::prepare(CreateTask task, const QString &failure, const QStrin
     if (!task) {
         QTimer::singleShot(0,this,[this,pluginId] { for(auto &p:m_libraries) if(p.id==pluginId) { p.unloading=true; p.services->stopRequests(); m_shutdownCheck.start(); } });
         registry.setPreparationState(pluginId, PreparationState::Failed, failure);
+        auto &row=m_catalog[pluginId.toLower()]; row["loading"]=false; row["message"]=failure;
+        emit stateChanged(); emit loadFinished(pluginId,false,failure);
         qWarning().noquote() << "[插件]" << pluginId << failure;
         return;
     }
@@ -178,7 +276,8 @@ void PluginLoader::finishPreparation(QPointer<PluginRegistry> registry, const QS
         });
         return;
     }
-    auto &row=m_catalog[pluginId.toLower()]; row["message"]=result.success?QString("Ready"):QString(result.message.constData(),result.message.size()); emit stateChanged();
+    auto &row=m_catalog[pluginId.toLower()]; row["loading"]=false; row["message"]=result.success?QString("Ready"):QString(result.message.constData(),result.message.size()); emit stateChanged();
+    emit loadFinished(pluginId,result.success,result.message);
     if(!result.success) {
         for(auto &p:m_libraries) if(p.id==pluginId) { p.unloading=true; p.services->stopRequests(); }
         m_shutdownCheck.start();
@@ -244,7 +343,7 @@ void PluginLoader::drainUnloads() {
             if(result.error==Error::Busy) { ++i; continue; }
         }
         const auto id=i->id; const bool ok=release(*i);
-        auto &row=m_catalog[id.toLower()]; row["loaded"]=!ok; row["stopping"]=false;
+        auto &row=m_catalog[id.toLower()]; row["loaded"]=!ok; row["loading"]=false; row["stopping"]=false;
         if(ok) { if(row["message"].toString()=="Stopping" || m_stopping) row["message"]="Disabled"; i=m_libraries.erase(i); }
         else { row["message"]=i->releaseError; ++i; }
         emit stateChanged(); emit unloadFinished(id,ok,row["message"].toString());
@@ -255,6 +354,7 @@ void PluginLoader::drainUnloads() {
 QStringList PluginLoader::pendingInitializations() const
 {
     QStringList pending;
+    for(const auto &load:m_loads) pending.append(m_catalog.value(load.key).value("name").toString());
     for (const auto &preparation : m_preparations) {
         if (!preparation.watcher->isFinished()) pending.append(preparation.name);
     }
@@ -267,6 +367,7 @@ void PluginLoader::requestShutdown()
     Q_ASSERT(QThread::currentThread() == thread());
     if (m_stopping) return;
     m_stopping = true;
+    for(auto &load:m_loads) load.cancellation.requestCancellation();
     for (auto &plugin : m_libraries) { plugin.cancellation.requestCancellation(); plugin.services->stopRequests(); plugin.unloading=true; }
     m_lastPending = pendingInitializations();
     emit shutdownProgress(m_lastPending);
@@ -284,7 +385,7 @@ void PluginLoader::checkShutdown()
     }
     // Future completion can precede the worker's final stack unwinding. A zero
     // deadline also confirms all runnables/captures are gone without blocking UI.
-    if (!pending.isEmpty() || !m_preparationPool.waitForDone(0)) return;
+    if (!pending.isEmpty() || !m_loadingPool.waitForDone(0) || !m_preparationPool.waitForDone(0)) return;
     drainUnloads();
     if(std::any_of(m_libraries.begin(),m_libraries.end(),[](const LoadedPlugin &p) { return !p.releaseFailed; })) return;
     m_shutdownCheck.stop();

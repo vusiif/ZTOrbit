@@ -91,6 +91,7 @@ private slots:
     void cleanup() {
         m_engine.reset(); m_window = nullptr; m_controller.reset();
         QSettings().clear(); qunsetenv("ZT_TEST_MODE"); qunsetenv("ZT_TEST_COMMAND_LOG");
+        qunsetenv("ZTGUI_PLUGIN_CREATE_STEPS");
     }
     void cleanupTestCase() { qputenv("PATH", m_path); qputenv("ProgramData", m_programData); qunsetenv("ZT_TEST_DATA_DIRECTORY"); }
     void recordUpdatesPreserveRowsAndExpansion() {
@@ -271,6 +272,38 @@ private slots:
         QVERIFY(m_controller->navigate("builtin/zerotier",container)); QVERIFY(!object("testPluginPage")->property("visible").toBool());
         QVERIFY(m_controller->navigate("test-page/page",container)); QCOMPARE(created,1);
         QVERIFY(m_controller->pluginRegistry()->unregisterPlugin("test-page").ok()); QCOMPARE(m_controller->activeMenu(),QString("builtin/zerotier"));
+    }
+    void pluginReloadKeepsOtherPagesInteractiveUntilReady() {
+        QTemporaryDir plugins;
+        QVERIFY(QFile::copy(FIXTURE_CANCELLABLE,plugins.filePath("test.ztplugin")));
+        qputenv("ZTGUI_PLUGIN_CREATE_STEPS","100");
+        openWindow(plugins.path());
+        const QString menuId="test-cancellable/overview";
+        const auto ready=[&] {
+            for(const auto &value:m_controller->menus()) {
+                const auto row=value.toMap();
+                if(row["id"].toString()==menuId) return row["ready"].toBool();
+            }
+            return false;
+        };
+        QTRY_VERIFY(ready());
+        m_controller->unloadPlugin("test-cancellable");
+        QTRY_VERIFY(!m_controller->plugins().first().toMap()["loaded"].toBool());
+        m_controller->loadPlugin("test-cancellable");
+        QVERIFY(m_controller->plugins().first().toMap()["loading"].toBool());
+        QVERIFY(!m_controller->busy()); QVERIFY(!ready());
+        QTRY_VERIFY(object("navigation-test-cancellable/overview"));
+        QVERIFY(!object("navigation-test-cancellable/overview")->property("enabled").toBool());
+        auto *container=qobject_cast<QQuickItem *>(object("pluginContainer")); QVERIFY(container);
+        QVERIFY(!m_controller->navigate(menuId,container));
+        click("settingsButton"); QTRY_COMPARE(m_controller->activeMenu(),QString(SettingsMenuId));
+        QVERIFY(object("settingsPage")->property("visible").toBool());
+        m_controller->setTheme("dark"); QVERIFY(m_controller->dark());
+        QTRY_VERIFY(ready());
+        QTRY_VERIFY(object("navigation-test-cancellable/overview")->property("enabled").toBool());
+        QVERIFY(!m_controller->plugins().first().toMap()["loading"].toBool());
+        click("navigation-test-cancellable/overview"); QTRY_COMPARE(m_controller->activeMenu(),menuId);
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
     void confirmationCancelsWithoutMutation() {
         DeferredOperations operations; AppController controller(nullptr,{},&operations);

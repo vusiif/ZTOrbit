@@ -60,6 +60,7 @@ private slots:
         QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
         PluginRegistry registry; PluginLoader loader; QQmlEngine engine; QQuickItem parent;
         const auto loaded=loader.loadFile(QString::fromUtf8(VOICE_PLUGIN),registry); QVERIFY2(loaded.ok(),qPrintable(loaded.message));
+        QTRY_VERIFY_WITH_TIMEOUT(!registry.plugins().isEmpty(),15000);
         QTRY_COMPARE_WITH_TIMEOUT(registry.preparationState("voice-chat"),PreparationState::Ready,15000);
         auto page=registry.page("voice-chat/rooms",&engine,&parent); QVERIFY(page.result.ok()); auto *model=controller(page.page); QVERIFY(model);
         if(model->property("inputs").toList().size()<2 || model->property("outputs").toList().size()<2)
@@ -134,6 +135,7 @@ private slots:
             PluginRegistry registry; PluginLoader loader; QQmlEngine engine; QQuickItem parent;
             const auto result=loader.loadFile(QString::fromUtf8(VOICE_PLUGIN),registry);
             QVERIFY2(result.ok(),qPrintable(result.message));
+            QTRY_VERIFY_WITH_TIMEOUT(!registry.plugins().isEmpty(),15000);
             QTRY_COMPARE_WITH_TIMEOUT(registry.preparationState("voice-chat"),PreparationState::Ready,15000);
             auto page=registry.page("voice-chat/rooms",&engine,&parent); QVERIFY2(page.result.ok(),qPrintable(page.result.message));
             auto *model=controller(page.page); QVERIFY(model);
@@ -185,6 +187,7 @@ private slots:
         QQmlEngine engine; QQuickWindow window; window.resize(920,780); window.show();
         auto registry=std::make_unique<PluginRegistry>(); auto loader=std::make_unique<PluginLoader>();
         QCOMPARE(loader->scan(directory.path(),*registry).size(),1);
+        QTRY_VERIFY_WITH_TIMEOUT(!registry->plugins().isEmpty(),15000);
         QTRY_COMPARE_WITH_TIMEOUT(registry->preparationState("voice-chat"),PreparationState::Ready,15000);
         auto page=registry->page("voice-chat/rooms",&engine,window.contentItem()); QVERIFY2(page.result.ok(),qPrintable(page.result.message));
         auto *item=page.page; item->setWidth(920); item->setHeight(780);
@@ -220,6 +223,7 @@ private slots:
         QPointer<QObject> alive=model; QVERIFY(loader->unload("voice-chat",*registry).ok()); QTRY_VERIFY(alive.isNull());
         // Reloading after unloading must not retain a compiled page/controller from the DLL.
         QVERIFY(loader->loadFile(directory.filePath(QFileInfo(library).fileName()),*registry).ok());
+        QTRY_VERIFY_WITH_TIMEOUT(!registry->plugins().isEmpty(),15000);
         QTRY_COMPARE_WITH_TIMEOUT(registry->preparationState("voice-chat"),PreparationState::Ready,15000);
         page=registry->page("voice-chat/rooms",&engine,window.contentItem()); QVERIFY(page.result.ok());
         QCOMPARE(controller(page.page)->property("volume").toInt(),35);
@@ -236,7 +240,9 @@ private slots:
         auto firstRegistry=std::make_unique<PluginRegistry>(),secondRegistry=std::make_unique<PluginRegistry>();
         auto loader=std::make_unique<PluginLoader>(),secondLoader=std::make_unique<PluginLoader>();
         loader->scan(directory.path(),*firstRegistry); secondLoader->scan(directory.path(),*secondRegistry);
+        QTRY_VERIFY_WITH_TIMEOUT(!firstRegistry->plugins().isEmpty(),15000);
         QTRY_COMPARE_WITH_TIMEOUT(firstRegistry->preparationState("voice-chat"),PreparationState::Ready,15000);
+        QTRY_VERIFY_WITH_TIMEOUT(!secondRegistry->plugins().isEmpty(),15000);
         QTRY_COMPARE_WITH_TIMEOUT(secondRegistry->preparationState("voice-chat"),PreparationState::Ready,15000);
         auto *firstPage=firstRegistry->page("voice-chat/rooms",&firstEngine,&firstParent).page;
         auto *secondPage=secondRegistry->page("voice-chat/rooms",&secondEngine,&secondParent).page;

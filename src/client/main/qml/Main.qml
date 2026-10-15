@@ -59,7 +59,7 @@ ApplicationWindow {
     }
     NumberAnimation { id: pageReveal; target: pageHost; property: "opacity"; from: 0; to: 1; duration: 140 }
     function pluginStatus(value) {
-        const labels = {"Ready": "已加载", "Preparing": "准备中…", "Stopping": "正在卸载…", "Disabled": "已禁用"}
+        const labels = {"Ready": "已加载", "Loading": "加载中…", "Preparing": "加载中…", "Stopping": "正在卸载…", "Disabled": "已禁用"}
         return labels[value] || value || "已加载"
     }
     function showDetails(kind, id, name) {
@@ -136,6 +136,7 @@ ApplicationWindow {
                     delegate: ItemDelegate {
                         id: navigationItem
                         required property var modelData
+                        objectName: "navigation-" + modelData.id
                         width: navigation.width
                         height: 44
                         text: modelData.title
@@ -145,7 +146,8 @@ ApplicationWindow {
                         contentItem: RowLayout {
                             spacing: 8
                             Image { visible: source.toString().length > 0; source: navigationItem.modelData.iconSource || ""; Layout.preferredWidth: 20; Layout.preferredHeight: 20 }
-                            Label { text: navigationItem.text; color: navigationItem.enabled ? Theme.text : Theme.muted; font.pixelSize: 16; horizontalAlignment: Text.AlignLeft; verticalAlignment: Text.AlignVCenter; Layout.fillWidth: true }
+                            BusyIndicator { running: navigationItem.modelData.loading || false; visible: running; Layout.preferredWidth: 18; Layout.preferredHeight: 18 }
+                            Label { text: navigationItem.text + (navigationItem.modelData.loading ? " · 加载中…" : ""); elide: Text.ElideRight; color: navigationItem.enabled ? Theme.text : Theme.muted; font.pixelSize: 16; horizontalAlignment: Text.AlignLeft; verticalAlignment: Text.AlignVCenter; Layout.fillWidth: true }
                         }
                         background: Rectangle {
                             radius: 5
@@ -468,12 +470,12 @@ ApplicationWindow {
                     delegate: ItemDelegate {
                         required property var modelData
                         width: ListView.view.width
-                        text: modelData.name + "  v" + modelData.version + "  " + window.pluginStatus(modelData.message)
+                        text: modelData.name + (modelData.version ? "  v" + modelData.version : "") + "  " + window.pluginStatus(modelData.message)
                         onClicked: { window.aboutPlugin = modelData; pluginAboutLoader.open() }
                         TapHandler { acceptedButtons: Qt.RightButton; onTapped: pluginMenu.popup() }
                         AppMenu {
                             id: pluginMenu
-                            AppMenuItem { text: "加载"; enabled: modelData.loadable && !modelData.loaded && !modelData.stopping; onTriggered: backend.loadPlugin(modelData.id) }
+                            AppMenuItem { text: "加载"; enabled: modelData.loadable && !modelData.loaded && !modelData.loading && !modelData.stopping; onTriggered: backend.loadPlugin(modelData.id) }
                             AppMenuItem { text: "卸载"; enabled: modelData.loaded && !modelData.stopping; onTriggered: backend.unloadPlugin(modelData.id) }
                             AppMenuItem { text: "关于"; onTriggered: { window.aboutPlugin = modelData; pluginAboutLoader.open() } }
                         }
