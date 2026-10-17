@@ -1,0 +1,235 @@
+{
+  "date": "2026-10-15",
+  "applicationVersion": "0.4.1",
+  "hostApi": "0.4",
+  "platform": "Windows 11 x64 / MSVC 2022 / Qt 6.8.3 Release",
+  "tests": {
+    "services": {
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0
+    },
+    "loader": {
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0
+    },
+    "container": {
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0
+    },
+    "core": {
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0
+    },
+    "gui": {
+      "passed": 27,
+      "failed": 0,
+      "skipped": 1
+    },
+    "gpu-override": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "voice-integration": {
+      "passed": 5,
+      "failed": 0,
+      "skipped": 2
+    },
+    "media-audio": {
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    },
+    "voice-ui": {
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    "server-container": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "voiceImportsIncludingDelayImports": {
+    "path": "D:\\User\\Code\\Github\\Utils\\zerotier-gui\\cmake-build-plugin-ztgui_voice_chat-windows-x64\\Release\\ztgui_voice_chat.dll",
+    "imports": [
+      "qt6quick.dll",
+      "qt6gui.dll",
+      "qt6qml.dll",
+      "qt6network.dll",
+      "qt6core.dll",
+      "msvcp140.dll",
+      "vcruntime140.dll",
+      "vcruntime140_1.dll",
+      "api-ms-win-crt-runtime-l1-1-0.dll",
+      "api-ms-win-crt-heap-l1-1-0.dll",
+      "api-ms-win-crt-string-l1-1-0.dll",
+      "kernel32.dll"
+    ],
+    "sha256": "179db2a5c56ecf8079d1b2be433fb96b8696d24218804125a2c3cf6b1a1e4cb9"
+  },
+  "rounds": 22,
+  "warmupRounds": 2,
+  "measuredRounds": 20,
+  "hostHandles": [
+    419,
+    417,
+    417,
+    417,
+    417,
+    419,
+    419,
+    419,
+    419,
+    419,
+    418,
+    416,
+    416,
+    416,
+    416,
+    416,
+    416,
+    416,
+    416,
+    414,
+    414,
+    412
+  ],
+  "hostThreads": [
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    12,
+    12,
+    12,
+    11,
+    11,
+    11,
+    11,
+    11,
+    11,
+    11,
+    11,
+    10,
+    10,
+    9
+  ],
+  "mainExecutableSha256": "333abd951fd0af5ed18baf6792c08306cb579969a4b9d190438c1f11db6dbbe9",
+  "proofRoot": "C:\\Users\\27384\\AppData\\Local\\Temp\\ztgui-sdk-proof-2eb732489ffd46629a5e89e98785c1fe",
+  "outsideRepositorySourceHashes": {
+    "src/plugins/media/client": {
+      "CMakeLists.txt": "40decbffec33e81a718dfc9e6a8f4ebe0f55c42a1b219c60aa5b2ef95bf82969",
+      "service-manifest.json": "5e672b6a5ef0e24cd0aed9cc790fc9a1bf2ffd03aae687436dac302cac79bea3",
+      "api/CMakeLists.txt": "fb65ed424b4b14b1df000bd66394ef82c2516618ab0a0871fb2f8a6f3051daf6",
+      "api/ZTGUIMediaApiConfig.cmake.in": "a95b3bcdb63524377f4e083ab6666fd769ea989d724546b8bc17433926a34cad",
+      "docs/media.md": "68f2e0c865e420aa65e17c6b03f0c3c31219770dcdb3503476faa600dd17d931",
+      "service/AudioEngine.cpp": "cdf9a3804ffc14255e1756f325ea0fa0c1bcd7a1396b827f2516d96d7285f92f",
+      "service/AudioEngine.h": "798cdd4913c5894f377c6d26ead8aefbf0f5f2085434fc63b88e0e11f872753d",
+      "service/AudioMath.h": "4fb239fbbba3ece821f2a6b438804c6369b802a10af1423bef1005e359196d39",
+      "service/main.cpp": "0b1cd4da9ff4c9084a0afb018ee9d971286a8a8c6bdd03a84df38e66c9efe15e",
+      "tests/AudioTests.cpp": "3eb59dd4b0181e3086cc0f84ea2f4a4687e473a5eaeb0a4b857af3df23507a4e",
+      "api/include/ztmedia/AudioClient.h": "05505394300a856bbb0ef8b013462576a97127121835df88fb5d28a3cc3c1287",
+      "api/include/ztmedia/AudioTypes.h": "3d77597ebdc630adc7702c9d5427b23e57ff28a6e7d3f5afd9a08be040316ae4"
+    },
+    "src/plugins/voice-chat/client": {
+      "AudioDeviceCache.h": "4f75d6fc653b3a2edebdb1ec9c614303437f577339251190bab3b11ac36d6052",
+      "CMakeLists.txt": "10fe44ace3ebd4bab658fc7378288b4182c7a8c2f1e08337db30d6c5e08628cc",
+      "Plugin.cpp": "3dcc135935bae65620a528be6a646626c8b4c783efed4503aa279ab60e5a333a",
+      "plugin.json.in": "cd87c010ac6ae7b3a0b1422b8f3675c8be4e1e0be5fc056052507582fc1fc27f",
+      "service-manifest.json": "f64ead9dacc6834dbd4c7fd0edbb0aadf1bd106d6b9b1f26c155fb1c99ee3f68",
+      "VoiceController.cpp": "1c8e88ee28188544b672d0a53d3cf04383447eef7dfa26b01b4b04240ad3460b",
+      "VoiceController.h": "52c58ec050dcd2a7b024f180327006456aff3da009d8023c7d3b54e84d426644",
+      "VoicePage.qml": "fc4bf1a202bbbbe34d0a1808443f17a0680c04eb9e798d660b2fc96e16cf528f",
+      "VoiceSession.cpp": "718ee042ddf696c29552162248f9dac50d0c6b90e71a1d6b63b30cab709e3613",
+      "VoiceSession.h": "6431d98cab9c1229857bb6872d29d5a2825752f287a7ba2bf93f92a451c668d6",
+      "docs/voice-chat.md": "3904a2bcc2e2960292412402b97e40a666dc0725a3121052488b2c837503fe10",
+      "tests/VoiceUiTests.cpp": "15dd8bc446670dd5296acf4fd15c678ae50a292e97e2cdfc60c0f4510db2f9cf"
+    },
+    "src/plugins/voice-chat/shared": {
+      "Protocol.h": "52cd52c211513493c4154e22e3d9b1d202301af4b28983dca3aa98c25559ff5a"
+    }
+  },
+  "installedSdkHashes": {
+    "ZTGUI-api-v0.4": {
+      "host-runtime-contract.json": "e6a8d998e0d75eb2da5849258df52184fbc71527d6df94d81ae54effede7ad5b",
+      "sdk-tools.json": "98fa22407868fed1cdcfc72746d9464cf3b5c4901bd213a584d483a8a5fa581e",
+      "bin/concrt140.dll": "2405355f0a58067b258f8df33c327e3a3d716eaac5a3a5aebb757842d85bd376",
+      "bin/libsodium.dll": "f1b56eb55a86edee37a2614c8bd38272ac325ec6fa6fa7a4088a4d1a42815c4c",
+      "bin/msvcp140.dll": "0f885b509a685d2bbfa652fed26b5fb31d88fbdab0a978c641d1c7b8aa460aa9",
+      "bin/msvcp140_1.dll": "bfad5aef4c63a669e3c140655cdfdf395b6c979b400a447bd5dcb65ed8826c3d",
+      "bin/msvcp140_2.dll": "3ea06f0ee098b4823cb79599df3780e7f23cce52c19aac31d2a0d47efe33a5e9",
+      "bin/msvcp140_atomic_wait.dll": "640b2aefced484d0368eea5bdd06addd0658a3a70a49256e560d6923b404a479",
+      "bin/msvcp140_codecvt_ids.dll": "f2069a52880ec885ee7f0511186100eb7fada0411a2b4948fafea7735b878a18",
+      "bin/Qt6Core.dll": "0cc62e841959fb8f6d366ea116c6f6bbc273e30f0ef90d8aa2e4adeb81fd63f8",
+      "bin/vcruntime140.dll": "d5e4d9a3e835fa679450145d6a7d94e36573a509317111904d9b3712c30d9066",
+      "bin/vcruntime140_1.dll": "1f2d41c4aa5db0bc33ebf7b66d72943a817d7ce6cbe880502a9403823633093f",
+      "bin/ztplugin_pack.exe": "0aa415b58cf26264982085b5bbc03b651514a3ea66da28c741afe5e676c352ee",
+      "licenses/libsodium-LICENSE.txt": "508a76d186356c0dd807a670ef510964f8724557024796a2c426c6c0e19ab683",
+      "include/ztgui/ApiVersion.h": "eded61dd1eaf61009ba6587df60b05e3e94fa979975f9e3363e2359ea81a4fd9",
+      "include/ztgui/Cancellation.h": "61337ba2ade474c2b6f6cc31908da186a776b390409e60626cddf613e6dc4962",
+      "include/ztgui/HostServices.h": "f3c95123794ec25ed64afbba976348411439dda0bcbbd5b2a11ddecea35786eb",
+      "include/ztgui/PluginApi.h": "2fdab3890bafc14a4b781b9dfb01e9cd784c125cbbf622f6d3da138bcd6a3e9b",
+      "include/ztgui/PluginFiles.h": "a6eea6ac5b55b4f427b99c923a54713c6c1e7b6ff57c6aa6ffc2c88b7cd00279",
+      "include/ztgui/PluginInterface.h": "adfb4b8c7af90717b394d4cfd85e22e53cb4e85afb38372c86fa38637c30a65c",
+      "include/ztgui/PluginLifecycle.h": "f4287d7efb103e84e6ecf2b570740773aab33720bef30f2c7dec715e91147814",
+      "include/ztgui/PluginPage.h": "d1ede9444982c5f9286befa65775cf308dd10959b764d87c3dc1784cec7f3291",
+      "include/ztgui/PluginServices.h": "12cdcb763a78244cb52e602e01f2bcc067c99b8db41033b8aa28979ac5d924a0",
+      "include/ztgui/PluginStop.h": "c0aab5951d1d10545dd49f90b845d7e93dd780b06094c3054ce4141accb2e182",
+      "include/ztgui/ZeroTierService.h": "ca279f070d727325386b3287fce2b826d6a051d3804b350923a3dd2cc0a31f39",
+      "include/ztprotocol/Cancellation.h": "d0b85e08b7e1a9e6ac753c17e37a530b9beefc1cfa74d5da7d6190c2aa3d958e",
+      "include/ztprotocol/NetworkAddress.h": "4097e9f743434ada32ad046f04d87351e554cb96e027a481ef6cbe2498c24e5c",
+      "include/ztprotocol/NetworkData.h": "bb27b3037743dc28f2e370652a047f1b8598210ea2af8598af796d37164baf08",
+      "include/ztprotocol/NetworkDelivery.h": "9ede6db72c7f61cda9f274d34f57c814d36b8c6b79cce09163b6124d633cf6e5",
+      "include/ztprotocol/NetworkService.h": "239b6484fa43de8a44a51d20d94db961b60a3223212c9619a894aff207d501fe",
+      "include/ztprotocol/PluginFiles.h": "0b44f2a877a5781ac2fe1fe85d92e894893af89a868d13c9dcbffc27f0c485a4",
+      "include/ztprotocol/PluginIdentity.h": "dc4d7e6ecc8eaa20d78a60555523abeb92c381886561b947494ec6c744d138d7",
+      "include/ztprotocol/PluginLogger.h": "4fbd761ed475bd7908bc215bc940ea1d3f6075a7e9fee8ea0f7110aacde24492",
+      "include/ztprotocol/ServiceWire.h": "246471a1a60a4d84b9c3dd336a54a17e9457c89e81df6855001880539b07f20c",
+      "include/ztprotocol/ServiceWorker.h": "c1f0e1251941aecf131b0414657a1181a3c9c1eefbc4d3f578f1284034fa66c0",
+      "include/ztprotocol/WireProtocol.h": "2138f4cc4840800e6582b0729447f2fc83a23408a3e7736d307907f813389394",
+      "lib/cmake/ZTGUIPluginApi/CollectPluginRuntime.cmake": "8c98dd1145e51c89e9aa1f0b04d85c6228ab3bb07aa7d34d4ee79c67ad264546",
+      "lib/cmake/ZTGUIPluginApi/CollectPluginRuntime.ps1": "4057b24a3220b2938b54bc66335c3c913ff4806bb3795230652a82b21a8e22b3",
+      "lib/cmake/ZTGUIPluginApi/GenerateHostContract.ps1": "48d77590dd920c05683dbbad0b5e045a404d34fec21c4e4a008251807e3efe40",
+      "lib/cmake/ZTGUIPluginApi/HostRuntimeContract.cmake": "b275ff1d603fe4c13976c3597335345e6145dbfdfdf6bc7ff9975d5e0cd3c84b",
+      "lib/cmake/ZTGUIPluginApi/PackagePlugin.cmake": "72f23a6d8f89521a00d91ef3e38128d3cfa0dad3f31acc5e4c73f5eb2402caf2",
+      "lib/cmake/ZTGUIPluginApi/RuntimeTools.ps1": "bddbdad8148d9d87e1edb16bd481fb4b91d790e0ebddb85fd5dcc05d444cd424",
+      "lib/cmake/ZTGUIPluginApi/ZTGUIPluginApiConfig.cmake": "0eb9c9a67e2900c92fd2b195f1aa92bf2829d2f23f29b31615a5aba807fd46fa",
+      "lib/cmake/ZTGUIPluginApi/ZTGUIPluginApiConfigVersion.cmake": "47d4cd56a02463757be3e21ced4bd4a82f72f1118758852cf3a077c581523705",
+      "lib/cmake/ZTGUIPluginApi/ZTGUIPluginApiTargets.cmake": "69d17c67f22225d9eaed69d1c49b787280f95c8e3183c86cf034d518480f3482",
+      "lib/cmake/ZTGUIPluginApi/contracts/Debug.json": "dd104ddd023f33d8c3939ff958693b9663e2b9f1f2af262af7a410a3fe9efa5c",
+      "lib/cmake/ZTGUIPluginApi/contracts/Release.json": "e6a8d998e0d75eb2da5849258df52184fbc71527d6df94d81ae54effede7ad5b"
+    },
+    "ZTGUI-media-api-v1": {
+      "include/ztmedia/AudioClient.h": "05505394300a856bbb0ef8b013462576a97127121835df88fb5d28a3cc3c1287",
+      "include/ztmedia/AudioTypes.h": "3d77597ebdc630adc7702c9d5427b23e57ff28a6e7d3f5afd9a08be040316ae4",
+      "lib/cmake/ZTGUIMediaApi/ZTGUIMediaApiConfig.cmake": "34d03037671d5a6e4c51f2fab10501ddfa3e36f5344fa1b31adc30f37702f302",
+      "lib/cmake/ZTGUIMediaApi/ZTGUIMediaApiConfigVersion.cmake": "be8b0216b4b0d7e83dca526a2a3133132e55d9737cb6afc8cda4ee9a2e41db25",
+      "lib/cmake/ZTGUIMediaApi/ZTGUIMediaApiTargets.cmake": "f5aac726c1b9eb3d8c7d39bbe3988c1b97337088666b4b80270890de26b12676"
+    }
+  },
+  "outsideRepositoryArtifacts": {
+    "build-media/Release/ztgui_media_worker.ztplugin": "efff4c697c16198b16b38197c57f3bfefbd16bf51a075d358d426b58aa528511",
+    "build-voice/Release/ztgui_voice_chat.ztplugin": "74c51e0a1f6eac4d7b50ad055256401e61a9edebd7624785734a96d386f73535",
+    "build-media/Release/media_audio_tests.exe": "7e8d6d9f13f5f278ac0e9641fd64af0b33be4e94f34cfaa69d21a973bdc6c1b1",
+    "build-voice/Release/voice_ui_tests.exe": "bdde37a48d25e83cd7573289b572f412b91e6136c9ae12a61d1ba53f9b22452f"
+  },
+  "standaloneBuildTestsEnabled": {
+    "MEDIA_BUILD_TESTS": true,
+    "VOICE_BUILD_TESTS": true
+  },
+  "limitations": [
+    "No screen-sharing implementation; two generic consumer fixtures only.",
+    "External-server tests skipped because ZTGUI_LIVE_VOICE_HOST was unset.",
+    "No multiplayer listening evaluation, production deployment or other client platform validation."
+  ]
+}

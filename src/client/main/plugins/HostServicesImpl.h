@@ -1,18 +1,21 @@
 #pragma once
 
 #include <ztgui/HostServices.h>
+#include "ServiceBroker.h"
 #include <QObject>
 #include <QFile>
 
 namespace vusiif::ztgui::util {
 class HostServicesImpl final : public QObject, public HostServices,
-                               public PluginFiles, public ZeroTierService, public PluginLogger {
+                               public PluginFiles, public ZeroTierService, public PluginLogger, public ServiceAccess {
 public:
     explicit HostServicesImpl(const QString &pluginName, const QString &dataRoot = {}, const QString &pluginId = {});
     ~HostServicesImpl() override;
     PluginFiles &files() override { return *this; }
     ZeroTierService &zeroTier() override { return *this; }
     PluginLogger &logs() override { return *this; }
+    PluginServices &pluginServices() override { return serviceClient; }
+    plugins::ServiceClient serviceClient;
     LogResult write(LogLevel level, const QString &message) override;
     FileResult readFile(const QString &relativePath) override;
     FileResult writeFile(const QString &relativePath, const QByteArray &data) override;

@@ -28,6 +28,8 @@ class AppController : public QObject {
     Q_PROPERTY(bool gpuAccelerationForcedOff READ gpuAccelerationForcedOff CONSTANT)
     Q_PROPERTY(QString version READ version CONSTANT)
     Q_PROPERTY(QString apiVersion READ apiVersion CONSTANT)
+    Q_PROPERTY(QString serverVersion READ serverVersion CONSTANT)
+    Q_PROPERTY(QString serverApiVersion READ serverApiVersion CONSTANT)
     Q_PROPERTY(QString qtVersion READ qtVersion CONSTANT)
     Q_PROPERTY(QVariantList menus READ menus NOTIFY menusChanged)
     Q_PROPERTY(QVariantList plugins READ plugins NOTIFY menusChanged)
@@ -55,6 +57,8 @@ public:
     bool gpuAccelerationForcedOff() const;
     QString version() const;
     QString apiVersion() const;
+    QString serverVersion() const;
+    QString serverApiVersion() const;
     QString qtVersion() const;
     QVariantList menus() const;
     QVariantList plugins() const;
@@ -82,6 +86,7 @@ public:
     Q_INVOKABLE void deleteMoon(const QString &id);
     Q_INVOKABLE void loadPlugin(const QString &id);
     Q_INVOKABLE void unloadPlugin(const QString &id);
+    Q_INVOKABLE void deletePlugin(const QString &path);
     Q_INVOKABLE void importPlugin(const QUrl &source);
     Q_INVOKABLE void confirm(bool accepted);
     Q_INVOKABLE void requestQuit();
@@ -94,6 +99,7 @@ signals:
     void menusChanged();
     void activeMenuChanged();
     void confirmationRequested(const QString &title, const QString &message, const QString &acceptLabel);
+    void pluginNoticeRequested(const QString &title, const QString &message);
     void networkJoined();
     void configurationImported(const QString &networkId);
     void exitFinished();
@@ -117,8 +123,8 @@ private:
     bool m_serviceQueryPending = false, m_moonFilesPending = false, m_moonRefreshQueued = false;
     QHash<QString, QPointer<QObject>> m_memberRequests;
     QHash<QString, QPointer<QObject>> m_memberProbeContexts;
-    QHash<QString,int> m_peerLatencies;
     std::function<void()> m_confirmation;
+    std::function<void(bool)> m_serviceMonitor;
     void ask(const QString &title, const QString &message, const QString &acceptLabel, std::function<void()> action);
     void setBusy(bool busy);
     void feedback(const QString &message);

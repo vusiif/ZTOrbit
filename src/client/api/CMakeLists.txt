@@ -5,11 +5,12 @@ set(ZTGUI_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../../VERSION")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ZTGUI_VERSION_FILE}")
 file(READ "${ZTGUI_VERSION_FILE}" ZTGUI_APP_VERSION)
 string(STRIP "${ZTGUI_APP_VERSION}" ZTGUI_APP_VERSION)
-if(NOT ZTGUI_APP_VERSION MATCHES "^0\\.([0-9]+)\\.[0-9]+$")
-    message(FATAL_ERROR "Pre-release VERSION must be 0.core.patch")
+if(NOT ZTGUI_APP_VERSION MATCHES "^0\\.([0-9]+)\\.([0-9]+)(-[0-9A-Za-z.-]+)?$")
+    message(FATAL_ERROR "VERSION must be 0.<core>.<patch>[-qualifier]")
 endif()
-set(ZTGUI_API_VERSION "0.${CMAKE_MATCH_1}")
-project(ZTGUIPluginApi VERSION "${ZTGUI_API_VERSION}" LANGUAGES CXX)
+set(ZTGUI_API_VERSION "0.${CMAKE_MATCH_1}${CMAKE_MATCH_3}")
+set(ZTGUI_API_VERSION_NUMERIC "0.${CMAKE_MATCH_1}")
+project(ZTGUIPluginApi VERSION "${ZTGUI_API_VERSION_NUMERIC}" LANGUAGES CXX)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/package/HostRuntimeContract.cmake")
 find_package(Qt6 6.8 REQUIRED COMPONENTS ${ZTGUI_CLIENT_HOST_QT_MODULES})
@@ -38,6 +39,13 @@ target_include_directories(ztgui_protocol INTERFACE
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../shared/include>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 target_link_libraries(ztgui_plugin_api INTERFACE ztgui_protocol)
+add_library(ztgui_services_api INTERFACE)
+add_library(ZTGUI::Services ALIAS ztgui_services_api)
+set_target_properties(ztgui_services_api PROPERTIES EXPORT_NAME Services)
+target_link_libraries(ztgui_services_api INTERFACE ztgui_protocol)
+target_include_directories(ztgui_services_api INTERFACE
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
 set(ZTGUI_API_CMAKE_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/ZTGUIPluginApi")
 configure_package_config_file(ZTGUIPluginApiConfig.cmake.in
@@ -45,7 +53,7 @@ configure_package_config_file(ZTGUIPluginApiConfig.cmake.in
     INSTALL_DESTINATION "${ZTGUI_API_CMAKE_DIR}")
 write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/ZTGUIPluginApiConfigVersion.cmake"
     VERSION "${PROJECT_VERSION}" COMPATIBILITY ExactVersion ARCH_INDEPENDENT)
-install(TARGETS ztgui_plugin_api ztgui_protocol EXPORT ZTGUIPluginApiTargets)
+install(TARGETS ztgui_plugin_api ztgui_protocol ztgui_services_api EXPORT ZTGUIPluginApiTargets)
 install(EXPORT ZTGUIPluginApiTargets NAMESPACE ZTGUI:: DESTINATION "${ZTGUI_API_CMAKE_DIR}")
 install(DIRECTORY include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/include/" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")

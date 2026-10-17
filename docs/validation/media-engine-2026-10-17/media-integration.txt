@@ -1,0 +1,79 @@
+********* Start testing of MediaIntegrationTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : MediaIntegrationTests::initTestCase()
+QINFO  : MediaIntegrationTests::syntheticRoundtripAndIsolation() [worker] Owned process started; pid 14624
+QINFO  : MediaIntegrationTests::syntheticRoundtripAndIsolation() [worker] IPC authenticated; waiting for service preparation; pid 14624
+QWARN  : MediaIntegrationTests::syntheticRoundtripAndIsolation() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : MediaIntegrationTests::syntheticRoundtripAndIsolation() [worker] Service preparation completed; pid 14624
+PASS   : MediaIntegrationTests::syntheticRoundtripAndIsolation()
+QINFO  : MediaIntegrationTests::workerExtensionRoundtrip() [worker] Owned process started; pid 21732
+QINFO  : MediaIntegrationTests::workerExtensionRoundtrip() [worker] IPC authenticated; waiting for service preparation; pid 21732
+QWARN  : MediaIntegrationTests::workerExtensionRoundtrip() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : MediaIntegrationTests::workerExtensionRoundtrip() [worker] Service preparation completed; pid 21732
+QWARN  : MediaIntegrationTests::workerExtensionRoundtrip() [worker] [input @ 00000237CA149100] Changing video frame properties on the fly is not supported by all filters.?
+[input @ 00000237CA149100] filter context - w: 1280 h: 720 fmt: 0 csp: unknown range: unknown, incoming frame - w: 1280 h: 720 fmt: 0 csp: bt709 range: tv pts_time: 0?
+
+PASS   : MediaIntegrationTests::workerExtensionRoundtrip()
+QINFO  : MediaIntegrationTests::closeInsideFrameCallback() [worker] Owned process started; pid 28456
+QINFO  : MediaIntegrationTests::closeInsideFrameCallback() [worker] IPC authenticated; waiting for service preparation; pid 28456
+QWARN  : MediaIntegrationTests::closeInsideFrameCallback() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : MediaIntegrationTests::closeInsideFrameCallback() [worker] Service preparation completed; pid 28456
+PASS   : MediaIntegrationTests::closeInsideFrameCallback()
+QINFO  : MediaIntegrationTests::destroySessionInsideFrameCallback() [worker] Owned process started; pid 23536
+QINFO  : MediaIntegrationTests::destroySessionInsideFrameCallback() [worker] IPC authenticated; waiting for service preparation; pid 23536
+QWARN  : MediaIntegrationTests::destroySessionInsideFrameCallback() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : MediaIntegrationTests::destroySessionInsideFrameCallback() [worker] Service preparation completed; pid 23536
+PASS   : MediaIntegrationTests::destroySessionInsideFrameCallback()
+QINFO  : MediaIntegrationTests::workerCrashInvalidatesLease() [worker] Owned process started; pid 16912
+QINFO  : MediaIntegrationTests::workerCrashInvalidatesLease() [worker] IPC authenticated; waiting for service preparation; pid 16912
+QWARN  : MediaIntegrationTests::workerCrashInvalidatesLease() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : MediaIntegrationTests::workerCrashInvalidatesLease() [worker] Service preparation completed; pid 16912
+QWARN  : MediaIntegrationTests::workerCrashInvalidatesLease() [worker] Worker exited (71, 0)
+PASS   : MediaIntegrationTests::workerCrashInvalidatesLease()
+QINFO  : MediaIntegrationTests::slowConsumerKeepsBuffersBounded() [worker] Owned process started; pid 10636
+QINFO  : MediaIntegrationTests::slowConsumerKeepsBuffersBounded() [worker] IPC authenticated; waiting for service preparation; pid 10636
+QWARN  : MediaIntegrationTests::slowConsumerKeepsBuffersBounded() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : MediaIntegrationTests::slowConsumerKeepsBuffersBounded() [worker] Service preparation completed; pid 10636
+PASS   : MediaIntegrationTests::slowConsumerKeepsBuffersBounded()
+QINFO  : MediaIntegrationTests::physicalCapture(screen) [worker] Owned process started; pid 25460
+QINFO  : MediaIntegrationTests::physicalCapture(screen) [worker] IPC authenticated; waiting for service preparation; pid 25460
+QWARN  : MediaIntegrationTests::physicalCapture(screen) [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : MediaIntegrationTests::physicalCapture(screen) [worker] Service preparation completed; pid 25460
+QINFO  : MediaIntegrationTests::physicalCapture(screen) Capture observation: "screen" 10 QJsonObject({"devices":{"physicalInputs":1,"physicalOutputs":0,"playedBytes":"0"},"queueBytes":"0","queueDepth":0,"queuePeak":4,"queuePeakBytes":"66176","tracks":[{"captured":"0","dropped":"19","frames":"10","id":"9024750037358938877-60cf3395a51245e38e3c66a3c0f10b7b","peakProcessingUs":"0","processingUs":"0","received":"32","running":true},{"captured":"34","dropped":"28","frames":"34","id":"9024750037358938877-c69efdab07b14adf900dafa09f49865e","peakProcessingUs":"21872","processingUs":"412930","received":"0","running":true}]})
+QWARN  : MediaIntegrationTests::physicalCapture(screen) [worker] [libopenh264 @ 00000171A0E3B0C0] 2 frames skipped?
+
+QINFO  : MediaIntegrationTests::physicalCapture(screen) Physical H.264 loopback verified: "screen" 10
+PASS   : MediaIntegrationTests::physicalCapture(screen)
+QINFO  : MediaIntegrationTests::physicalCapture(window) [worker] Owned process started; pid 3976
+QINFO  : MediaIntegrationTests::physicalCapture(window) [worker] IPC authenticated; waiting for service preparation; pid 3976
+QWARN  : MediaIntegrationTests::physicalCapture(window) [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : MediaIntegrationTests::physicalCapture(window) [worker] Service preparation completed; pid 3976
+QINFO  : MediaIntegrationTests::physicalCapture(window) Capture observation: "window" 10 QJsonObject({"devices":{"physicalInputs":1,"physicalOutputs":0,"playedBytes":"0"},"queueBytes":"0","queueDepth":0,"queuePeak":2,"queuePeakBytes":"2142","tracks":[{"captured":"14","dropped":"4","frames":"14","id":"6840324273522167760-0d743b1e4dff446f8d91f6d5a6e280de","peakProcessingUs":"16615","processingUs":"163340","received":"0","running":true},{"captured":"0","dropped":"0","frames":"10","id":"6840324273522167760-3d3dc5992d5643019c5fa6550802359b","peakProcessingUs":"0","processingUs":"0","received":"13","running":true}]})
+QINFO  : MediaIntegrationTests::physicalCapture(window) Physical H.264 loopback verified: "window" 10
+PASS   : MediaIntegrationTests::physicalCapture(window)
+QINFO  : MediaIntegrationTests::physicalCapture(camera) [worker] Owned process started; pid 2952
+QINFO  : MediaIntegrationTests::physicalCapture(camera) [worker] IPC authenticated; waiting for service preparation; pid 2952
+QWARN  : MediaIntegrationTests::physicalCapture(camera) [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : MediaIntegrationTests::physicalCapture(camera) [worker] Service preparation completed; pid 2952
+QINFO  : MediaIntegrationTests::physicalCapture(camera) Capture observation: "camera" 10 QJsonObject({"devices":{"physicalInputs":1,"physicalOutputs":0,"playedBytes":"0"},"queueBytes":"0","queueDepth":0,"queuePeak":2,"queuePeakBytes":"30014","tracks":[{"captured":"0","dropped":"0","frames":"10","id":"13712798208421825801-a52bb6938bc2421d8d84bd7eebda6fbd","peakProcessingUs":"0","processingUs":"0","received":"12","running":true},{"captured":"12","dropped":"0","frames":"12","id":"13712798208421825801-de21745edfd642699d698a24cc0af566","peakProcessingUs":"17616","processingUs":"122381","received":"0","running":true}]})
+QINFO  : MediaIntegrationTests::physicalCapture(camera) Physical H.264 loopback verified: "camera" 10
+PASS   : MediaIntegrationTests::physicalCapture(camera)
+QINFO  : MediaIntegrationTests::physicalAudioLoopback() [worker] Owned process started; pid 28116
+QINFO  : MediaIntegrationTests::physicalAudioLoopback() [worker] IPC authenticated; waiting for service preparation; pid 28116
+QWARN  : MediaIntegrationTests::physicalAudioLoopback() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : MediaIntegrationTests::physicalAudioLoopback() [worker] Service preparation completed; pid 28116
+QINFO  : MediaIntegrationTests::physicalAudioLoopback() Physical audio counters: QJsonObject({"devices":{"physicalInputs":1,"physicalOutputs":1,"playedBytes":"115200"},"queueBytes":"0","queueDepth":0,"queuePeak":1,"queuePeakBytes":"29","tracks":[{"captured":"0","dropped":"0","frames":"0","id":"1441944019741124874-a8c0c28fa0a343cea0992507d5510988","peakProcessingUs":"0","processingUs":"0","received":"20","running":true},{"captured":"20","dropped":"0","frames":"0","id":"1441944019741124874-b76c027a63174eb39afa55ae9aa5ace4","peakProcessingUs":"0","processingUs":"0","received":"0","running":true}]})
+PASS   : MediaIntegrationTests::physicalAudioLoopback()
+PASS   : MediaIntegrationTests::cleanupTestCase()
+Totals: 12 passed, 0 failed, 0 skipped, 0 blacklisted, 96525ms
+********* Finished testing of MediaIntegrationTests *********

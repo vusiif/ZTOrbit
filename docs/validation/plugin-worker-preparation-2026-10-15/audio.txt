@@ -1,0 +1,20 @@
+********* Start testing of VoicePluginTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : VoicePluginTests::initTestCase()
+QINFO  : VoicePluginTests::physicalAudioThroughWorkerIpc() [worker] Owned process started; pid 7776
+QWARN  : VoicePluginTests::physicalAudioThroughWorkerIpc() [worker] [media] Initializing media service?
+
+QINFO  : VoicePluginTests::physicalAudioThroughWorkerIpc() [worker] IPC authenticated; waiting for service preparation; pid 7776
+QWARN  : VoicePluginTests::physicalAudioThroughWorkerIpc() [worker] [media] Preparing audio devices?
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : VoicePluginTests::physicalAudioThroughWorkerIpc() [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : VoicePluginTests::physicalAudioThroughWorkerIpc() [worker] Service preparation completed; pid 7776
+QINFO  : VoicePluginTests::physicalAudioThroughWorkerIpc() Physical input devices: QList("阵列麦克风 (AMD Audio Device)", "麦克风阵列 (网易虚拟音频设备)") output devices: QList("扬声器 (Senary Audio)", "扬声器 (网易虚拟音频设备)")
+QINFO  : VoicePluginTests::physicalAudioThroughWorkerIpc() Selected capture: "阵列麦克风 (AMD Audio Device)" selected playback: "扬声器 (Senary Audio)"
+QINFO  : VoicePluginTests::physicalAudioThroughWorkerIpc() Physical worker counters: QJsonObject({"captureOpen":true,"capturedFrames":15,"playbackOpen":true,"playedBytes":115192,"receivedFrames":15})
+PASS   : VoicePluginTests::physicalAudioThroughWorkerIpc()
+PASS   : VoicePluginTests::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 4440ms
+********* Finished testing of VoicePluginTests *********

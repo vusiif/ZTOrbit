@@ -1,0 +1,67 @@
+********* Start testing of QmlTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : QmlTests::initTestCase()
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] Owned process started; pid 5076
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Initializing media service?
+
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] IPC authenticated; waiting for service preparation; pid 5076
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Preparing audio devices?
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] Service preparation completed; pid 5076
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] Owned process started; pid 14748
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Initializing media service?
+
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] IPC authenticated; waiting for service preparation; pid 14748
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Preparing audio devices?
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] Service preparation completed; pid 14748
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] Owned process started; pid 39628
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Initializing media service?
+
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] IPC authenticated; waiting for service preparation; pid 39628
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Preparing audio devices?
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] Service preparation completed; pid 39628
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] Owned process started; pid 26768
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Initializing media service?
+
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] IPC authenticated; waiting for service preparation; pid 26768
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Preparing audio devices?
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] Service preparation completed; pid 26768
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] Owned process started; pid 37492
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Initializing media service?
+
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] IPC authenticated; waiting for service preparation; pid 37492
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Preparing audio devices?
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] Service preparation completed; pid 37492
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] Owned process started; pid 8756
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Initializing media service?
+
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] IPC authenticated; waiting for service preparation; pid 8756
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Preparing audio devices?
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : QmlTests::mediaOnlyUnloadMemory() [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : QmlTests::mediaOnlyUnloadMemory() [worker] Service preparation completed; pid 8756
+PASS   : QmlTests::mediaOnlyUnloadMemory()
+PASS   : QmlTests::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 77188ms
+********* Finished testing of QmlTests *********

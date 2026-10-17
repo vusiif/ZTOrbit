@@ -1,34 +1,59 @@
-# ZTServer
+# ZTServer（Java 25 + Netty）
 
-Linux 无界面 ZeroTier 查询与插件转发服务，C++17 / 动态 Qt6.4 Core、Network。程序版本与客户端共用根 `VERSION`；服务端 SDK 使用独立包 `ZTServerPluginApi`。
+Linux 无界面 ZeroTier 只读查询与插件转发服务。宿主负责 TCP/UDP 路由、`builtin` 查询、Java 插件加载和网络中转；ZeroTier/ztncui 安装、卸载与 Moon 导出由独立 `scripts/zt-installer.sh` 完成。
+
+- 运行时：Java 25（不内置 JRE），Netty 4.2.x NIO。
+- 构建：Maven 3.9+，`maven.compiler.release=25`。
+- 版本：服务端程序与 API 由客户端侧维护的根 `SERVER_VERSION` 指定；程序 `0.2.1-beta`，插件 API `0.2-beta`。客户端 `VERSION` 不再决定服务端版本。
+- 旧 C++ 实现归档在 [`../server-old/`](../server-old/README.md)。
+
+## 目录
+
+```text
+src/server/
+  pom.xml             聚合父 POM
+  api/                Java 插件 SDK（ztserver-api，版本=${apiVersion}）
+  main/               宿主实现与 fat jar（zt-server.jar）
+  scripts/            start-server.sh、zt-server.service、zt-installer.sh
+  licenses/           Apache-2.0、Netty NOTICE、Jackson NOTICE
+```
 
 ## 构建
 
-Ubuntu 24.04：`apt-get install cmake g++ qt6-base-dev python3`。
-
 ```bash
-cmake -S src/server -B cmake-build-server -DCMAKE_BUILD_TYPE=Release
-cmake --build cmake-build-server --target zt-server --parallel
-# 仅明确需要语音插件时开启：
-cmake -S src/server -B cmake-build-server -DZTSERVER_BUILD_VOICE_PLUGIN=ON
-cmake --build cmake-build-server --target ztserver_voice_chat --parallel
+revision="$(tr -d '\r\n' < SERVER_VERSION)"
+api_version="$(printf '%s' "$revision" | sed -E 's/^0\.([0-9]+)\.[0-9]+(-[0-9A-Za-z.-]+)?$/0.\1\2/')"
+mvn -f src/server/pom.xml -Drevision="$revision" -DapiVersion="$api_version" clean verify
 ```
 
-`bash scripts/build-linux.sh --build-voice-plugin` 生成 `dist/linux-x64.tar.gz`、条件更新的 `dist/ZTServer-api-v0.4.zip`，以及独立 `dist/server-plugins/ztserver_voice_chat.ztplugin`。不带插件开关只编译宿主。运行包不携带测试、插件或运行数据，目标机器需安装匹配的动态 Qt Core/Network 运行库（Ubuntu24.04：`libqt6core6t64 libqt6network6t64`）。
+产物为 `src/server/main/target/zt-server.jar`。发布版本必须由脚本传入；直接构建子模块会使用开发默认版本 `0.0.0-dev`/`0.0`。
 
-## 启动
+Linux 发行打包：
+
+```bash
+bash scripts/build-linux.sh                        # build/dist/linux-x64.tar.gz + build/dist/ZTServer-api-v0.2-beta.zip
+bash scripts/build-linux.sh --build-voice-plugin   # 另生成 build/dist/server-plugins/ztserver_voice_chat-v0.1.0.jar
+```
+
+## 运行
 
 ```bash
 cd /root/Server/ZTServer
-./zt-server --server --port 18100 --listen 0.0.0.0
-./zt-server --install zerotier --ip 198.51.100.1
-./zt-server --install ztncui
-./zt-server --moon
-./zt-server --uninstall all --yes
+./start-server.sh --version
+./start-server.sh --check-deps
+./start-server.sh                 # 默认 --server --listen 0.0.0.0 --port 18100
 ```
 
-运行操作要求 root。安装与卸载无目标时显示选择菜单，目标支持 `zerotier/ztncui/all`，短参数为 `-i/-u/-m/-s/-p`。四种操作互斥；无参数显示帮助。`--force` 重建已有 Moon/容器；`--dry-run` 验证并打印安装脚本参数。安装 ZeroTier 同时生成或复用并导出 Moon；仅安装 ztncui 要求已有 ZeroTier。卸载 ZeroTier 会删除节点身份，仅卸载 ZeroTier 时保留 ztncui 配置；全量卸载删除两者。嵌入安装脚本不依赖 `.tmp/`，流程支持 Ubuntu/Debian 与 systemd。
+CLI 保留 `--server`、`--listen <IPv4>`、`--port <1-65535>`、`--version`、`--help`。旧安装参数（`--install/-i`、`--uninstall/-u`、`--moon/-m`、`--ip`、`--force`、`--yes`、`--dry-run`）提示使用 `./zt-installer.sh` 并以 2 退出。
 
-服务保持前台运行，由附带 `zt-server.service` 交给 systemd 托管。启动工作目录决定 `plugins/`、`plugins-data/` 与 `logs/` 的位置；插件变化后需重启。扫描目录直接子文件中的 `.so`，坏插件被拒绝并记录日志。首版没有账户、Token 或 TLS，监听全部 IPv4 地址，访问范围由部署网络和防火墙控制。
+服务保持前台运行，由 `scripts/zt-server.service` 托管。启动目录决定 `plugins/`、`plugins-data/` 和 `logs/` 的位置；安装、插件、数据与回滚见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
-SDK、协议和查询接口见 [服务端 API](../../docs/server-api.md)，语音插件部署与业务规则见 [语音服务端文档](../plugins/voice-chat/server/docs/voice-chat.md)。
+## Java 插件
+
+插件是 `plugins/*.jar`，内含 `META-INF/ztserver-plugin.json` 并实现 `vusiif.ztgui.server.api.ServerPlugin`。仅启动时扫描，不支持热加载。SDK 签名、`ZTS1`/`builtin` 协议、网络中转和线程约定见 [服务端 API](../../docs/server-api.md)。
+
+语音服务端插件位于 [`src/plugins/voice-chat/server`](../plugins/voice-chat/server/docs/voice-chat.md)，与客户端 `ZTV1` 协议保持字节兼容。
+
+## 验证
+
+测试位于 `src/tests/server/` 与 `src/tests/voice-chat/`；本轮迁移证据在 `docs/validation/ztserver-java-2026-10-17/`。

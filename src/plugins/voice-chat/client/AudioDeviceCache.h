@@ -1,34 +1,30 @@
 #pragma once
-#include <QAudioDevice>
-#include <QMediaDevices>
-#include <QMutex>
-#include <QMutexLocker>
+#include <ztmedia/MediaSession.h>
+#include <ztgui/ZeroTierService.h>
+#include <ztgui/PluginFiles.h>
 #include <memory>
-#include <functional>
 namespace vusiif::ztgui::voice_chat {
-struct AudioDeviceSnapshot {
-    bool ready = false;
-    QList<QAudioDevice> inputs, outputs;
-};
-class AudioDeviceCache {
-    mutable QMutex mutex;
-    AudioDeviceSnapshot devices;
+struct VoiceDevice {QByteArray id;QString description;bool isDefault=false;};
+struct AudioDeviceSnapshot {bool ready=false;QList<VoiceDevice> inputs,outputs;};
+class AudioDeviceCache : public QObject {
 public:
-    // QMediaDevices getters are thread-safe. Never call this from page construction.
-    bool refresh(const std::function<bool()> &canceled = {}) {
-        const auto stopping = [&] { return canceled && canceled(); };
-        if (stopping()) return false;
-        AudioDeviceSnapshot next;
-        next.inputs = QMediaDevices::audioInputs();
-        if (stopping()) return false;
-        next.outputs = QMediaDevices::audioOutputs();
-        if (stopping()) return false;
-        next.ready = true;
-        QMutexLocker lock(&mutex); devices = std::move(next);
-        return true;
+    util::ZeroTierService *zeroTier=nullptr; // Borrowed until plugin destruction.
+    util::PluginFiles *files=nullptr;
+    std::shared_ptr<media::MediaSession> audio=std::make_shared<media::MediaSession>(nullptr);
+    AudioDeviceSnapshot snapshot() const { return devices; }
+    void refresh(QObject *context,std::function<void()> completed) {
+        if(!audio) { if(completed) completed(); return; }
+        audio->sources(context,[this,completed](media::Result<media::SourceSnapshot> result) {
+            if(!result.ok() && audio->error) audio->error(result.error);
+            devices={};devices.ready=result.value.ready;
+            for(const auto &source:result.value.sources) {
+                VoiceDevice device{QByteArray::fromHex(source.id.toLatin1()),source.description,source.isDefault};
+                if(source.kind=="microphone")devices.inputs.append(device);else if(source.kind=="speaker")devices.outputs.append(device);
+            }
+            if(completed) completed();
+        });
     }
-    AudioDeviceSnapshot snapshot() const {
-        QMutexLocker lock(&mutex); return devices;
-    }
+private:
+    AudioDeviceSnapshot devices;
 };
 }

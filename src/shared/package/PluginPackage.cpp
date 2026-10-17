@@ -1,4 +1,5 @@
 #include "PluginPackage.h"
+#include "PluginDependencies.h"
 #include <ztprotocol/PluginIdentity.h>
 #include <QFile>
 #include <QSaveFile>
@@ -51,8 +52,9 @@ PackageResult inspect(const QString &path) {
     }
     if(!file.open(QIODevice::ReadOnly)) { result.error=file.errorString(); return result; }
     const auto magic=file.read(6);
-    if(file.size()<50 || (magic!="ZTPK1\n" && magic!="ZTPK2\n")) { result.error="Invalid package header or size"; return result; }
-    const bool v2=magic=="ZTPK2\n";
+    if(file.size()<50 || (magic!="ZTPK1\n" && magic!="ZTPK2\n" && magic!="ZTPK3\n")) { result.error="Invalid package header or size"; return result; }
+    const bool v2=magic!="ZTPK1\n";
+    const int format=magic=="ZTPK3\n"?3:v2?2:1;
     if(!v2 && file.size()>MaxLibraryBytes+65586) { result.error="Legacy package exceeds size limit"; return result; }
     const auto sizeBytes=file.read(4);
     if(sizeBytes.size()!=4) { result.error="Truncated package header"; return result; }
@@ -62,18 +64,23 @@ PackageResult inspect(const QString &path) {
     const auto doc=QJsonDocument::fromJson(result.header,&parse);
     if(parse.error!=QJsonParseError::NoError || !doc.isObject()) { result.error="Invalid package JSON"; return result; }
     result.info=doc.object();
-    if(result.info["formatVersion"].toInt()!=(v2?2:1)) { result.error="Format version mismatch"; return result; }
+    if(result.info["formatVersion"].toInt()!=format) { result.error="Format version mismatch"; return result; }
     if(v2) { file.close(); result.error=readBundle(result,{},false); }
     // v1 is read only when extracting; inspect never buffers ciphertext.
     return result;
 }
 QString validate(const QJsonObject &info,const QString &host,const QString &api,const QString &iid) {
-    if((info["formatVersion"].toInt()!=1 && info["formatVersion"].toInt()!=2) || info["host"].toString()!=host || !protocol::validPluginId(info["id"].toString())
+    if((info["formatVersion"].toInt()<1 || info["formatVersion"].toInt()>3) || info["host"].toString()!=host || !protocol::validPluginId(info["id"].toString())
         || info["name"].toString().trimmed().isEmpty() || info["version"].toString().trimmed().isEmpty()) return "Invalid plugin basic information";
-    if(info["apiVersion"].toString()!=api || info["iid"].toString()!=iid) return "API version or interface IID mismatch";
+    const auto semanticError=validateServiceManifest(info); if(!semanticError.isEmpty()) return semanticError;
+    const bool worker=info["execution"].toObject()["kind"]=="worker-process";
+    if(worker && host!="client") return "Worker services are supported by the client only";
+    if(info["apiVersion"].toString()!=api || (!worker && info["iid"].toString()!=iid)) return "API version or interface IID mismatch";
     const auto own=buildInfo();
-    for(const auto &field:{"platform","architecture","compilerAbi","debug"})
+    for(const auto &field:{"platform","architecture"})
         if(info[field]!=own[field]) return QString("Incompatible plugin %1").arg(field);
+    if(worker) return {};
+    for(const auto &field:{"compilerAbi","debug"}) if(info[field]!=own[field]) return QString("Incompatible plugin %1").arg(field);
     const auto qt=info["qtVersion"].toString();
     if(!QRegularExpression("\\A[0-9]+\\.[0-9]+(?:\\.[0-9]+)?\\z").match(qt).hasMatch()
         || qt.section('.',0,1)!=own["qtVersion"].toString().section('.',0,1)) return "Incompatible plugin Qt version";
@@ -143,7 +150,7 @@ void cleanStaleCache() {
     }
 }
 QString extract(const PackageResult &result,std::unique_ptr<QTemporaryDir> &directory,QString &library,std::unique_ptr<QLockFile> &lock) {
-    if(result.info["formatVersion"].toInt()==2) {
+    if(result.info["formatVersion"].toInt()>=2) {
         auto error=createCache("load",directory,lock); if(!error.isEmpty()) return error;
         error=readBundle(result,directory->path(),false);
         if(!error.isEmpty()) { lock.reset(); discardCache(directory); return error; }
@@ -192,5 +199,12 @@ QString createCache(const QString &kind,std::unique_ptr<QTemporaryDir> &director
     lock=std::make_unique<QLockFile>(directory->filePath("active.lock")); lock->setStaleLockTime(0);
     if(!lock->tryLock()) return "Cannot lock plugin cache";
     return {};
+}
+QString authenticate(const PackageResult &p) {
+    if(!p.ok()) return p.error;
+    if(p.info["formatVersion"].toInt()!=1) return {};
+    std::unique_ptr<QTemporaryDir> directory; std::unique_ptr<QLockFile> lock; QString entry;
+    const auto error=extract(p,directory,entry,lock);
+    lock.reset(); discardCache(directory); return error;
 }
 }

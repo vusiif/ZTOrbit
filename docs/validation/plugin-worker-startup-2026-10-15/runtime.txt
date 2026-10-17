@@ -1,0 +1,15 @@
+********* Start testing of VoicePluginTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : VoicePluginTests::initTestCase()
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] Owned process started; pid 38552
+QWARN  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] [media] Initializing media service?
+[media] Preparing audio devices?
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] [media] Audio devices prepared; connecting to host?
+
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() Worker application-local Qt/CRT and backend modules verified: QSet("qt6core.dll", "avcodec-61.dll", "msvcp140_1.dll", "vcruntime140_1.dll", "avutil-59.dll", "qt6multimedia.dll", "msvcp140_2.dll", "qt6gui.dll", "vcruntime140.dll", "ffmpegmediaplugin.dll", "msvcp140.dll", "qt6network.dll", "swscale-8.dll", "avformat-61.dll", "swresample-5.dll")
+PASS   : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt()
+PASS   : VoicePluginTests::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 6760ms
+********* Finished testing of VoicePluginTests *********

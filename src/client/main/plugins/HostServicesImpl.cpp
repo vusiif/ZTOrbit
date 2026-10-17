@@ -199,17 +199,23 @@ void HostServicesImpl::sendNetwork(const QString &network, const QStringList &me
     if (m_stopped || !context || !completed || QThread::currentThread()!=thread() || context->thread()!=thread()) return;
     auto *job=new QObject(&m_requests);
     connect(context,&QObject::destroyed,job,[job] { delete job; });
-    network::ClientNetworkService::instance().transport().send(m_pluginId,network,members,data,balanced,job,
-        [job,completed=std::move(completed),lease=m_callbacks](const SendResult &result) { job->deleteLater(); completed(result); });
+    network::ClientNetworkService::instance().withTransport(job,
+        [id=m_pluginId,network,members,data,balanced,job,completed=std::move(completed),lease=m_callbacks](network::NetworkTransport &transport) {
+            transport.send(id,network,members,data,balanced,job,
+                [job,completed,lease](const SendResult &result) { job->deleteLater(); completed(result); });
+        });
 }
 void HostServicesImpl::getNetworkRelays(const QString &networkId,QObject *context,RelayCallback completed) {
     if(m_stopped || !context || !completed || QThread::currentThread()!=thread() || context->thread()!=thread()) return;
     auto *job=new QObject(&m_requests); connect(context,&QObject::destroyed,job,[job] { delete job; });
-    network::ClientNetworkService::instance().transport().relays(networkId,job,[job,completed=std::move(completed),lease=m_callbacks](const RelayResult &r) { job->deleteLater(); completed(r); });
+    network::ClientNetworkService::instance().withTransport(job,
+        [networkId,job,completed=std::move(completed),lease=m_callbacks](network::NetworkTransport &transport) {
+            transport.relays(networkId,job,[job,completed,lease](const RelayResult &r) { job->deleteLater(); completed(r); });
+        });
 }
 NetworkSubscription *HostServicesImpl::subscribeNetworkData(const QString &networkId,QObject *context,NetworkCallback callback) {
     if(m_stopped || !context || QThread::currentThread()!=thread() || context->thread()!=thread()) return nullptr;
-    auto *sub=network::ClientNetworkService::instance().transport().subscribe(m_pluginId,networkId,context,[callback=std::move(callback),lease=m_callbacks](const NetworkMessage &message) { if(callback) callback(message); });
+    auto *sub=network::ClientNetworkService::instance().subscribe(m_pluginId,networkId,context,[callback=std::move(callback),lease=m_callbacks](const NetworkMessage &message) { if(callback) callback(message); });
     if(sub) { auto *guard=new QObject(&m_requests); connect(guard,&QObject::destroyed,sub,[sub] { sub->cancel(); }); }
     return sub;
 }

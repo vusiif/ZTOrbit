@@ -24,19 +24,30 @@ $contract=Get-Content -LiteralPath $r.contract -Raw | ConvertFrom-Json
 if ($contract.debug -ne ($r.configuration -eq 'Debug')) {throw 'SDK runtime contract configuration mismatch'}
 $base=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($name in $contract.baseLibraries) {$null=$base.Add($name)}
+if ($r.worker) {$base.Clear()}
+if ($r.worker -and $r.configuration -eq 'Debug') {throw 'Worker distribution currently supports Release runtime packages only'}
 $stage=Join-Path ([IO.Path]::GetDirectoryName($r.output)) ('.runtime-stage-'+[guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory -Path $stage
 try {
     $files=[Collections.Generic.List[object]]::new()
-    $files.Add(@{path='plugin/plugin.dll';role='entry';source=$r.entry})
+    # Static imports are resolved before main(): PATH cannot override System32.
+    # Keep the worker beside its actual Qt/CRT DLLs for application-local loading.
+    $entryPath=if ($r.worker) {'runtime/bin/'+[IO.Path]::GetFileName($r.entry)} else {'plugin/plugin.dll'}
+    $files.Add(@{path=$entryPath;role='entry';source=$r.entry})
+    if ($r.worker) {
+        $qtConf=Join-Path $stage 'worker-qt.conf'
+        [IO.File]::WriteAllText($qtConf,"[Paths]`nPrefix=..`nPlugins=qt-plugins`n",[Text.UTF8Encoding]::new($false))
+        $files.Add(@{path='runtime/bin/qt.conf';role='resource';source=$qtConf})
+    }
     $private=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
     $explicit=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     if ($r.modules.Count) {
         # Recompute this Kit's contract using the SDK's host module set, before deployment patches any DLL.
         $verify=Join-Path $stage 'kit-contract.json'
-        & (Join-Path $PSScriptRoot 'GenerateHostContract.ps1') -QtBin (Join-Path $r.qtRoot 'bin') -Modules ($contract.modules -join ',') -Output $verify -QtVersion $contract.qtVersion -Architecture $contract.architecture -CompilerAbi $contract.compilerAbi -Configuration $r.configuration -HostKind $contract.host
+        $kitVersion=if ($r.worker) {$r.qtVersion} else {$contract.qtVersion}
+        & (Join-Path $PSScriptRoot 'GenerateHostContract.ps1') -QtBin (Join-Path $r.qtRoot 'bin') -Modules ($contract.modules -join ',') -Output $verify -QtVersion $kitVersion -Architecture $contract.architecture -CompilerAbi $contract.compilerAbi -Configuration $r.configuration -HostKind $contract.host
         $actual=Get-Content -LiteralPath $verify -Raw | ConvertFrom-Json
-        if ($actual.qtBuildId -ne $contract.qtBuildId) {throw 'Qt Kit does not match SDK host runtime contract; update SDK/Kit'}
+        if (!$r.worker -and $actual.qtBuildId -ne $contract.qtBuildId) {throw 'Qt Kit does not match SDK host runtime contract; update SDK/Kit'}
         $deploy=Join-Path $r.qtRoot 'bin/windeployqt.exe'
         $arguments=@('--dir',$stage,'--libdir',(Join-Path $stage 'bin'),'--plugindir',(Join-Path $stage 'qt-plugins'),'--no-translations','--no-quick-import','--no-compiler-runtime','--no-opengl-sw','--no-system-d3d-compiler','--no-system-dxc-compiler','--no-patchqt','--skip-plugin-types','qmltooling')
         $arguments+=if ($r.configuration -eq 'Debug') {'--debug'} else {'--release'}
@@ -48,23 +59,34 @@ try {
         $types=@($r.pluginTypes)
         foreach ($file in (Get-ChildItem -LiteralPath $stage -Recurse -File -Filter '*.dll')) {
             $relative=$file.FullName.Substring($stage.Length+1).Replace('\','/')
-            if ($base.Contains($file.Name) -or (Test-SystemLibrary $file.Name)) {continue}
+            $workerCrt=$r.worker -and $file.Name -match '^(msvcp|vcruntime|concrt).*\.dll$'
+            if ($base.Contains($file.Name) -or ((Test-SystemLibrary $file.Name) -and !$workerCrt)) {continue}
             if ($relative.StartsWith('qt-plugins/')) {
                 if ($types -notcontains $relative.Split('/')[1]) {continue}
                 $item=@{path='runtime/'+$relative;role='qt-plugin';source=$file.FullName}
-            } elseif ($relative.StartsWith('bin/')) {
+            } elseif ($relative.StartsWith('bin/') -or $workerCrt) {
                 $item=@{path='runtime/bin/'+$file.Name;role='runtime-library';source=$file.FullName}
             } else {continue}
             if ($private.ContainsKey($file.Name)) {throw "Duplicate runtime DLL: $($file.Name)"}
             $private.Add($file.Name,$item)
         }
     }
-    foreach ($mapping in $r.runtime) {
+    if($r.overrides.Count -and !$r.worker) {throw 'Runtime overrides are restricted to isolated workers'}
+    $overridden=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach($mapping in $r.overrides) {
+        $parts=$mapping.Split('=',2)
+        if($parts.Count -ne 2) {throw 'Expected package/path=source override mapping'}
+        $leaf=[IO.Path]::GetFileName($parts[0])
+        if(!$private.ContainsKey($leaf) -or !$overridden.Add($leaf)) {throw "Override must replace one collected runtime DLL: $leaf"}
+        $private.Remove($leaf) | Out-Null
+    }
+    foreach ($mapping in (@($r.runtime)+@($r.overrides))) {
         $parts=$mapping.Split('=',2)
         if ($parts.Count -ne 2) {throw 'Expected package/path=source runtime mapping'}
         Assert-RegularPath $parts[1]
         $leaf=[IO.Path]::GetFileName($parts[0])
-        if ($base.Contains($leaf) -or (Test-SystemLibrary $leaf) -or $leaf -ieq 'libsodium.dll') {throw "Host/system library must not be bundled: $leaf"}
+        $workerCrt=$r.worker -and $leaf -match '^(msvcp|vcruntime|concrt).*\.dll$'
+        if ($base.Contains($leaf) -or ((Test-SystemLibrary $leaf) -and !$workerCrt) -or $leaf -ieq 'libsodium.dll') {throw "Host/system library must not be bundled: $leaf"}
         if ($private.ContainsKey($leaf)) {throw "Duplicate runtime DLL: $leaf"}
         $private.Add($leaf,@{path=$parts[0];role=$(if ($parts[0].StartsWith('runtime/qt-plugins/')) {'qt-plugin'} else {'runtime-library'});source=$parts[1]})
         $null=$explicit.Add($leaf)
@@ -72,6 +94,16 @@ try {
     # Any new transitive Qt library copied by windeployqt but needed by retained backends is retained.
     $queue=[Collections.Generic.Queue[object]]::new()
     $queue.Enqueue(@{source=$r.entry})
+    foreach($mapping in $r.resources) {
+        $parts=$mapping.Split('=',2)
+        if($parts.Count -ne 2 -or $parts[0] -match '^(runtime|licenses)/') {throw 'Invalid resource mapping'}
+        if([IO.Path]::IsPathRooted($parts[0]) -or $parts[0].Contains(':') -or
+           ($parts[0].Split('/') | Where-Object {$_ -in @('','.','..')}).Count) {throw 'Resource path must stay inside the package'}
+        Assert-RegularPath $parts[1]
+        $item=@{path=$parts[0];role='resource';source=$parts[1]}
+        $files.Add($item)
+        if($parts[0].EndsWith('.dll',[StringComparison]::OrdinalIgnoreCase)) {$queue.Enqueue($item)}
+    }
     foreach ($name in $private.Keys) {
         if ($private[$name].role -eq 'qt-plugin' -or $explicit.Contains($name)) {$queue.Enqueue($private[$name])}
     }
@@ -87,8 +119,8 @@ try {
         if (!$visited.Add($item.source)) {continue}
         foreach ($name in (Get-PeImports $item.source)) {
             if ($base.Contains($name)) {$null=$required.Add($name); continue}
-            if (Test-SystemLibrary $name) {continue}
             if ($private.ContainsKey($name)) {$queue.Enqueue($private[$name]); continue}
+            if (Test-SystemLibrary $name) {continue}
             throw "Missing transitive import $name required by $($item.source); declare RUNTIME_FILES explicitly"
         }
     }
@@ -99,14 +131,15 @@ try {
         $licenseRoot=Join-Path $r.qtRoot 'licenses'
         if (!(Test-Path -LiteralPath $licenseRoot)) {throw "Actual Qt/FFmpeg Kit licenses missing: $licenseRoot; install verified license files into the Kit"}
         foreach ($file in (Get-ChildItem -LiteralPath $licenseRoot -File -Recurse)) {
+            if($r.provenance -and $file.FullName.StartsWith((Join-Path $licenseRoot 'FFmpeg')+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) {continue}
             $licenseMappings+=('licenses/Qt/'+$file.FullName.Substring($licenseRoot.Length+1).Replace('\','/')+'='+$file.FullName)
         }
         if (!($licenseMappings | Where-Object {$_ -match '(?i)LGPL.*3|LGPL-3'})) {throw 'Qt LGPLv3 license missing'}
-        if (($private.Keys | Where-Object {$_ -match '^(avcodec|avformat|avutil|swresample|swscale)'}) -and
+        if (($private.Keys | Where-Object {$_ -match '^(avcodec|avformat|avutil|avfilter|avdevice|swresample|swscale)'}) -and
             !($licenseMappings | Where-Object {$_ -match '(?i)ffmpeg'})) {throw 'Actual FFmpeg build license/attribution missing'}
-        $ffmpeg=@($files | Where-Object {$_.path -match '/(avcodec|avformat|avutil|swresample|swscale)'})
+        $ffmpeg=@($files | Where-Object {$_.path -match '/(avcodec|avformat|avutil|avfilter|avdevice|swresample|swscale)'})
         if ($ffmpeg.Count) {
-            $provenance=Join-Path $licenseRoot 'FFmpeg/actual-build.json'
+            $provenance=if($r.provenance) {$r.provenance} else {Join-Path $licenseRoot 'FFmpeg/actual-build.json'}
             if (!(Test-Path -LiteralPath $provenance)) {throw 'FFmpeg actual-build.json with binary hashes, version, configuration and license is required'}
             $record=Get-Content -LiteralPath $provenance -Raw | ConvertFrom-Json
             if (!$record.av_version_info -or !$record.avutil_configuration -or !$record.avutil_license) {throw 'Incomplete FFmpeg build provenance'}
@@ -124,6 +157,7 @@ try {
     }
     $runtime=@{}
     if ($private.Count) {$runtime=@{qtBuildId=$contract.qtBuildId}}
+    if ($r.worker) {$runtime=@{isolated=$true;qtBuildId=$actual.qtBuildId;qtVersion=$actual.qtVersion}}
     $manifest=@{files=@($files.ToArray());runtime=$runtime;requiresHost=@($required | Sort-Object)}
     # Publish collected files into a new durable bundle directory before handing them to the tool.
     $bundle=$r.output+'.bundle-'+[guid]::NewGuid().ToString('N')

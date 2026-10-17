@@ -159,9 +159,15 @@ private slots:
         auto files=p.info["files"].toArray(); auto item=files[0].toObject();
         item["role"]="runtime-library"; item["path"]="runtime/bin/Qt6Multimedia.dll"; files.append(item);
         p.info["files"]=files; p.info["runtime"]=QJsonObject{{"qtBuildId","wrong"}};
-        QVERIFY(validateRuntime(p).contains("mismatch"));
+        QVERIFY(validateRuntime(p).contains("worker-process"));
         item["path"]="runtime/bin/Qt6Core.dll"; files[1]=item; p.info["files"]=files;
         QVERIFY(validateRuntime(p).contains("override"));
+        p.info["execution"]=QJsonObject{{"kind","worker-process"}};
+        p.info["requiresHost"]=QJsonArray{};
+        QVERIFY(validateRuntime(p).contains("runtime/bin"));
+        p.info["entry"]="runtime/bin/worker.exe";
+        // A worker owns its Qt runtime and does not share the host's Kit ABI.
+        QVERIFY(validateRuntime(p).isEmpty());
     }
 };
 QTEST_GUILESS_MAIN(PluginPackageTests)

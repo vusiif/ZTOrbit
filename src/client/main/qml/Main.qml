@@ -14,6 +14,14 @@ ApplicationWindow {
     property string detailId: ""
     property var aboutPlugin: ({})
     property bool layoutReady: false
+    property var pluginNotices: []
+    function showNextPluginNotice() {
+        if (pluginNotices.length === 0 || (pluginNoticeLoader.item && pluginNoticeLoader.item.visible)) return
+        const notice = pluginNotices.shift()
+        const popup = pluginNoticeLoader.ensure()
+        popup.title = notice.title; popup.message = notice.message
+        pluginNoticeLoader.open()
+    }
     property real guideScrollPosition: 0
     width: windowSettings.savedWidth
     height: windowSettings.savedHeight
@@ -59,7 +67,7 @@ ApplicationWindow {
     }
     NumberAnimation { id: pageReveal; target: pageHost; property: "opacity"; from: 0; to: 1; duration: 140 }
     function pluginStatus(value) {
-        const labels = {"Ready": "已加载", "Loading": "加载中…", "Preparing": "加载中…", "Stopping": "正在卸载…", "Disabled": "已禁用"}
+        const labels = {"Ready": "已就绪", "Loading": "加载中…", "Preparing": "准备中…", "Preparing service": "服务准备中…", "Verifying": "校验中…", "Waiting for dependencies": "等待依赖…", "Starting worker": "服务启动中…", "Waiting for dependents": "等待依赖者停止…", "Stopping": "正在卸载…", "Disabled": "已禁用", "Not loaded": "未加载"}
         return labels[value] || value || "已加载"
     }
     function showDetails(kind, id, name) {
@@ -87,6 +95,10 @@ ApplicationWindow {
         function onTrayRequested() { if (tray.available) window.hide(); else window.showMinimized() }
         function onNetworkJoined() { joinLoader.close() }
         function onConfigurationImported(networkId) { joinLoader.ensure().setNetworkId(networkId) }
+        function onPluginNoticeRequested(title, message) {
+            window.pluginNotices.push({title: title, message: message})
+            window.showNextPluginNotice()
+        }
         function onConfirmationRequested(title, message, acceptLabel) {
             const popup = confirmationLoader.ensure()
             popup.title = title; popup.message = message; popup.acceptLabel = acceptLabel; confirmationLoader.open()
@@ -339,6 +351,20 @@ ApplicationWindow {
         }
     }
     LazyPopup {
+        id: pluginNoticeLoader
+        sourceComponent: AppDialog {
+            id: pluginNotice
+            objectName: "pluginNoticeDialog"
+            property string message: ""
+            anchors.centerIn: parent
+            width: Math.min(500, window.width - 40)
+            modal: true
+            standardButtons: Dialog.Ok
+            onClosed: Qt.callLater(window.showNextPluginNotice)
+            Label { text: pluginNotice.message; wrapMode: Text.Wrap; width: parent.width }
+        }
+    }
+    LazyPopup {
         id: confirmationLoader
         sourceComponent: AppDialog {
             id: confirmation
@@ -357,8 +383,8 @@ ApplicationWindow {
                 Label { text: confirmation.message; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 RowLayout {
                     Layout.alignment: Qt.AlignRight
-                    ActionButton { text: "取消"; focus: true; onClicked: confirmation.reject() }
-                    ActionButton { text: confirmation.acceptLabel; destructive: true; onClicked: confirmation.accept() }
+                    ActionButton { objectName: "cancelActionButton"; text: "取消"; focus: true; onClicked: confirmation.reject() }
+                    ActionButton { objectName: "confirmActionButton"; text: confirmation.acceptLabel; destructive: true; onClicked: confirmation.accept() }
                 }
             }
         }
@@ -452,6 +478,7 @@ ApplicationWindow {
         sourceComponent: AppDialog {
             id: pluginDialog
             objectName: "pluginDialog"
+            property string selectedPath: ""
             title: "插件"
             anchors.centerIn: parent
             width: Math.min(520, window.width - 40)
@@ -468,19 +495,25 @@ ApplicationWindow {
                     boundsBehavior: Flickable.StopAtBounds
                     model: backend.plugins
                     delegate: ItemDelegate {
+                        id: pluginRow
                         required property var modelData
+                        objectName: "pluginRow-" + modelData.id
                         width: ListView.view.width
                         text: modelData.name + (modelData.version ? "  v" + modelData.version : "") + "  " + window.pluginStatus(modelData.message)
-                        onClicked: { window.aboutPlugin = modelData; pluginAboutLoader.open() }
-                        TapHandler { acceptedButtons: Qt.RightButton; onTapped: pluginMenu.popup() }
+                        highlighted: pluginDialog.selectedPath === modelData.path
+                        onClicked: pluginDialog.selectedPath = modelData.path
+                        contentItem: Text { text: pluginRow.text; color: Theme.text; font: pluginRow.font; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
+                        background: Rectangle { radius: 4; color: pluginRow.highlighted ? Theme.selection : pluginRow.hovered ? Theme.hover : "transparent" }
+                        TapHandler { acceptedButtons: Qt.RightButton; onTapped: (point) => { pluginDialog.selectedPath = modelData.path; pluginMenu.popup(pluginRow, point.position.x, point.position.y) } }
                         AppMenu {
                             id: pluginMenu
-                            AppMenuItem { text: "加载"; enabled: modelData.loadable && !modelData.loaded && !modelData.loading && !modelData.stopping; onTriggered: backend.loadPlugin(modelData.id) }
-                            AppMenuItem { text: "卸载"; enabled: modelData.loaded && !modelData.stopping; onTriggered: backend.unloadPlugin(modelData.id) }
-                            AppMenuItem { text: "关于"; onTriggered: { window.aboutPlugin = modelData; pluginAboutLoader.open() } }
+                            AppMenuItem { objectName: "pluginLoad-" + modelData.id; text: "加载"; visible: !modelData.loaded; enabled: modelData.loadable && !modelData.loading && !modelData.stopping; onTriggered: backend.loadPlugin(modelData.path) }
+                            AppMenuItem { objectName: "pluginUnload-" + modelData.id; text: "卸载"; visible: modelData.loaded; enabled: !modelData.stopping; onTriggered: backend.unloadPlugin(modelData.id) }
+                            AppMenuItem { objectName: "pluginDelete-" + modelData.id; text: "删除"; visible: !modelData.loaded; enabled: !modelData.loading && !modelData.stopping; onTriggered: backend.deletePlugin(modelData.path) }
+                            AppMenuItem { objectName: "pluginAbout-" + modelData.id; text: "关于"; onTriggered: { window.aboutPlugin = modelData; pluginAboutLoader.open() } }
                         }
                     }
-                    Label { anchors.centerIn: parent; visible: backend.plugins.length === 0; text: "没有已加载的插件"; color: Theme.muted }
+                    Label { anchors.centerIn: parent; visible: backend.plugins.length === 0; text: "没有已安装的插件"; color: Theme.muted }
                 }
                 RowLayout {
                     ActionButton { objectName: "importPluginButton"; text: "导入插件"; onClicked: pluginFileLoader.open() }
@@ -507,6 +540,10 @@ ApplicationWindow {
                 Label { text: "插件 ID：" + (window.aboutPlugin.id || ""); wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Label { text: "版本：" + (window.aboutPlugin.version || "") }
                 Label { text: "API：" + (window.aboutPlugin.api || "") }
+                Label { text: "运行方式：" + (window.aboutPlugin.execution === "worker-process" ? "独立服务进程" : "进程内插件") }
+                Label { objectName: "pluginServicesLabel"; text: "提供服务：" + ((window.aboutPlugin.provides || []).map(s => s.service + " / " + s.api).join("、") || "无"); wrapMode: Text.Wrap; Layout.fillWidth: true }
+                Label { text: "前置依赖：" + ((window.aboutPlugin.dependencies || []).map(d => d.pluginId + " " + d.versionRange).join("、") || "无"); wrapMode: Text.Wrap; Layout.fillWidth: true }
+                Label { text: "使用者：" + ((window.aboutPlugin.usedBy || []).join("、") || "无"); wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Label { text: "加载状态：" + window.pluginStatus(window.aboutPlugin.message) }
             }
         }
@@ -525,6 +562,7 @@ ApplicationWindow {
                 Label { text: "ZTGUI"; font.pixelSize: 24; font.bold: true }
                 Label { objectName: "aboutVersionLabel"; text: "v" + backend.version }
                 Label { text: "API " + backend.apiVersion }
+                Label { objectName: "aboutServerVersionLabel"; text: "服务端 " + backend.serverVersion + "（API " + backend.serverApiVersion + "）" }
                 Label { text: "Qt " + backend.qtVersion }
             }
         }

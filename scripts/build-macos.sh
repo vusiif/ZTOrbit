@@ -7,8 +7,8 @@ if [[ "$(uname -s)" != Darwin ]]; then
 fi
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-build_directory="$project_root/cmake-build-macos-arm64"
-output_directory="$project_root/dist/macos-arm64"
+build_directory="$project_root/build/cmake-build-macos-arm64"
+output_directory="$project_root/build/dist/macos-arm64"
 
 if [[ -z "${QT_ROOT:-}" ]] && command -v brew >/dev/null 2>&1; then
     QT_ROOT="$(brew --prefix qt)"
@@ -25,24 +25,15 @@ cmake -S "$project_root" -B "$build_directory" \
 cmake --build "$build_directory" --parallel "$(sysctl -n hw.logicalcpu)"
 ctest --test-dir "$build_directory" --output-on-failure
 
-api_sdk="$project_root/dist/ZTGUI-api"
+api_sdk="$project_root/build/dist/ZTGUI-api"
 cmake --install "$build_directory" --prefix "$api_sdk"
-voice_build="$project_root/cmake-build-voice-client-macos-arm64"
-cmake -S "$project_root/src/plugins/voice-chat/client" -B "$voice_build" \
-    -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$api_sdk;$QT_ROOT" \
-    -DCMAKE_OSX_ARCHITECTURES=arm64
-cmake --build "$voice_build" --parallel "$(sysctl -n hw.logicalcpu)"
 
+# Application plugins are not built for macOS in this generation: the voice
+# plugin needs the installed media API/worker, whose macOS delivery is not
+# implemented or verified. Ship the host application only; see docs/macos.md.
 staging="$(mktemp -d "$build_directory/package.XXXXXX")"
 trap '/bin/rm -rf -- "$staging"' EXIT
 /usr/bin/ditto "$build_directory/ZTGUI.app" "$staging/ZTGUI.app"
-/bin/mkdir -p "$staging/ZTGUI.app/Contents/MacOS/plugins"
-voice_library="$(find "$voice_build" -maxdepth 1 -type f \( -name 'ztgui_voice_chat.dylib' -o -name 'ztgui_voice_chat.so' \) -print -quit)"
-if [[ -z "$voice_library" ]]; then
-    echo 'Voice plugin artifact not found' >&2
-    exit 1
-fi
-/bin/cp "$voice_library" "$staging/ZTGUI.app/Contents/MacOS/plugins/"
 
 iconset="$staging/app-icon.iconset"
 /bin/mkdir -p "$iconset" "$staging/ZTGUI.app/Contents/Resources"
@@ -60,7 +51,6 @@ plist="$staging/ZTGUI.app/Contents/Info.plist"
 (
     cd "$staging"
     "$QT_ROOT/bin/macdeployqt" ZTGUI.app -qmldir="$project_root/src/client/main/qml" \
-        "-executable=ZTGUI.app/Contents/MacOS/plugins/$(basename "$voice_library")" \
         -always-overwrite -codesign=- -dmg
 )
 /usr/bin/lipo -verify_arch arm64 "$staging/ZTGUI.app/Contents/MacOS/ZTGUI"

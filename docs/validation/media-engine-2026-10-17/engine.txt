@@ -1,0 +1,16 @@
+********* Start testing of MediaEngineTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : MediaEngineTests::initTestCase()
+PASS   : MediaEngineTests::packetMetadataRoundtrip()
+PASS   : MediaEngineTests::audioVideoShareClockDomain()
+PASS   : MediaEngineTests::sharedSlotOwnership()
+PASS   : MediaEngineTests::bulkFragmentationAndBounds()
+PASS   : MediaEngineTests::bulkRejectsWrongCredential()
+PASS   : MediaEngineTests::bulkReceiverCanDestroyItself()
+PASS   : MediaEngineTests::bulkOutputBackpressureIsBounded()
+PASS   : MediaEngineTests::resamplingAndOpusPlc()
+PASS   : MediaEngineTests::h264AndIndependentExtensionInstances()
+PASS   : MediaEngineTests::rejectExtensionFingerprint()
+PASS   : MediaEngineTests::cleanupTestCase()
+Totals: 12 passed, 0 failed, 0 skipped, 0 blacklisted, 452ms
+********* Finished testing of MediaEngineTests *********

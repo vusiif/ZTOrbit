@@ -1,42 +1,63 @@
-# 语音服务端插件
+# 语音服务端插件（Java）
 
-`ztserver_voice_chat.so` 是新宿主 `zt-server` 的独立插件，路由 ID 为 `voice-chat`，名称“语音聊天”。只依赖公开 `ZTServer::Api` 和 `src/plugins/voice-chat/shared/Protocol.h`，没有 Widgets、Multimedia、Opus 或宿主内部头文件依赖。与客户端共用业务协议，使用宿主的 TCP/UDP 收发工具。
+`ztserver_voice_chat.jar` 是 ZTServer 的 Java 插件，路由 ID `voice-chat`、显示名“语音聊天”、版本 0.1.0、API 0.2-beta。成员房间与 `ZTV1` 音频协议与旧 C++ 插件完全一致；客户端无需修改。
 
-## 构建与配置
+## 构建与部署
+
+需要 JDK 25 与 Maven（宿主 API 由根项目安装到本地 Maven 仓库）：
 
 ```bash
-cmake -S src/server -B cmake-build-server -DCMAKE_BUILD_TYPE=Release -DZTSERVER_BUILD_VOICE_PLUGIN=ON
-cmake --build cmake-build-server --target zt-server ztserver_voice_chat --parallel
+revision="$(tr -d '\r\n' < SERVER_VERSION)"
+api_version="$(printf '%s' "$revision" | sed -E 's/^0\.([0-9]+)\.[0-9]+(-[0-9A-Za-z.-]+)?$/0.\1\2/')"
+mvn -f src/server/pom.xml -Drevision="$revision" -DapiVersion="$api_version" -pl api -am -DskipTests install
+mvn -f src/plugins/voice-chat/server/pom.xml -DapiVersion="$api_version" clean package
+# 产物：src/plugins/voice-chat/server/target/ztserver_voice_chat.jar
 ```
 
-独立编译插件时使用 `cmake -S src/plugins/voice-chat/server -B cmake-build-server-voice -DCMAKE_PREFIX_PATH=/path/to/ZTServer-api-v0.4`，并保留同项目的 `shared/`；共享协议路径可通过 `-Dvoice_protocol=/path/to/shared` 指定，该目录直接包含 `Protocol.h`。产物位于构建目录的 `plugins/`，插件自身版本0.1.0，与宿主API0.4精确匹配。目录迁移后使用新的构建目录或重新生成旧 CMake 缓存。
+或使用发行脚本一次性构建：`bash scripts/build-linux.sh --build-voice-plugin`，结果在 `build/dist/server-plugins/ztserver_voice_chat-v0.1.0.jar`，不进入宿主包。
 
-将 `.so` 放到启动目录 `plugins/`，宿主默认使用同一个端口 TCP/UDP18100。插件默认32个房间、每房间16人、256个语音会话；可在 `plugins-data/语音聊天/settings.json` 设置 `maxRooms/maxMembers/maxConnections`，重启生效。宿主总连接上限仍为256。
+把 JAR 放入宿主工作目录的 `plugins/` 后重启：
 
-房间开放且临时，一个会话只能加入一个房间，最后成员退出后删除，重启清空。业务控制 JSON、房间凭据和 `ZTV1` 音频包均位于统一 `ZTS1` 包的业务负载内。TCP 控制 JSON 最大64 KiB，保留 hello/rooms/create/join/leave/mute/ping，以及 rooms/members 事件；UDP 内层最大1200字节。详细业务字段与音频规则见 [客户端语音文档](../../client/docs/voice-chat.md)。
+```bash
+cd /root/Server/ZTServer
+install -m644 /path/ztserver_voice_chat.jar plugins/
+systemctl restart zt-server.service
+```
 
-UDP 首次注册要求来源 IP 与 TCP 一致，成功后绑定端口；音频只接受有效房间凭据和绑定端点。退房凭据作废，只向同房间其他成员转发，每个接收者使用自己的凭据。每会话控制请求每秒30次、UDP包100次；15秒无控制请求清理会话，控制发送积压超过256KiB时排队关闭连接。初始化、房间进出和停机使用双写日志，日志不包含音频负载或凭据。
+插件加载要求 manifest `apiVersion` 与宿主完全一致；构建脚本使用根 `SERVER_VERSION` 的前两段数字和同一预发布后缀（当前 0.2-beta）。
 
-## 部署与回滚
+## 运行规则
 
-当前部署目录为 `/root/Server/ZTServer`，systemd unit 为 `zt-server.service`，以root运行、监听 `0.0.0.0:18100`。首次迁移先停止并禁用旧 `ztgui-voice.service`，保留 `/opt/ztgui-voice` 和旧unit；新宿主启动成功后用适配过的客户端插件连接。旧客户端和新宿主的外层协议不兼容，必须同时更新。
+- 默认 32 个房间、每房间 16 人、256 个语音会话；`plugins-data/语音聊天/settings.json` 可设置 `maxRooms`(1–10000)、`maxMembers`(1–256)、`maxConnections`(1–10000)，重启生效。宿主总连接上限仍为 256。
+- 房间开放且临时，一个会话只能加入一个房间；最后成员退出后删除，重启清空。
+- 业务控制 JSON 走 `ZTS1` 路由 `voice-chat`，最大 64 KiB；支持 `hello/rooms/create/join/leave/mute/ping` 和 `rooms/members` 事件，错误码与旧实现一致。
+- UDP 音频走同一路由的 `ZTV1` 包（30 字节头 + 负载，单包最多 1200 字节）。首次注册要求来源 IP 与 TCP peer 一致并绑定端口；退房/静音/过期 token 不再转发；每个接收者使用自己的 token，房间隔离。
+- 每会话控制请求每秒 30 次、UDP 包每秒 100 次；15 秒无控制请求清理会话；控制发送积压超过 256 KiB 时延迟关闭连接。
+- 插件在宿主事件线程处理回调；停止时取消定时清理任务并清空会话。
 
-回滚时停止并禁用 `zt-server.service`，再 `systemctl enable --now ztgui-voice.service`；客户端恢复旧语音DLL。现有ZeroTier、Moon、ztncui与其他服务不参与替换。
+## 测试
 
-隔离测试：`python3 src/tests/voice-chat/ServerTests.py --binary /absolute/path/to/zt-server`；已部署服务测试：`python3 src/tests/voice-chat/ServerTests.py --host 10.10.10.1 --port 18100`。已部署测试仅创建临时房间，不修改容量或真实网络配置。真实多人麦克风/耳机听感须另行验收。
+隔离模式需要插件 JAR；宿主以临时目录启动并复制 JAR：
 
-## 音量与新封装
+```bash
+python3 src/tests/voice-chat/ServerTests.py \
+  --binary src/server/scripts/start-server.sh \
+  --jar src/server/main/target/zt-server.jar \
+  --plugin src/plugins/voice-chat/server/target/ztserver_voice_chat.jar
+```
 
-客户端输入、总输出及其他成员的本机播放音量支持 0–200%；输入和成员默认100%，总输出迁移既有80%设置。输入在编码前增益，成员在混音前增益，总输出在混音后增益并最后限幅；静音优先，不修改系统音量。输入和总输出持久化，成员音量只对本机、当前房间会话有效，退房清空，切换设备保留。
+也可以直接使用 fat jar：
 
-两端技术 ID 为 `voice-chat`，显示名和数据目录仍为“语音聊天”。协议业务版本仍为1，路由 ID 同步改变；客户端入口／生命周期 IID 为 /3.0，服务端 /2.0，两端旧动态库需重编。SDK CMake 辅助函数构建后生成 `ztgui_voice_chat.ztplugin` 或 `ztserver_voice_chat.ztplugin`，正式宿主只加载该封装包；没有接入多中转音频传输。
+```bash
+python3 src/tests/voice-chat/ServerTests.py \
+  --binary src/server/main/target/zt-server.jar \
+  --plugin src/plugins/voice-chat/server/target/ztserver_voice_chat.jar
+```
 
-2026-10-14：语音客户端及Linux服务端已重新编译为API0.3的加密 .ztplugin，分别发布到 dist/plugins/ztgui_voice_chat.ztplugin 和 dist/server-plugins/ztserver_voice_chat.ztplugin。Windows使用安装后的客户端SDK、Qt6.8.3/MSVC2022/x64 Release；真实封装包的动态加载、页面创建、音频设置、连接／断开、异步卸载和再次加载通过，音频／页面源码测试两组通过。Linux Qt6.4.2服务端插件的5项隔离语音集成全部通过，涵盖容量、超时、UDP隔离、静音和过期凭据。未连接已部署服务器，未进行真实多人麦克风／耳机听感验收。
+已部署服务（不创建隔离服务器，容量/超时测试自动跳过）：
 
-## v2 独立 SDK 构建
+```bash
+python3 src/tests/voice-chat/ServerTests.py --host 10.10.10.1 --port 18100
+```
 
-Linux 服务端使用安装后的 ZTServerPluginApi 0.4 SDK 独立配置，显式构建 `ztserver_voice_chat_package` 得到 v2 包。正式 install 仅安装 `.ztplugin` 和声明的许可证；业务 SO 为中间产物。无录放音需求，不部署 Multimedia/FFmpeg，不捆绑系统 Qt。SDK 工具和容器兼容规则见[运行依赖分离](../../../../../docs/plugin-runtime-separation.md)。
-
-2026-10-14 运行依赖分离验收：v2 正式产物、独立 SDK 构建、实际加载结果和明确未验证的平台/听感项目统一记录在[本轮验收](../../../../../docs/plugin-runtime-separation.md#验证记录)，其中客户端完成真实设备零增益回送及20轮热卸载。
-
-2026-10-14 版本升级：宿主0.4.1、SDK0.4，当前插件须使用API0.4重编；客户端/3.0和服务端/2.0 IID保持不变，上方API0.3记录为历史验证。
+6 项隔离测试覆盖成员身份/旧客户端、房间生命周期、UDP 隔离/静音/过期凭据、容量、畸形控制和超时清理。真实多人麦克风/耳机听感须另行验收。

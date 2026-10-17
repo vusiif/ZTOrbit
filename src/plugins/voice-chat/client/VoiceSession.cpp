@@ -1,4 +1,5 @@
 #include "VoiceSession.h"
+#include <Protocol.h>
 #include <ztprotocol/WireProtocol.h>
 #include <QNetworkDatagram>
 #include <QNetworkProxy>
@@ -7,7 +8,7 @@
 #include <limits>
 namespace vusiif::ztgui::voice_chat {
 VoiceSession::VoiceSession(std::shared_ptr<AudioDeviceCache> cache, QObject *parent) : QObject(parent), tcp(new QTcpSocket(this)), udp(new QUdpSocket(this)),
-    heartbeat(new QTimer(this)), registration(new QTimer(this)), watchdog(new QTimer(this)), audio(new AudioEngine(this)), deviceCache(std::move(cache))
+    heartbeat(new QTimer(this)), registration(new QTimer(this)), watchdog(new QTimer(this)), audio(new VoiceAudio(cache->audio.get(),this)), deviceCache(std::move(cache))
 {
     // Voice transport is a direct TCP/UDP connection over the selected network.
     tcp->setProxy(QNetworkProxy::NoProxy);
@@ -15,7 +16,7 @@ VoiceSession::VoiceSession(std::shared_ptr<AudioDeviceCache> cache, QObject *par
     tcp->setReadBufferSize(MaxControlBytes + 160);
     heartbeat->setInterval(5000); registration->setInterval(1000);
     watchdog->setInterval(15000); watchdog->setSingleShot(true);
-    connect(tcp, &QTcpSocket::connected, this, [this] { request("hello", {{"nickname", nickname}}); });
+    connect(tcp, &QTcpSocket::connected, this, [this] { request("hello", {{"nickname", nickname},{"ztid",ztid}}); });
     connect(tcp, &QTcpSocket::readyRead, this, &VoiceSession::read);
     connect(tcp, &QTcpSocket::disconnected, this, [this] { close(); emit notice(QStringLiteral("连接已断开，请手动重连")); });
     connect(tcp, &QTcpSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
@@ -25,20 +26,20 @@ VoiceSession::VoiceSession(std::shared_ptr<AudioDeviceCache> cache, QObject *par
     connect(watchdog, &QTimer::timeout, this, [this] { close(); emit notice(QStringLiteral("服务器响应超时，请手动重连")); });
     connect(registration, &QTimer::timeout, this, &VoiceSession::sendRegistration);
     connect(udp, &QUdpSocket::readyRead, this, &VoiceSession::datagrams);
-    connect(audio, &AudioEngine::notice, this, &VoiceSession::notice);
-    connect(audio, &AudioEngine::encoded, this, [this](const QByteArray &data) {
-        if (udpReady && room && !muted)
+    audio->notice=[this](const QString &message) { emit notice(message); };
+    audio->encoded=[this](const QByteArray &data) {
+        if(microphoneTesting) audio->receive(testSender(),testSequence++,data);
+        else if (udpReady && room && !muted)
             udp->writeDatagram(protocol::encode("voice-chat", encodePacket({Audio, token, session, sequence++, data})), tcp->peerAddress(), udpPort);
-    });
+    };
 }
 void VoiceSession::refreshDevices() {
-    deviceCache->refresh();
-    emit devicesRefreshed();
+    deviceCache->refresh(this,[this] { emit devicesRefreshed(); });
 }
-void VoiceSession::open(const QString &address, quint16 port, const QString &name)
+void VoiceSession::open(const QString &address, quint16 port, const QString &name, const QString &identity)
 {
     close();
-    const auto host = address.trimmed(); nickname = name.trimmed();
+    const auto host = address.trimmed(); nickname = name.trimmed(); ztid=identity;
     if (host.isEmpty() || nickname.isEmpty()) { emit notice(QStringLiteral("请填写服务器地址和昵称")); return; }
     emit busyChanged(true); emit notice(QStringLiteral("正在连接…"));
     watchdog->start(); tcp->connectToHost(host, port);
@@ -79,13 +80,31 @@ void VoiceSession::leave() {
 }
 void VoiceSession::configure(const QByteArray &input, const QByteArray &output, bool allowed) {
     inputId = input; outputId = output; recordAllowed = allowed;
-    if (room && udpReady) { audio->start(inputId, outputId, recordAllowed); audio->setMuted(muted); }
+    if (microphoneTesting || (room && udpReady)) {
+        audio->start(inputId, outputId, recordAllowed); audio->setMuted(muted && !microphoneTesting);
+        audio->setDeafened(deafened && !microphoneTesting); retainMembers();
+    }
+}
+void VoiceSession::testMicrophone(bool enabled) {
+    if(microphoneTesting==enabled) return;
+    microphoneTesting=enabled; testSequence=0;
+    // Restart/stop flushes buffered loopback audio immediately on dismissal.
+    if(enabled || (room && udpReady)) configure(inputId,outputId,recordAllowed);
+    else audio->stop();
+    audio->setMuted(muted && !enabled); audio->setDeafened(deafened && !enabled);
+    retainMembers(); emit microphoneTestingChanged(enabled);
+}
+void VoiceSession::retainMembers() {
+    auto retained=members;
+    if(microphoneTesting) retained.insert(testSender());
+    audio->retain(retained);
 }
 void VoiceSession::mute(bool value) {
-    muted = value; audio->setMuted(value);
+    muted = value; audio->setMuted(value && !microphoneTesting);
     if (ready && room) request("mute", {{"muted", value}});
 }
 void VoiceSession::clearRoom() {
+    if(microphoneTesting) { microphoneTesting=false; emit microphoneTestingChanged(false); }
     audio->stop(); audio->clearMemberVolumes(); registration->stop(); token.clear(); members.clear();
     room = 0; udpReady = false; sequence = 0; emit roomChanged({});
 }
@@ -96,7 +115,7 @@ void VoiceSession::updateRoom(const QJsonObject &value) {
         const auto id = quint32(entry.toObject().value("id").toDouble());
         if (id != session) members.insert(id);
     }
-    audio->retain(members);
+    retainMembers();
     auto snapshot=value; auto rows=value["members"].toArray();
     for(qsizetype i=0;i<rows.size();++i) { auto row=rows[i].toObject(); row["self"]=quint32(row["id"].toDouble())==session; rows[i]=row; }
     snapshot["members"]=rows; emit roomChanged(snapshot);
@@ -173,7 +192,7 @@ void VoiceSession::datagrams() {
             || !protocol::decode(datagram.data(), packet) || packet.plugin != "voice-chat" || !decodePacket(packet.payload, p) || p.token != token) continue;
         if (p.type == Registered && p.sender == session && !udpReady) {
             udpReady = true; registration->stop(); emit notice(QStringLiteral("语音通道已就绪"));
-            audio->start(inputId, outputId, recordAllowed); audio->setMuted(muted);
+            configure(inputId,outputId,recordAllowed);
         } else if (p.type == Audio && udpReady && members.count(p.sender)) audio->receive(p.sender, p.sequence, p.payload);
     }
 }

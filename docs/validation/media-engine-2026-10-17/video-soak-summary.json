@@ -1,0 +1,9 @@
+{
+  "seconds": 600,
+  "encodedPackets": 17043,
+  "decodedFrames": 17040,
+  "decodedFps": 28.4,
+  "workerPrivateMinMiB": 59.62890625,
+  "workerPrivateMaxMiB": 68.234375,
+  "workerPrivateLastMiB": 59.66796875
+}

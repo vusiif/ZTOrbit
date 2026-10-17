@@ -39,6 +39,9 @@ if ($VoicePlugin) { $taskCases += @{Name='compact_voice';Mode='compact-lists';Vo
 foreach ($taskCase in $taskCases) {
     $taskPluginDir = Join-Path $taskRuntime 'plugins'
     # The harness owns only this copied test DLL; never alter the real plugin directory.
+    # Historical 0.3.2 flow: current hosts scan only *.ztplugin and voice audio runs
+    # in the media worker. To reproduce current voice usage, package the .ztplugin
+    # and media worker instead of this bare DLL copy.
     $taskPluginCopy = Join-Path $taskPluginDir 'ztgui_voice_chat.dll'
     if ($taskCase.Voice) {
         New-Item -ItemType Directory -Path $taskPluginDir -Force | Out-Null

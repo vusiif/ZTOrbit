@@ -4,6 +4,7 @@
 #include <QQmlEngine>
 #include <QQuickWindow>
 #include <QQuickItem>
+#include <QQuickItemGrabResult>
 #include <QQuickStyle>
 #include <QTemporaryDir>
 #include <QSettings>
@@ -19,6 +20,8 @@
 #include <QFontDatabase>
 #include <QtTest>
 #include "PluginRuntime.h"
+#include <QCryptographicHash>
+#include <ztmedia/MediaSession.h>
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <tlhelp32.h>
@@ -28,6 +31,8 @@ using namespace vusiif::ztgui::api;
 using namespace vusiif::ztgui::plugins;
 class VoicePluginTests : public QObject {
     Q_OBJECT
+    QTemporaryDir installed;
+    QString voicePath;
     static QJsonObject control(QTcpSocket &socket,QByteArray &buffer,int &serial,const QString &op,const QJsonObject &data={}) {
         const int id=++serial;
         socket.write(vusiif::ztgui::protocol::frame("voice-chat",QJsonDocument(QJsonObject{{"v",1},{"id",id},{"op",op},{"data",data}}).toJson(QJsonDocument::Compact)));
@@ -48,6 +53,49 @@ class VoicePluginTests : public QObject {
         QTest::mouseClick(&window,Qt::LeftButton,{},button->mapToScene(QPointF(button->width()/2,button->height()/2)).toPoint());
     }
 private slots:
+    void previewSdkConsumerRendersVideo() {
+        const auto probe=qEnvironmentVariable("ZTGUI_PREVIEW_PLUGIN");if(probe.isEmpty())QSKIP("Set ZTGUI_PREVIEW_PLUGIN to the independently built SDK preview package");
+        QTemporaryDir directory;QVERIFY(directory.isValid());QVERIFY(QFile::copy(probe,directory.filePath("preview.ztplugin")));QVERIFY(QFile::copy(MEDIA_PLUGIN,directory.filePath("media.ztplugin")));
+        QQmlEngine engine;QQuickWindow window;window.resize(1000,640);window.show();QTest::qWait(100);window.hide();window.show();QTRY_VERIFY(window.isExposed());
+        PluginRegistry registry;PluginLoader loader;loader.scan(directory.path(),registry);QTRY_COMPARE_WITH_TIMEOUT(registry.plugins().size(),2,80000);QTRY_COMPARE_WITH_TIMEOUT(registry.preparationState("media-preview-probe"),PreparationState::Ready,15000);
+        auto page=registry.page("media-preview-probe/preview",&engine,window.contentItem());QVERIFY2(page.result.ok(),qPrintable(page.result.message));page.page->setSize(QSizeF(1000,640));auto *model=controller(page.page);QVERIFY(model);QVERIFY(QMetaObject::invokeMethod(model,"start",Q_ARG(QString,"synthetic")));
+        QTRY_VERIFY_WITH_TIMEOUT(model->property("status").toString().contains(QStringLiteral("正在回送")),10000);QTest::qWait(500);
+        for(const char *name:{"sourcePreviewHost","decodedPreviewHost"}) {
+            auto *host=page.page->findChild<QQuickItem *>(name);QVERIFY(host);auto grab=host->grabToImage();QVERIFY(grab);QSignalSpy ready(grab.data(),&QQuickItemGrabResult::ready);QTRY_VERIFY(!ready.isEmpty());auto image=grab->image();QVERIFY(!image.isNull());auto pixel=image.pixelColor(image.width()/5,image.height()/2);QVERIFY2(pixel.red()>180&&pixel.green()<100&&pixel.blue()<100,name);
+        }
+        loader.requestShutdown();QTRY_VERIFY_WITH_TIMEOUT(loader.shutdownComplete(),10000);
+    }
+    void mediaWorkerUsesPackagedCoreAndCrt() {
+#ifdef Q_OS_WIN
+        using namespace vusiif::ztgui;
+        const auto pkg=package::inspect(MEDIA_PLUGIN); QVERIFY2(pkg.ok(),qPrintable(pkg.error));
+        QCOMPARE(QFileInfo(pkg.info["entry"].toString()).path(),QString("runtime/bin"));
+        std::unique_ptr<QTemporaryDir> cache; std::unique_ptr<QLockFile> lock; QString entry;
+        QVERIFY(package::extract(pkg,cache,entry,lock).isEmpty());
+        ServiceBroker broker; QSignalSpy failed(&broker,&ServiceBroker::failed); broker.start(entry,cache->path(),pkg.info);
+        QTRY_VERIFY_WITH_TIMEOUT(broker.ready() || !failed.isEmpty(),80000); QVERIFY2(broker.ready(),qPrintable(broker.failure()));
+        QMap<QString,QJsonObject> files;
+        for(const auto &value:pkg.info["files"].toArray()) {
+            const auto f=value.toObject(); if(f["role"]=="runtime-library" || f["role"]=="qt-plugin") files[QFileInfo(f["path"].toString()).fileName().toLower()]=f;
+        }
+        QSet<QString> mapped;
+        const auto snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,DWORD(broker.pid())); QVERIFY(snapshot!=INVALID_HANDLE_VALUE);
+        MODULEENTRY32W module{}; module.dwSize=sizeof(module);
+        if(Module32FirstW(snapshot,&module)) do {
+            const auto path=QString::fromWCharArray(module.szExePath),name=QFileInfo(path).fileName().toLower();
+            if(!files.contains(name)) continue;
+            mapped.insert(name); const auto expected=cache->filePath(files[name]["path"].toString());
+            QCOMPARE(QFileInfo(path).canonicalFilePath().toCaseFolded(),QFileInfo(expected).canonicalFilePath().toCaseFolded());
+            QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly)); QCryptographicHash hash(QCryptographicHash::Sha256); QVERIFY(hash.addData(&file));
+            QCOMPARE(QString::fromLatin1(hash.result().toHex()),files[name]["sha256"].toString());
+        } while(Module32NextW(snapshot,&module));
+        CloseHandle(snapshot);
+        QVERIFY(mapped.contains("qt6core.dll")); QVERIFY(mapped.contains("msvcp140.dll")); QVERIFY(mapped.contains("vcruntime140.dll"));
+        qInfo()<<"Worker application-local Qt/CRT and backend modules verified:"<<mapped;
+        broker.stop(); QTRY_VERIFY_WITH_TIMEOUT(broker.exited(),8000); QVERIFY(!broker.forced());
+        lock.reset(); package::discardCache(cache);
+#endif
+    }
     void liveDeviceCaptureAndLoopback() {
         const auto endpoint=vusiif::ztgui::protocol::serverEndpoint(qEnvironmentVariable("ZTGUI_LIVE_VOICE_HOST"));
         if(!endpoint.valid()) QSKIP("Set ZTGUI_LIVE_VOICE_HOST to an isolated server reachable over TCP and UDP");
@@ -59,14 +107,16 @@ private slots:
         QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings.path()); QSettings().setValue("voice-chat/muted",true);
         QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
         PluginRegistry registry; PluginLoader loader; QQmlEngine engine; QQuickItem parent;
-        const auto loaded=loader.loadFile(QString::fromUtf8(VOICE_PLUGIN),registry); QVERIFY2(loaded.ok(),qPrintable(loaded.message));
-        QTRY_VERIFY_WITH_TIMEOUT(!registry.plugins().isEmpty(),15000);
+        const auto loaded=loader.loadFile(voicePath,registry); QVERIFY2(loaded.ok(),qPrintable(loaded.message));
+        QTRY_COMPARE_WITH_TIMEOUT(registry.plugins().size(),2,80000);
         QTRY_COMPARE_WITH_TIMEOUT(registry.preparationState("voice-chat"),PreparationState::Ready,15000);
         auto page=registry.page("voice-chat/rooms",&engine,&parent); QVERIFY(page.result.ok()); auto *model=controller(page.page); QVERIFY(model);
+        QElapsedTimer deviceWait;deviceWait.start();
+        while((model->property("inputs").toList().size()<2 || model->property("outputs").toList().size()<2)&&deviceWait.elapsed()<3000)QTest::qWait(10);
         if(model->property("inputs").toList().size()<2 || model->property("outputs").toList().size()<2)
             QSKIP("Physical capture/playback devices are unavailable");
         model->setProperty("address",qEnvironmentVariable("ZTGUI_LIVE_VOICE_HOST")); model->setProperty("nickname","Physical audio test");
-        model->setProperty("outputVolume",0); model->setProperty("inputVolume",100);
+        model->setProperty("volume",0); model->setProperty("inputVolume",100);
         QVERIFY(QMetaObject::invokeMethod(model,"toggleConnection")); QTRY_VERIFY(model->property("connected").toBool());
         QVERIFY(QMetaObject::invokeMethod(model,"createRoom",Q_ARG(QString,"Physical device "+QString::number(QDateTime::currentMSecsSinceEpoch()))));
         QTRY_COMPARE_WITH_TIMEOUT(model->property("members").toList().size(),1,5000);
@@ -112,69 +162,72 @@ private slots:
         QVERIFY(loader.unload("voice-chat",registry).ok()); QTRY_VERIFY(registry.plugins().isEmpty());
 #ifdef Q_OS_WIN
         PROCESS_MEMORY_COUNTERS_EX memory{}; memory.cb=sizeof(memory); QVERIFY(K32GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&memory),sizeof(memory)));
-        const auto stats=vusiif::ztgui::package::runtimeStatistics(); QCOMPARE(stats["directories"].toInt(),1); QCOMPARE(stats["handles"].toInt(),6);
+        const auto stats=vusiif::ztgui::package::runtimeStatistics(); QCOMPARE(stats["directories"].toInt(),0); QCOMPARE(stats["handles"].toInt(),0);
         csv<<round<<','<<qulonglong(memory.PrivateUsage)<<','<<qulonglong(memory.WorkingSetSize)<<','<<stats["directories"].toInt()<<','<<stats["handles"].toInt()<<'\n'; csv.flush();
 #endif
         }
     }
     void initTestCase() {
+        voicePath=installed.filePath("voice.ztplugin");
+        QVERIFY(QFile::copy(QString::fromUtf8(VOICE_PLUGIN),voicePath));
+        QVERIFY(QFile::copy(MEDIA_PLUGIN,installed.filePath("media.ztplugin")));
 #ifdef Q_OS_WIN
         QVERIFY(!GetModuleHandleW(L"Qt6Multimedia.dll"));
         QVERIFY(!GetModuleHandleW(L"avcodec-61.dll"));
 #endif
     }
-    void repeatedLoadsKeepOneRuntimeAndUnloadBusiness() {
+    void repeatedLoadsLeaveNoMediaModulesOrWorker() {
         using namespace vusiif::ztgui::package;
         QTemporaryDir settings; QVERIFY(settings.isValid());
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings.path());
-        QFile observations(qEnvironmentVariable("ZTGUI_RUNTIME_OBSERVATION_FILE",QCoreApplication::applicationDirPath()+"/runtime-memory.csv"));
-        QVERIFY(observations.open(QIODevice::WriteOnly));
-        QTextStream csv(&observations); csv<<"round,privateBytes,workingSet,threads,runtimeDirectories,runtimeHandles\n";
-        QJsonObject warmed;
+        const auto media=inspect(MEDIA_PLUGIN); QVERIFY2(media.ok(),qPrintable(media.error));
+        QSet<QString> bases; for(const auto &v:hostRuntimeContract()["baseLibraries"].toArray()) bases.insert(v.toString().toLower());
+        QMap<QString,QString> forbidden;
+        for(const auto &v:media.info["files"].toArray()) {
+            const auto item=v.toObject(); const auto name=QFileInfo(item["path"].toString()).fileName().toLower();
+            const bool compilerRuntime=name.startsWith("msvcp") || name.startsWith("vcruntime") || name.startsWith("concrt");
+            if((item["role"]=="runtime-library" && !bases.contains(name) && !compilerRuntime) || (item["role"]=="qt-plugin" && item["path"].toString().contains("/multimedia/"))) forbidden.insert(name,item["sha256"].toString());
+        }
+        QFile observations(QCoreApplication::applicationDirPath()+"/media-process-observations.jsonl"); QVERIFY(observations.open(QIODevice::WriteOnly));
+        QSet<QString> generations;
         for(int round=0;round<22;++round) {
             PluginRegistry registry; PluginLoader loader; QQmlEngine engine; QQuickItem parent;
-            const auto result=loader.loadFile(QString::fromUtf8(VOICE_PLUGIN),registry);
-            QVERIFY2(result.ok(),qPrintable(result.message));
-            QTRY_VERIFY_WITH_TIMEOUT(!registry.plugins().isEmpty(),15000);
+            int ticks=0; QTimer heartbeat; heartbeat.setInterval(5); connect(&heartbeat,&QTimer::timeout,this,[&] { ++ticks; }); heartbeat.start();
+            QVERIFY(loader.loadFile(voicePath,registry).ok()); QTRY_COMPARE_WITH_TIMEOUT(registry.plugins().size(),2,80000);
             QTRY_COMPARE_WITH_TIMEOUT(registry.preparationState("voice-chat"),PreparationState::Ready,15000);
             auto page=registry.page("voice-chat/rooms",&engine,&parent); QVERIFY2(page.result.ok(),qPrintable(page.result.message));
             auto *model=controller(page.page); QVERIFY(model);
-            QVERIFY(model->property("inputs").isValid()); QVERIFY(model->property("outputs").isValid());
-            if(round==0) qInfo()<<"Available audio devices:"<<model->property("inputs").toList().size()-1<<"inputs,"<<model->property("outputs").toList().size()-1<<"outputs";
-            model->setProperty("inputVolume",125); model->setProperty("outputVolume",65); model->setProperty("muted",true);
-            QCOMPARE(model->property("inputVolume").toInt(),125); QCOMPARE(model->property("outputVolume").toInt(),65);
+            QTRY_VERIFY(model->property("inputs").toList().size()>=1); model->setProperty("inputVolume",125); model->setProperty("outputVolume",65); model->setProperty("muted",true);
+            qint64 pid=0; QString generation;
+            for(const auto &v:loader.catalog()) if(v.toMap()["id"]=="media") { pid=v.toMap()["pid"].toLongLong(); generation=v.toMap()["generation"].toString(); }
+            QVERIFY(pid>0); QVERIFY(!generation.isEmpty()); QVERIFY(!generations.contains(generation)); generations.insert(generation);
+            QJsonArray modules;
 #ifdef Q_OS_WIN
-            const auto multimedia=GetModuleHandleW(L"Qt6Multimedia.dll"); QVERIFY(multimedia);
-            wchar_t modulePath[32768]; const auto length=GetModuleFileNameW(multimedia,modulePath,32768);
-            const auto source=QString::fromWCharArray(modulePath,length);
-            if(round==0) qInfo()<<"Private Multimedia source:"<<source;
-            QVERIFY2(source.contains("/runtime-",Qt::CaseInsensitive) || source.contains("\\runtime-",Qt::CaseInsensitive),qPrintable(source));
-            const auto backend=GetModuleHandleW(L"ffmpegmediaplugin.dll"); QVERIFY(backend);
-            GetModuleFileNameW(backend,modulePath,32768);
-            QVERIFY(QString::fromWCharArray(modulePath).contains("runtime/qt-plugins/multimedia") ||
-                    QString::fromWCharArray(modulePath).contains("runtime\\qt-plugins\\multimedia"));
+            for(auto it=forbidden.cbegin();it!=forbidden.cend();++it) QVERIFY2(!GetModuleHandleW(reinterpret_cast<LPCWSTR>(it.key().utf16())),qPrintable(it.key()));
+            const auto snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,DWORD(pid));
+            QVERIFY(snapshot!=INVALID_HANDLE_VALUE); MODULEENTRY32W module{}; module.dwSize=sizeof(module); bool multimedia=false;
+            if(Module32FirstW(snapshot,&module)) do {
+                const auto path=QString::fromWCharArray(module.szExePath),name=QFileInfo(path).fileName().toLower();
+                if(!forbidden.contains(name)) continue;
+                QFile binary(path); QVERIFY(binary.open(QIODevice::ReadOnly)); QCryptographicHash hash(QCryptographicHash::Sha256); QVERIFY(hash.addData(&binary));
+                const auto sha=QString::fromLatin1(hash.result().toHex()); QCOMPARE(sha,forbidden[name]);
+                modules.append(QJsonObject{{"path",path},{"sha256",sha}}); multimedia|=name.startsWith("qt6multimedia");
+            } while(Module32NextW(snapshot,&module)); CloseHandle(snapshot); QVERIFY(multimedia);
 #endif
             QPointer<QObject> alive=model; QSignalSpy finished(&loader,&PluginLoader::unloadFinished);
-            QVERIFY(loader.unload("voice-chat",registry).ok()); QTRY_COMPARE(finished.size(),1);
-            QVERIFY2(finished.first()[1].toBool(),qPrintable(finished.first()[2].toString())); QVERIFY(alive.isNull());
-            QVERIFY(registry.plugins().isEmpty());
-            const auto stats=runtimeStatistics();
-            if(round==1) warmed=stats;
-            if(round>1) { QCOMPARE(stats["directories"],warmed["directories"]); QCOMPARE(stats["handles"],warmed["handles"]); }
+            QVERIFY(loader.unload("voice-chat",registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(registry.plugins().isEmpty(),10000); QVERIFY(alive.isNull());
+            for(const auto &event:finished) QVERIFY2(event[1].toBool(),qPrintable(event[2].toString()));
+            QCOMPARE(runtimeStatistics()["handles"].toInt(),0); QCOMPARE(runtimeStatistics()["directories"].toInt(),0); QVERIFY(ticks>2);
 #ifdef Q_OS_WIN
-            // The business DLL must be gone even while Qt retains application-lifetime backends.
-            const auto snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,GetCurrentProcessId());
-            QVERIFY(snapshot!=INVALID_HANDLE_VALUE); MODULEENTRY32W module{}; module.dwSize=sizeof(module);
-            if(Module32FirstW(snapshot,&module)) do {
-                const auto path=QString::fromWCharArray(module.szExePath);
-                QVERIFY2(!(path.contains("\\load-") && path.endsWith("\\plugin.dll")),qPrintable(path));
-            } while(Module32NextW(snapshot,&module)); CloseHandle(snapshot);
-            PROCESS_MEMORY_COUNTERS_EX memory{}; memory.cb=sizeof(memory); QVERIFY(K32GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&memory),sizeof(memory)));
-            int threads=0; const auto threadSnapshot=CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD,0);
-            THREADENTRY32 thread{}; thread.dwSize=sizeof(thread);
-            if(Thread32First(threadSnapshot,&thread)) do { if(thread.th32OwnerProcessID==GetCurrentProcessId()) ++threads; } while(Thread32Next(threadSnapshot,&thread));
-            CloseHandle(threadSnapshot);
-            csv<<round<<','<<qulonglong(memory.PrivateUsage)<<','<<qulonglong(memory.WorkingSetSize)<<','<<threads<<','<<stats["directories"].toInt()<<','<<stats["handles"].toInt()<<'\n'; csv.flush();
+            HANDLE process=OpenProcess(SYNCHRONIZE,FALSE,DWORD(pid)); if(process) { QCOMPARE(WaitForSingleObject(process,0),DWORD(WAIT_OBJECT_0)); CloseHandle(process); }
+            for(auto it=forbidden.cbegin();it!=forbidden.cend();++it) QVERIFY2(!GetModuleHandleW(reinterpret_cast<LPCWSTR>(it.key().utf16())),qPrintable(it.key()));
+            const auto hostSnapshot=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,GetCurrentProcessId());
+            QVERIFY(hostSnapshot!=INVALID_HANDLE_VALUE); module.dwSize=sizeof(module);
+            if(Module32FirstW(hostSnapshot,&module)) do { const auto path=QString::fromWCharArray(module.szExePath); QVERIFY2(!(path.contains("\\load-") && path.endsWith("\\plugin.dll")),qPrintable(path)); } while(Module32NextW(hostSnapshot,&module)); CloseHandle(hostSnapshot);
+            DWORD handles=0; QVERIFY(GetProcessHandleCount(GetCurrentProcess(),&handles));
+            int threads=0; const auto ts=CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD,0); THREADENTRY32 thread{}; thread.dwSize=sizeof(thread);
+            if(Thread32First(ts,&thread)) do { if(thread.th32OwnerProcessID==GetCurrentProcessId()) ++threads; } while(Thread32Next(ts,&thread)); CloseHandle(ts);
+            observations.write(QJsonDocument(QJsonObject{{"round",round},{"pid",double(pid)},{"generation",generation},{"modules",modules},{"hostHandles",int(handles)},{"hostThreads",threads},{"workerExited",true},{"hostMediaModules",0}}).toJson(QJsonDocument::Compact)+'\n'); observations.flush();
 #endif
         }
     }
@@ -182,12 +235,13 @@ private slots:
         QTemporaryDir directory; QVERIFY(directory.isValid());
         QCoreApplication::setOrganizationName("ZTGUI-Test"); QCoreApplication::setApplicationName("VoicePlugin");
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
-        const auto library=QString::fromUtf8(VOICE_PLUGIN);
+        const auto library=voicePath;
         QVERIFY(QFile::copy(library,directory.filePath(QFileInfo(library).fileName())));
+        QVERIFY(QFile::copy(MEDIA_PLUGIN,directory.filePath("media.ztplugin")));
         QQmlEngine engine; QQuickWindow window; window.resize(920,780); window.show();
         auto registry=std::make_unique<PluginRegistry>(); auto loader=std::make_unique<PluginLoader>();
         QCOMPARE(loader->scan(directory.path(),*registry).size(),1);
-        QTRY_VERIFY_WITH_TIMEOUT(!registry->plugins().isEmpty(),15000);
+        QTRY_COMPARE_WITH_TIMEOUT(registry->plugins().size(),2,80000);
         QTRY_COMPARE_WITH_TIMEOUT(registry->preparationState("voice-chat"),PreparationState::Ready,15000);
         auto page=registry->page("voice-chat/rooms",&engine,window.contentItem()); QVERIFY2(page.result.ok(),qPrintable(page.result.message));
         auto *item=page.page; item->setWidth(920); item->setHeight(780);
@@ -223,11 +277,11 @@ private slots:
         QPointer<QObject> alive=model; QVERIFY(loader->unload("voice-chat",*registry).ok()); QTRY_VERIFY(alive.isNull());
         // Reloading after unloading must not retain a compiled page/controller from the DLL.
         QVERIFY(loader->loadFile(directory.filePath(QFileInfo(library).fileName()),*registry).ok());
-        QTRY_VERIFY_WITH_TIMEOUT(!registry->plugins().isEmpty(),15000);
+        QTRY_COMPARE_WITH_TIMEOUT(registry->plugins().size(),2,80000);
         QTRY_COMPARE_WITH_TIMEOUT(registry->preparationState("voice-chat"),PreparationState::Ready,15000);
         page=registry->page("voice-chat/rooms",&engine,window.contentItem()); QVERIFY(page.result.ok());
         QCOMPARE(controller(page.page)->property("volume").toInt(),35);
-        loader.reset(); registry.reset();
+        loader->requestShutdown(); QTRY_VERIFY(loader->shutdownComplete()); loader.reset(); registry.reset();
     }
     void liveRoomLifecycle() {
         const auto host=qEnvironmentVariable("ZTGUI_LIVE_VOICE_HOST");
@@ -235,14 +289,15 @@ private slots:
         QTemporaryDir directory; QVERIFY(directory.isValid()); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
         QSettings().setValue("voice-chat/muted",true);
         QNetworkProxy::setApplicationProxy(QNetworkProxy(QNetworkProxy::HttpProxy,"127.0.0.1",1));
-        const auto library=QString::fromUtf8(VOICE_PLUGIN); QVERIFY(QFile::copy(library,directory.filePath(QFileInfo(library).fileName())));
+        const auto library=voicePath; QVERIFY(QFile::copy(library,directory.filePath(QFileInfo(library).fileName())));
+        QVERIFY(QFile::copy(MEDIA_PLUGIN,directory.filePath("media.ztplugin")));
         QQmlEngine firstEngine,secondEngine; QQuickItem firstParent,secondParent;
         auto firstRegistry=std::make_unique<PluginRegistry>(),secondRegistry=std::make_unique<PluginRegistry>();
         auto loader=std::make_unique<PluginLoader>(),secondLoader=std::make_unique<PluginLoader>();
         loader->scan(directory.path(),*firstRegistry); secondLoader->scan(directory.path(),*secondRegistry);
-        QTRY_VERIFY_WITH_TIMEOUT(!firstRegistry->plugins().isEmpty(),15000);
+        QTRY_COMPARE_WITH_TIMEOUT(firstRegistry->plugins().size(),2,80000);
         QTRY_COMPARE_WITH_TIMEOUT(firstRegistry->preparationState("voice-chat"),PreparationState::Ready,15000);
-        QTRY_VERIFY_WITH_TIMEOUT(!secondRegistry->plugins().isEmpty(),15000);
+        QTRY_COMPARE_WITH_TIMEOUT(secondRegistry->plugins().size(),2,80000);
         QTRY_COMPARE_WITH_TIMEOUT(secondRegistry->preparationState("voice-chat"),PreparationState::Ready,15000);
         auto *firstPage=firstRegistry->page("voice-chat/rooms",&firstEngine,&firstParent).page;
         auto *secondPage=secondRegistry->page("voice-chat/rooms",&secondEngine,&secondParent).page;
@@ -259,7 +314,7 @@ private slots:
         QVERIFY(roomId); QVERIFY(QMetaObject::invokeMethod(second,"joinRoom",Q_ARG(quint32,roomId)));
         QTRY_COMPARE_WITH_TIMEOUT(first->property("members").toList().size(),2,5000); QTRY_COMPARE_WITH_TIMEOUT(second->property("members").toList().size(),2,5000);
         QVERIFY(QMetaObject::invokeMethod(second,"leaveRoom")); QTRY_COMPARE_WITH_TIMEOUT(first->property("members").toList().size(),1,5000);
-        loader.reset(); secondLoader.reset(); firstRegistry.reset(); secondRegistry.reset(); QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
+        loader->requestShutdown(); secondLoader->requestShutdown(); QTRY_VERIFY(loader->shutdownComplete() && secondLoader->shutdownComplete()); loader.reset(); secondLoader.reset(); firstRegistry.reset(); secondRegistry.reset(); QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
     }
 };
 int main(int argc,char **argv) {

@@ -1,108 +1,44 @@
-# 语音插件与服务端
+# 语音客户端插件
 
-## 架构与边界
+语音插件 `0.3.0` 是独立 Qt Quick/QML 项目，只链接安装后的宿主 API `0.5-alpha` 和媒体 API `2.x`。ZTPK3 清单声明前置 `media >=2.0.0 <3.0.0` 及 `media.session / 1`；DLL 不导入 Qt Multimedia、FFmpeg 或 Opus，也不链接媒体实现。媒体项目及打包见[媒体文档](../../../media/client/docs/media.md)。
 
-`src/plugins/voice-chat/client/` 是独立 Qt Quick/QML 动态插件，服务端是 `src/plugins/voice-chat/server/` 下由 `zt-server` 加载的 `.so`。双方共用同项目的 `shared/Protocol.h`，统一路由编解码由公开 SDK 提供。客户端只依赖公开 SDK；服务端插件只依赖自己的公开 SDK，均不包含宿主实现。
+VoicePage.qml 展示房间、成员和音频配置，页面持有 VoiceController；VoiceSession 保留现有 TCP/UDP 与房间业务。网络使用事件循环异步运行，音频实现全部在共享媒体工作进程中。VoiceAudio 仅在语音项目内部将业务成员映射为通用发送／接收音轨，不作为兼容 API 对外提供。切换菜单保留页面和会话。插件的独立异步停止接口先断开网络并关闭媒体租约，确认排空后才允许页面、工厂及 DLL 销毁。
 
-页面由 `VoicePage.qml` 展示、页面持有的 `VoiceController` 注入状态和操作，网络／音频仍在 `VoiceSession` 工作线程运行。QML资源随DLL部署，不依赖宿主内部QML组件。页面销毁同步停止线程后才允许卸载DLL。
+首次服务器地址为空；填入地址和打开面板不会联网，点击连接才建立会话。保存地址、昵称、设备 ID、静音和音量；异步设备枚举完成前保留已保存的设备 ID。设备 DTO 不暴露媒体对象，热插拔由 worker 通知；缺失的设备在界面回退到系统默认；列表刷新和热插拔不重启采集，需要用户重新选择设备或明确停止后启动。
 
-2026-10-13 客户端UI优化后的DLL使用SDK0.3、动态Qt6.8.3和MSVC2022/x64独立构建，发布到 `dist/plugins/ztgui_voice_chat.dll`。Windows原生平台验证动态加载、页面／音频浮窗、显式地址端口连接、断开、卸载与重载；音频测试通过。这是分离前的验证记录；当前媒体依赖随 v2 `.ztplugin` 交付。本轮未连接真实服务器或进行多人听感验证。
+昵称留空时通过宿主公开的 ZeroTier 查询异步取得本机 ID 作为昵称；查询失败提示手动填写，取消连接或卸载会取消待处理查询。音频设置的麦克风测试将采集的 Opus 帧送回本地媒体服务播放，测试期间不发送采集帧到房间；再次点击、关闭设置、离开页面或卸载会停止测试并清除回放缓冲。测试临时绕过麦克风／耳机静音，保留已保存的静音与音量偏好，结束后恢复原状态。成员音量只能通过成员行的左键／右键浮窗调整；成员退出时浮窗自动关闭。
 
-客户端首次地址为空。服务器地址未写端口时使用 TCP `18100`，支持 `域名:端口`、`IPv4:端口`、`[IPv6]:端口` 与裸 IPv6；UDP 使用服务器握手返回的端口。地址解析共用公开SDK的 `protocol::serverEndpoint`，旧独立端口偏好不再覆盖默认值。打开面板或填写地址均不联网；点击连接后才建立会话。上次地址、昵称和设备偏好会保存，但不会自动连接。当前部署目标 `10.10.10.1` 不写入客户端默认值。TCP 和 UDP 均直接连接，不使用系统 HTTP/SOCKS 代理。
+## 协议与行为兼容
 
-房间开放且临时，创建者直接加入，一个会话只能加入一个房间。最后成员离开后删除，服务重启清空。默认最多32个房间、每房间16人、256个连接。首版面向 ZeroTier / 可信内网，无账户、密码、房主控制、TLS、录音、回声消除和自动重连。
+成员行浮窗支持保存或清空本地备注，显示顺序为本地备注、服务器昵称、ZeroTier ID。备注通过公开 `HostServices::files()` 原子保存到 `plugins-data/语音聊天/member-remarks.json`，按小写的十六进制 ZeroTier ID 匹配，不上传服务器；退出房间、重连或修改昵称不影响备注。损坏文件保留且禁止覆盖，写入失败保留原备注并显示错误。
 
-加入房间并完成 UDP 注册后使用 `QAudioSource` / `QAudioSink`；设备原生 PCM 格式转换为单声道48 kHz，Opus 编码为20 ms、24 kbps。服务端仅转发，客户端按发送者维护解码器、60 ms缓冲和丢包补偿，混音后限幅输出。设备变化时重新打开音频，断线或退出立即停止并清空会话。麦克风静音不发送音频，耳机静音仍维护接收流。
+连接时通过公开 ZeroTier 服务查询本机 ID，`hello.data.ztid` 和服务器成员列表的 `ztid` 是新增可选字段（十位十六进制），业务协议版本仍为 1。旧服务端忽略新字段；连接旧服务端时，只有昵称本身为 ZeroTier ID 的成员能够设置稳定备注，其余成员的备注入口禁用。自报 ID 沿用现有可信内网模型，不提供身份认证。
 
-## 启动预处理与首次页面卡顿
+控制 TCP 默认 `18100`，支持域名／IPv4 的显式端口、`[IPv6]:端口` 及裸 IPv6；UDP 端口来自服务器握手。地址使用公开 SDK 的 serverEndpoint；旧独立端口偏好不覆盖默认值。TCP/UDP 直接连接，不使用 HTTP/SOCKS 代理。不会自动连接、自动重连或在媒体进程重启后恢复录音。
 
-语音客户端、共享协议和服务端类型位于 `vusiif::ztgui::voice_chat`。插件实现 SDK 的 `vusiif::ztgui::api::PluginInterface` 和 `PluginLifecycleInterface`，只在 `onCreate(util::HostServices&, const util::CancellationToken&)` 返回设备初始化任务；工具类型属于 `vusiif::ztgui::util`。启动时先注册菜单并置灰，后台初始化 Qt Multimedia 后端及枚举输入/输出设备，完成后启用菜单。关闭时在枚举前、输入枚举后和输出枚举后检查取消请求，取消时不发布部分设备快照；单次Qt设备枚举不可强行中断，宿主异步等待它返回，GUI继续响应。该步骤不联网，也不启动录音或播放设备；连接服务器和入房仍由用户操作触发。页面只读取加锁的设备快照，设备变化时在会话工作线程重新枚举，再通过信号更新下拉列表。
+房间开放且临时，一个会话只能加入一个房间，最后成员离开后删除。语音协议与路由 ID `voice-chat` 保持，客户端使用同项目 `shared/Protocol.h`；Java 服务端在 `VoiceProtocol.java` 中按字节兼容实现并继续仅转发。Java 迁移后的部署方式见[服务端文档](../../server/docs/voice-chat.md)。
 
-Windows x64 / Qt6.8.3 本机诊断记录：旧实现DLL加载约3 ms，首次页面工厂约4012 ms，再次创建约4 ms；独立测量首次输出设备查询约4134 ms，先枚举设备后页面创建约10 ms。瓶颈是旧页面构造在GUI线程调用 `QMediaDevices::audioOutputs()`，触发后端和系统音频设备冷初始化。`QMediaDevices` 对象本身构造约0 ms；连接设备变化信号也可能触发懒初始化，因此页面仅在缓存准备好后安装监听。
+入房并完成 UDP 注册后，才通过媒体 API 启动音频。PCM 转换为单声道 48 kHz，Opus 为 20 ms、24 kbps；每个发送者独立解码、约 60 ms 缓冲和丢包补偿，混音后限幅输出。输入、总输出和成员本机音量仍为 0–200%；麦克风静音不发送，耳机静音仍维护接收流。退房／断线立即请求停止音频，卸载等待远端资源关闭。
 
-数据为本机观测，设备/驱动不同会改变耗时。Qt6.8.3 的设备查询调用平台媒体集成层，其getter支持跨线程使用：[Qt源码](https://github.com/qt/qtmultimedia/blob/v6.8.3/src/multimedia/qmediadevices.cpp)。任务完成前宿主GUI保持响应；关闭程序时等待预处理结束，避免后台仍在执行插件代码时卸载动态库。
+面向 ZeroTier／可信内网，尚无账户、密码、房主控制、TLS、录音、回声消除或自动重连。ZeroTier 节点列表不等同于应用联系人或媒体服务发现。
 
-新实现通过实际宿主加载器再次测量：启动预处理约4495 ms，期间10 ms的GUI心跳触发448次，首次页面创建约10 ms，第二次约4 ms。耗时已移出GUI线程，初始化成本仍存在，完成前菜单暂不可点击。
-
-客户端插件菜单支持运行时加载／卸载；卸载后持久禁用并保留数据，服务端仍启动加载。正式安装文件使用 `.ztplugin`，裸动态库只作为编译中间产物。
-
-## 独立构建与打包
-
-Windows 宿主和插件需要匹配的动态 Qt 6.8+（Quick、Qml、Network、Multimedia）、MSVC 2022 x64、Release。在仓库根执行：
+## 独立构建
 
 ```powershell
-$qtSdk = 'C:/Qt/6.8.3/msvc2022_64'
-cmake -S src/client/api -B cmake-build-api -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$qtSdk"
-cmake --build cmake-build-api --config Release --target ztplugin_pack
-cmake --install cmake-build-api --config Release --prefix dist/ZTGUI-api-v0.4
-$apiSdk = (Resolve-Path dist/ZTGUI-api-v0.4).Path
-cmake -S src/plugins/voice-chat/client -B cmake-build-voice-client -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_PREFIX_PATH=$apiSdk;$qtSdk"
-cmake --build cmake-build-voice-client --config Release --parallel
+cmake -S client -B build-client "-DCMAKE_PREFIX_PATH=$hostSdk;$mediaSdk;$qtSdk"
+cmake --build build-client --config Release --target ztgui_voice_chat ztgui_voice_chat_package
 ```
 
-客户端正式产物：`dist/plugins/ztgui_voice_chat.ztplugin`；裸 DLL 仅留在构建目录。SDK/API版本为`0.4`，插件自身版本为`0.1.0`。插件依赖固定 Opus `1.6.1` 源码下载并验证 SHA256；离线构建可传入 `-DFETCHCONTENT_SOURCE_DIR_OPUS=/path/to/opus-1.6.1`。Opus 静态链接进插件，宿主仍使用动态 Qt。
+在 `voice-chat/` 项目根或仓库外完整副本执行，只需 client/、shared/ 和安装后的 SDK。Qt 6.8+ 的 Quick/Qml/Network 与 MSVC／架构／构建模式须匹配宿主；语音项目不再下载或编译 Opus。
 
-明确要求构建语音插件时，执行 `./.agent/skills/ztgui-build/scripts/build-windows.ps1 -QtRoot $qtSdk -BuildVoicePlugin`。脚本默认只构建并压缩主程序，API 变化时更新 SDK，不自动编译插件。指定语音插件后组合入口调用独立插件脚本，主程序部署不受插件影响。语音包位于 `dist/plugins/ztgui_voice_chat.ztplugin`，可读许可证位于 `ztgui_voice_chat-licenses/`。将包导入客户端或复制到 `ZTGUI.exe` 旁的 `plugins/`，通过客户端插件菜单可运行时加载／卸载；测试可执行文件和模拟 CLI 不进入发行包。
+仓库测试 `src/tests/voice-chat/VoiceUiTests.cpp`，覆盖协议边界、配置和面板交互；配置时加 `-DVOICE_BUILD_TESTS=ON`，构建 `voice_ui_tests`，用 `voice_ui_tests.exe -platform windows` 验证原生界面。测试仅在完整仓库启用；正式插件可复制到仓库外后使用安装 SDK 独立构建。媒体算法测试由媒体项目自己的 tests/ 维护，宿主 src/tests/ 仅保留跨插件集成及通用框架测试。
 
-脚本先部署到干净暂存目录，完成后替换发行目录；旧目录保留为同级 `windows-x64.previous-<随机编号>` 备份，其中的日志、插件数据及额外插件不会带入新包。语音 UDP 初始化失败提示使用服务器返回的实际 UDP 端口，可据此检查自定义端口配置。
+仓库通用入口：
 
-服务端使用新宿主与语音 `.so`，独立构建、容量配置、部署和回滚由[服务端插件文档](../../server/docs/voice-chat.md)维护。本次部署目录 `/root/Server/ZTServer`，unit 为 `zt-server.service`；旧 `ztgui-voice.service` 停止并禁用，保留用于回滚。
-
-## 协议 v1
-
-所有消息先封装统一 `ZTS1` 外层，路由为 `voice-chat`。TCP 使用四字节大端长度帧，业务负载为 UTF-8 JSON，单条最大64 KiB；不再使用换行分帧。请求形式为 `{v:1,id:<整数>,op:<操作>,data:<对象>}`；响应为 `{v:1,id:<对应值>,ok:<布尔>,data:<结果>}`，失败为 `error:<错误码>`。支持拆包和粘包。
-
-| 操作 | 请求 data | 成功 data |
-| --- | --- | --- |
-| `hello` | `nickname` | `session`、`udpPort`、`rooms` |
-| `rooms` | 空对象 | 房间数组 |
-| `create` | `name` | `room`快照、十六进制`token` |
-| `join` | 数字`room` ID | `room`快照、十六进制`token` |
-| `leave` | 空对象 | 空对象 |
-| `mute` | 布尔`muted` | 空对象 |
-| `ping` | 空对象 | 空对象 |
-
-房间列表对象含 `id,name,members,capacity`；单房间快照含 `id,name,members`，其中成员含 `id,nickname,muted`。服务端事件为 `{v:1,event:"rooms"或"members",data:<列表或快照>}`。客户端5秒心跳；服务端与客户端均以15秒无控制响应判定超时。
-
-UDP 内层业务包最大1200字节，外层总包不超过1232字节；业务整数为大端，内层头部固定30字节：
-
-| 偏移 | 字节数 | 内容 |
-| --- | --- | --- |
-| 0 | 4 | ASCII `ZTV1` |
-| 4 | 1 | 版本1 |
-| 5 | 1 | 类型：1注册、2确认、3音频 |
-| 6 | 16 | 房间语音凭据 |
-| 22 | 4 | 发送者会话ID |
-| 26 | 4 | 帧序号，允许32位回绕 |
-| 30 | 可变 | 单个20 ms Opus包，仅音频类型携带 |
-
-入房时服务器生成随机凭据，退房立即作废。UDP注册要求来源IP与TCP连接一致，首次有效注册绑定端口，确认返回原会话ID/凭据。音频仅接受已绑定端点和有效房间成员，转发时将凭据替换为接收者凭据，发送者ID保持不变，不回传发送者。客户端每秒重试注册，5次未确认显示不可达，退出房间后可重试。
-
-控制请求每会话每秒最多30次，UDP最多100包；发送积压超过256 KiB关闭慢连接。音频队列、每发送者抖动缓冲和播放积压均有上限，过期包丢弃以避免延迟持续增加。日志不记录语音负载与凭据。
-
-## 验证
-
-自动化测试位于 `src/tests/plugins/` 和 `src/tests/voice-chat/`。音频测试需以 `-DVOICE_BUILD_TESTS=ON` 配置客户端，然后运行 `ctest --test-dir cmake-build-voice-client -C Release --output-on-failure`。宿主配置 `-DZEROTIER_BUILD_TESTS=ON -DZTGUI_VOICE_PLUGIN_PATH=/absolute/path/to/ztgui_voice_chat.ztplugin` 可测试真实插件面板；`ZTGUI_LIVE_VOICE_HOST` 可指定已部署服务测试真实房间操作，测试以麦克风静音运行。
-
-```bash
-python3 src/tests/voice-chat/ServerTests.py --binary /path/to/zt-server
-python3 src/tests/voice-chat/ServerTests.py --host 10.10.10.1 --port 18100
+```powershell
+& ./.agents/skills/ztgui-build/scripts/build-plugin-windows.ps1 -PluginDirectory src/plugins/voice-chat/client -Target ztgui_voice_chat -QtRoot $qtSdk -ApiSdk $hostSdk -AdditionalSdk $mediaSdk
 ```
 
-独立服务测试包括容量和15秒超时清理；已部署服务测试只创建临时测试房间，不修改容量和服务状态。音频测试验证合成音频、PCM转换、流式重采样、序号回绕、乱序和丢包。真实麦克风/耳机通话效果及macOS仍需实机验收。
+正式产物为 `build/dist/plugins/ztgui_voice_chat-v0.3.0.ztplugin`（版本从包声明读取；中间构建文件保留固定名），同时安装独立媒体包；缺少或明确禁用媒体时不会执行语音入口。卸载语音保留包和用户数据，自动媒体无其他占用时退出；用户单独加载的媒体保持至用户卸载。旧 0.1.0 进程内媒体包必须迁移，不能用旧常驻路径回退。
 
-## 音量与新封装
-
-客户端输入、总输出及其他成员的本机播放音量支持 0–200%；输入和成员默认100%，总输出迁移既有80%设置。输入在编码前增益，成员在混音前增益，总输出在混音后增益并最后限幅；静音优先，不修改系统音量。输入和总输出持久化，成员音量只对本机、当前房间会话有效，退房清空，切换设备保留。
-
-两端技术 ID 为 `voice-chat`，显示名和数据目录仍为“语音聊天”。协议业务版本仍为1，路由 ID 同步改变；客户端入口／生命周期 IID 为 /3.0，服务端 /2.0，两端旧动态库需重编。SDK CMake 辅助函数构建后生成 `ztgui_voice_chat.ztplugin` 或 `ztserver_voice_chat.ztplugin`，正式宿主只加载该封装包；没有接入多中转音频传输。
-
-2026-10-14：语音客户端及Linux服务端已重新编译为API0.3的加密 .ztplugin，分别发布到 dist/plugins/ztgui_voice_chat.ztplugin 和 dist/server-plugins/ztserver_voice_chat.ztplugin。Windows使用安装后的客户端SDK、Qt6.8.3/MSVC2022/x64 Release；真实封装包的动态加载、页面创建、音频设置、连接／断开、异步卸载和再次加载通过，音频／页面源码测试两组通过。Linux Qt6.4.2服务端插件的5项隔离语音集成全部通过，涵盖容量、超时、UDP隔离、静音和过期凭据。未连接已部署服务器，未进行真实多人麦克风／耳机听感验收。
-
-## 媒体库随包交付
-
-安装更新后的 API 0.4 SDK 后，可仅执行 `.agent/skills/ztgui-build/scripts/build-plugin-windows.ps1 -PluginDirectory src/plugins/voice-chat/client -Target ztgui_voice_chat -QtRoot $qtSdk -ApiSdk dist/ZTGUI-api-v0.4`。默认输出单个 v2 `.ztplugin`，包含 Multimedia、Kit 默认媒体后端、实际 FFmpeg 和 Qt/FFmpeg/Opus 许可证。基础 Qt 由宿主共享、Opus 静态链接。Kit 需匹配宿主 qtBuildId；Linux 客户端/macOS 媒体部署未验证。加载寿命和 Kit 许可证要求见[运行依赖分离](../../../../../docs/plugin-runtime-separation.md)。
-
-2026-10-14 运行依赖分离验收：v2 正式产物、独立 SDK 构建、实际加载结果和明确未验证的平台/听感项目统一记录在[本轮验收](../../../../../docs/plugin-runtime-separation.md#验证记录)，其中客户端完成真实设备零增益回送及20轮热卸载。
-
-2026-10-14 版本升级：宿主0.4.1、SDK0.4，当前插件须使用API0.4重编；客户端/3.0和服务端/2.0 IID保持不变，上方API0.3记录为历史验证。
+Windows 原生 UI、真实设备的本机零增益回送及 2 轮暖机／20 轮模块检查见[本轮验证](../../../../../docs/plugin-services-validation.md)。未在本轮重新连接生产服务器或进行多人听感验收；Linux 客户端和 macOS 的 worker 部署／权限未验证。

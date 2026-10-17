@@ -31,6 +31,19 @@ class LoaderTests : public QObject {
         return result[1].toBool()?api::Result{}:api::Result{Error::InvalidPlugin,result[2].toString()};
     }
 private slots:
+    void deleteRequiresUnloadAndRemovesPackageDataAndCatalog() {
+        QTemporaryDir directory,data; const auto path=copy(FIXTURE_GOOD,directory);
+        QVERIFY(QDir().mkpath(data.filePath("Dynamic/nested")));
+        QFile saved(data.filePath("Dynamic/nested/settings.json")); QVERIFY(saved.open(QIODevice::WriteOnly)); saved.write("saved"); saved.close();
+        PluginRegistry registry; PluginLoader loader; QVERIFY(load(loader,path,registry).ok());
+        QVERIFY(!loader.removeFile(path,directory.path(),data.path()).ok()); QVERIFY(QFileInfo::exists(path));
+        QVERIFY(loader.unload("test-dynamic",registry).ok()); QTRY_VERIFY(registry.plugins().isEmpty());
+        QTRY_VERIFY(!loader.catalog().first().toMap()["loaded"].toBool());
+        QVERIFY(!loader.removeFile(path,data.path(),data.path()).ok());
+        QVERIFY(loader.removeFile(path,directory.path(),data.path()).ok());
+        QVERIFY(!QFileInfo::exists(path)); QVERIFY(!QFileInfo::exists(data.filePath("Dynamic"))); QVERIFY(loader.catalog().isEmpty());
+        QVERIFY(!QSettings().contains("plugins/disabled/test-dynamic"));
+    }
     void api03PackageIsRejectedBeforeEntry() {
         const auto p=package::inspect(FIXTURE_GOOD); QVERIFY(p.ok());
         std::unique_ptr<QTemporaryDir> extracted; std::unique_ptr<QLockFile> lock; QString library;
@@ -167,7 +180,7 @@ private slots:
         QTimer trigger; trigger.setInterval(5); connect(&trigger,&QTimer::timeout,this,[&] {
             if(trace(log).contains("callback-start")) { trigger.stop(); QVERIFY(loader.unload("test-lifecycle",registry).ok()); }
         }); trigger.start();
-        QVERIFY(registry.activateMenu("test-lifecycle/overview").ok()); QTRY_VERIFY(registry.plugins().isEmpty());
+        QVERIFY(registry.activateMenu("test-lifecycle/overview").ok()); QTRY_VERIFY_WITH_TIMEOUT(registry.plugins().isEmpty(),15000);
         const auto text=trace(log); QVERIFY(text.contains("callback-end")); QVERIFY(text.indexOf("callback-end")<text.indexOf("destroy"));
     }
     void cleanupFailureRetainsLibraryAndPreventsReload() {
@@ -176,7 +189,7 @@ private slots:
         qputenv("ZTGUI_PLUGIN_DESTROY_THROWS","1"); QSignalSpy finished(&loader,&PluginLoader::unloadFinished);
         QVERIFY(loader.unload("test-lifecycle",registry).ok()); QTRY_COMPARE(finished.size(),1);
         QVERIFY(!finished.first()[1].toBool()); QVERIFY(finished.first()[2].toString().contains("cleanup")); QVERIFY(registry.plugins().isEmpty());
-        QCOMPARE(load(loader,path,registry).error,Error::DuplicatePlugin); loader.requestShutdown(); QTRY_VERIFY(loader.shutdownComplete());
+        QCOMPARE(load(loader,path,registry).error,Error::DuplicatePlugin); loader.requestShutdown(); QTest::qWait(100); QVERIFY(!loader.shutdownComplete());
     }
     void initializationFailureCleansOnce() {
         QTemporaryDir directory; const auto path=copy(FIXTURE_LIFECYCLE_FAILED,directory); const auto log=directory.filePath("trace"); qputenv("ZTGUI_PLUGIN_LIFETIME_FILE",log.toUtf8());

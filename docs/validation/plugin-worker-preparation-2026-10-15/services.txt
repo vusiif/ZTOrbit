@@ -1,0 +1,57 @@
+********* Start testing of PluginServicesTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : PluginServicesTests::initTestCase()
+PASS   : PluginServicesTests::versionsAndGraph()
+PASS   : PluginServicesTests::boundedBinaryWire()
+PASS   : PluginServicesTests::missingDisabledAndDuplicateNeverExecuteConsumer()
+QINFO  : PluginServicesTests::sharedProviderAndReverseStop() [worker] Owned process started; pid 30652
+QINFO  : PluginServicesTests::sharedProviderAndReverseStop() [worker] Owned process started; pid 37080
+PASS   : PluginServicesTests::sharedProviderAndReverseStop()
+QINFO  : PluginServicesTests::failedConsumerRollsBackAutomaticProvider() [worker] Owned process started; pid 19068
+QINFO  : PluginServicesTests::failedConsumerRollsBackAutomaticProvider() [插件] fixture-a onCreate 0 ms
+PASS   : PluginServicesTests::failedConsumerRollsBackAutomaticProvider()
+QINFO  : PluginServicesTests::explicitProviderSurvivesFailedConsumer() [worker] Owned process started; pid 15580
+QINFO  : PluginServicesTests::explicitProviderSurvivesFailedConsumer() [插件] fixture-a onCreate 0 ms
+PASS   : PluginServicesTests::explicitProviderSurvivesFailedConsumer()
+QINFO  : PluginServicesTests::stopFailureRetainsProviderAndCanRetry() [worker] Owned process started; pid 35628
+PASS   : PluginServicesTests::stopFailureRetainsProviderAndCanRetry()
+QINFO  : PluginServicesTests::crashInvalidatesAndNewInstanceHasNewGeneration() [worker] Owned process started; pid 16996
+QWARN  : PluginServicesTests::crashInvalidatesAndNewInstanceHasNewGeneration() [worker] Worker exited (7, 0)
+QINFO  : PluginServicesTests::crashInvalidatesAndNewInstanceHasNewGeneration() [worker] Owned process started; pid 35028
+PASS   : PluginServicesTests::crashInvalidatesAndNewInstanceHasNewGeneration()
+QINFO  : PluginServicesTests::cancellationWhileWaitingForHandshakeRollsBack() [worker] Owned process started; pid 34532
+PASS   : PluginServicesTests::cancellationWhileWaitingForHandshakeRollsBack()
+PASS   : PluginServicesTests::cancellationBeforeIdentityIsKnownNeverExecutesEntry()
+PASS   : PluginServicesTests::serviceDeclarationsAreAuthenticatedAndCannotDowngrade()
+QINFO  : PluginServicesTests::workerCapabilitiesMustMatchAuthenticatedManifest() [worker] Owned process started; pid 19200
+QWARN  : PluginServicesTests::workerCapabilitiesMustMatchAuthenticatedManifest() [worker] Worker handshake/capability mismatch
+PASS   : PluginServicesTests::workerCapabilitiesMustMatchAuthenticatedManifest()
+QINFO  : PluginServicesTests::newConsumerWaitsForAutomaticProviderStop() [worker] Owned process started; pid 20124
+QINFO  : PluginServicesTests::newConsumerWaitsForAutomaticProviderStop() [worker] Owned process started; pid 38508
+PASS   : PluginServicesTests::newConsumerWaitsForAutomaticProviderStop()
+QINFO  : PluginServicesTests::rejectedCallbackWithHostContextKeepsDllUntilReturn() [worker] Owned process started; pid 12680
+PASS   : PluginServicesTests::rejectedCallbackWithHostContextKeepsDllUntilReturn()
+QINFO  : PluginServicesTests::closeCancelsDeferredRejectionsEvenWithHostContext() [worker] Owned process started; pid 20860
+PASS   : PluginServicesTests::closeCancelsDeferredRejectionsEvenWithHostContext()
+QINFO  : PluginServicesTests::stopTimeoutTerminatesOwnedTree() [worker] Owned process started; pid 21768
+QWARN  : PluginServicesTests::stopTimeoutTerminatesOwnedTree() [worker] Forced owned process termination
+PASS   : PluginServicesTests::stopTimeoutTerminatesOwnedTree()
+PASS   : PluginServicesTests::hostDeathTerminatesOwnedTree()
+QINFO  : PluginServicesTests::workerUsesApplicationLocalRuntime() [worker] Owned process started; pid 37696
+PASS   : PluginServicesTests::workerUsesApplicationLocalRuntime()
+QINFO  : PluginServicesTests::workerFailureSurvivesForcedCleanup() [worker] Owned process started; pid 12184
+QWARN  : PluginServicesTests::workerFailureSurvivesForcedCleanup() [worker] Worker handshake/capability mismatch
+QWARN  : PluginServicesTests::workerFailureSurvivesForcedCleanup() [worker] Forced owned process termination
+PASS   : PluginServicesTests::workerFailureSurvivesForcedCleanup()
+QINFO  : PluginServicesTests::workerDiagnosticsReachHostWithoutConsole() [worker] Owned process started; pid 10652
+PASS   : PluginServicesTests::workerDiagnosticsReachHostWithoutConsole()
+QINFO  : PluginServicesTests::slowPreparationDoesNotPublishOrRunConsumerEarly() [worker] Owned process started; pid 35912
+QINFO  : PluginServicesTests::slowPreparationDoesNotPublishOrRunConsumerEarly() [worker] IPC authenticated; waiting for service preparation; pid 35912
+QINFO  : PluginServicesTests::slowPreparationDoesNotPublishOrRunConsumerEarly() [worker] Service preparation completed; pid 35912
+PASS   : PluginServicesTests::slowPreparationDoesNotPublishOrRunConsumerEarly()
+QINFO  : PluginServicesTests::preparationRemainsCancellableAfterHandshake() [worker] Owned process started; pid 13272
+QINFO  : PluginServicesTests::preparationRemainsCancellableAfterHandshake() [worker] IPC authenticated; waiting for service preparation; pid 13272
+PASS   : PluginServicesTests::preparationRemainsCancellableAfterHandshake()
+PASS   : PluginServicesTests::cleanupTestCase()
+Totals: 24 passed, 0 failed, 0 skipped, 0 blacklisted, 43813ms
+********* Finished testing of PluginServicesTests *********

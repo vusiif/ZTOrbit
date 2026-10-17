@@ -4,7 +4,7 @@
 
 - `client/`：独立编译的 ZTGUI 动态插件。
 - `server/`：由 `zt-server` 加载的独立服务端插件。
-- `shared/`：两端共用的 `Protocol.h` 语音协议。
+- `shared/`：客户端与归档 C++ 服务端共用的 `Protocol.h`；Java 服务端在 `VoiceProtocol.java` 中按字节兼容重新实现。
 
 宿主的公开工具和通用路由协议仍通过各自 SDK 提供。
 

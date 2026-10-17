@@ -1,0 +1,153 @@
+********* Start testing of VoicePluginTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : VoicePluginTests::initTestCase()
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] Owned process started; pid 4176
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] IPC authenticated; waiting for service preparation; pid 4176
+QWARN  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] Service preparation completed; pid 4176
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() Worker application-local Qt/CRT and backend modules verified: QSet("vcruntime140_1.dll", "avformat-61.dll", "avutil-59.dll", "qt6core.dll", "qt6multimedia.dll", "swresample-5.dll", "msvcp140.dll", "qwindows.dll", "avfilter-10.dll", "msvcp140_2.dll", "vcruntime140.dll", "openh264.dll", "avcodec-61.dll", "msvcp140_1.dll", "ffmpegmediaplugin.dll", "swscale-8.dll", "qt6gui.dll", "qt6network.dll")
+PASS   : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt()
+QINFO  : VoicePluginTests::liveDeviceCaptureAndLoopback() [worker] Owned process started; pid 27920
+QINFO  : VoicePluginTests::liveDeviceCaptureAndLoopback() [worker] IPC authenticated; waiting for service preparation; pid 27920
+QWARN  : VoicePluginTests::liveDeviceCaptureAndLoopback() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::liveDeviceCaptureAndLoopback() [worker] Service preparation completed; pid 27920
+QINFO  : VoicePluginTests::liveDeviceCaptureAndLoopback() Physical microphone frames captured and looped back: 10
+PASS   : VoicePluginTests::liveDeviceCaptureAndLoopback()
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 20084
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 20084
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 20084
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 25712
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 25712
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 25712
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 23700
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 23700
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 23700
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 26560
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 26560
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 26560
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 21036
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 21036
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 21036
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 16656
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 16656
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 16656
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 21992
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 21992
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 21992
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 14932
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 14932
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 14932
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 27228
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 27228
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 27228
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 16564
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 16564
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 16564
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 8596
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 8596
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 8596
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 16452
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 16452
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 16452
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 2948
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 2948
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 2948
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 17528
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 17528
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 17528
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 11796
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 11796
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 11796
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 11756
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 11756
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 11756
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 19592
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 19592
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 19592
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 21864
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 21864
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 21864
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 25656
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 25656
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 25656
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 25828
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 25828
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 25828
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 27804
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 27804
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 27804
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 23292
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] IPC authenticated; waiting for service preparation; pid 23292
+QWARN  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Service preparation completed; pid 23292
+PASS   : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker()
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Owned process started; pid 4496
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] IPC authenticated; waiting for service preparation; pid 4496
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Service preparation completed; pid 4496
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Owned process started; pid 26772
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] IPC authenticated; waiting for service preparation; pid 26772
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Service preparation completed; pid 26772
+PASS   : VoicePluginTests::panelOnlyConnectsOnClick()
+QINFO  : VoicePluginTests::liveRoomLifecycle() [worker] Owned process started; pid 12772
+QINFO  : VoicePluginTests::liveRoomLifecycle() [worker] Owned process started; pid 22164
+QINFO  : VoicePluginTests::liveRoomLifecycle() [worker] IPC authenticated; waiting for service preparation; pid 12772
+QWARN  : VoicePluginTests::liveRoomLifecycle() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::liveRoomLifecycle() [worker] IPC authenticated; waiting for service preparation; pid 22164
+QWARN  : VoicePluginTests::liveRoomLifecycle() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::liveRoomLifecycle() [worker] Service preparation completed; pid 12772
+QINFO  : VoicePluginTests::liveRoomLifecycle() [worker] Service preparation completed; pid 22164
+PASS   : VoicePluginTests::liveRoomLifecycle()
+PASS   : VoicePluginTests::cleanupTestCase()
+Totals: 7 passed, 0 failed, 0 skipped, 0 blacklisted, 219847ms
+********* Finished testing of VoicePluginTests *********

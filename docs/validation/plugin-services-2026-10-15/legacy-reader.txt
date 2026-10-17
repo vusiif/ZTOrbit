@@ -1,0 +1,3 @@
+D:\User\Code\Github\Utils\zerotier-gui\dist\ZTGUI-api-v0.4.previous-a913a1f3b05b4769afea85a31353fc43
+Invalid package header or size
+Exit code: 1

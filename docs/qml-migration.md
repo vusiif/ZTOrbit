@@ -10,15 +10,15 @@
 
 退出先取消并等待初始化和系统操作，保持GUI事件循环运行；然后销毁页面／控制器、清理引擎JS对象与组件缓存，释放工厂、查询和插件库。直接析构仍有阻塞等待兜底。窗口标题栏关闭在Windows收起到托盘，任务栏关闭和明确退出等待清理完成；没有托盘时最小化到任务栏。
 
-客户端入口和生命周期IID使用 `/2.0` 区分页面ABI，旧Widgets `/1.0` DLL在实例化前拒绝。根VERSION及派生的API数字由开发者管理，本次迁移不改变它们。服务端接口、部署和协议不变。
+客户端入口和生命周期IID使用 `/3.0` 区分页面ABI，旧Widgets `/1.0` 与旧QML `/2.0` DLL在实例化前拒绝。客户端 `VERSION` 及派生的 API 版本由开发者管理；服务端版本由客户端侧 `SERVER_VERSION` 指定并独立演进。服务端已迁移为 Java 25 + Netty 的独立宿主，不再共享客户端 C++ 插件 ABI，接口与部署见[服务端 API](server-api.md)。
 
 ## 构建与部署
 
 主程序使用 `qt_add_qml_module` 编译并嵌入QML；Qt 6.8/MSBuild的测试目标引用外部源目录会生成含 `_..` 的缓存路径，因此测试资源使用 `NO_CACHEGEN`，生产目标仍生成QML缓存。Widgets仅作为Qt.labs.platform原生托盘／菜单后备库，公开SDK和语音页面不依赖它。
 
-宿主显式导入 `QtQuick.Controls.Basic`，并继续为通用Controls插件设置Basic。弹窗、行菜单和编辑器按需构造；已打开的弹窗保持缓存，以保留再次打开时的状态。成员子模型在首次拿到成员时创建。隐藏窗口允许释放场景图／图形设备资源，恢复后重建；业务模型、备注、导航和语音会话保留。设置中的“禁止GPU加速”及 `--disable-gpu-acceleration` 在创建QML引擎前选择Qt的software场景图，设置默认关闭、重启生效，启动参数仅影响本次启动。适用范围和实测见 [资源占用分析](resources.md)。
+宿主显式导入 `QtQuick.Controls.Basic`，并继续为通用Controls插件设置Basic。弹窗、行菜单和编辑器按需构造；已打开的弹窗保持缓存，以保留再次打开时的状态。成员子模型在首次拿到成员时创建。隐藏窗口允许释放场景图／图形设备资源，恢复后重建；业务模型、备注、导航和语音会话保留。设置中的“禁止GPU加速”及 `--disable-gpu-acceleration` 在创建QML引擎前选择Qt的software场景图；设置默认开启，首次切换时提示完全退出并重启后生效，启动参数仅覆盖本次启动。该设置与历史实测见 [资源占用分析](resources.md)（0.3.2）。
 
-Windows的 `windeployqt --qmldir src/client/main/qml` 和macOS的 `macdeployqt -qmldir=...` 必须部署QML模块及其插件；仅扫描EXE的DLL导入表不足以部署QML。插件的额外导入模块也需要打包；当前语音页使用宿主已有Qt Quick Controls，音频使用C++ Multimedia。
+Windows的 `windeployqt --qmldir src/client/main/qml` 和macOS的 `macdeployqt -qmldir=...` 必须部署QML模块及其插件；仅扫描EXE的DLL导入表不足以部署QML。插件的额外导入模块也需要打包；当前语音页使用宿主已有的 Qt Quick Controls，音频通过媒体 API 访问 `media.session`，实现位于媒体工作进程，语音插件不导入 Multimedia 或 FFmpeg。
 
 ## 验证范围
 

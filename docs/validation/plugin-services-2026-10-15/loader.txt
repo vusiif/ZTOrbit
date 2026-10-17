@@ -1,0 +1,29 @@
+********* Start testing of LoaderTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : LoaderTests::initTestCase()
+PASS   : LoaderTests::api03PackageIsRejectedBeforeEntry()
+PASS   : LoaderTests::ordinaryV1PackageLoadsOnNewHost()
+PASS   : LoaderTests::validPackageRoundTripAndReload()
+PASS   : LoaderTests::largePackageReloadRunsBehindResponsiveEventLoop()
+PASS   : LoaderTests::shutdownBeforePackageStartsSkipsPluginEntry()
+PASS   : LoaderTests::rawLibrariesAreIgnoredAndOldApiRejected()
+PASS   : LoaderTests::metadataAndCiphertextTamperingRejected()
+PASS   : LoaderTests::incompatibleBuildAndInvalidIdsRejectedBeforeEntry()
+QINFO  : LoaderTests::runtimeUnloadDuringInitializationIsResponsive() [插件] test-cancellable_blocked onCreate 378 ms
+QINFO  : LoaderTests::runtimeUnloadDuringInitializationIsResponsive() [插件] test-cancellable_blocked onCreate 378 ms
+PASS   : LoaderTests::runtimeUnloadDuringInitializationIsResponsive()
+QINFO  : LoaderTests::activePageAndFactoriesDieBeforeDestroy() [插件] test-lifecycle onCreate 190 ms
+PASS   : LoaderTests::activePageAndFactoriesDieBeforeDestroy()
+QINFO  : LoaderTests::nestedDataCallbackKeepsLibraryAliveUntilReturn() [插件] test-lifecycle onCreate 188 ms
+PASS   : LoaderTests::nestedDataCallbackKeepsLibraryAliveUntilReturn()
+QINFO  : LoaderTests::cleanupFailureRetainsLibraryAndPreventsReload() [插件] test-lifecycle onCreate 161 ms
+PASS   : LoaderTests::cleanupFailureRetainsLibraryAndPreventsReload()
+QINFO  : LoaderTests::initializationFailureCleansOnce() [插件] test-lifecycle onCreate 189 ms
+PASS   : LoaderTests::initializationFailureCleansOnce()
+QINFO  : LoaderTests::shutdownCancelsQueuedTasksAndUnloadsBeforeCompletion() [插件] test-cancellable onCreate 145 ms
+QINFO  : LoaderTests::shutdownCancelsQueuedTasksAndUnloadsBeforeCompletion() [插件] test-cancellable_second onCreate 201 ms
+PASS   : LoaderTests::shutdownCancelsQueuedTasksAndUnloadsBeforeCompletion()
+PASS   : LoaderTests::emptyShutdownIsAsynchronousAndIdempotent()
+PASS   : LoaderTests::cleanupTestCase()
+Totals: 17 passed, 0 failed, 0 skipped, 0 blacklisted, 9744ms
+********* Finished testing of LoaderTests *********

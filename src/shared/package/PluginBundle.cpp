@@ -1,4 +1,5 @@
 #include "PluginPackage.h"
+#include "PluginDependencies.h"
 #include <QFile>
 #include <QSaveFile>
 #include <QJsonDocument>
@@ -33,6 +34,7 @@ static QString regularSource(const QString &path,bool file=true) {
     return {};
 }
 QString validBundle(const QJsonObject &info) {
+    const auto semanticError=validateServiceManifest(info); if(!semanticError.isEmpty()) return semanticError;
     if(!info["files"].isArray() || !info["runtime"].isObject() || !info["requiresHost"].isArray()) return "Missing v2 manifest fields";
     const auto files=info["files"].toArray(); if(files.isEmpty() || files.size()>512) return "Invalid bundle file count";
     QSet<QString> paths; int entries=0; qint64 total=0;
@@ -53,7 +55,10 @@ QString validBundle(const QJsonObject &info) {
         if(role=="runtime-library" && (!path.startsWith("runtime/bin/") || path.mid(12).contains('/'))) return "Runtime libraries must be in runtime/bin";
         if(role=="qt-plugin" && !path.startsWith("runtime/qt-plugins/")) return "Qt plugin must be below runtime/qt-plugins";
         if(role=="license" && !path.startsWith("licenses/")) return "License must be below licenses";
-        if((role=="resource" || role=="entry") && (path.startsWith("runtime/") || path.startsWith("licenses/"))) return "Business file in reserved directory";
+        const bool worker=info["execution"].toObject()["kind"]=="worker-process";
+        const bool workerEntry=worker && role=="entry" && path.startsWith("runtime/bin/") && !path.mid(12).contains('/') && path.endsWith(".exe",Qt::CaseInsensitive);
+        const bool workerConfig=worker && role=="resource" && path=="runtime/bin/qt.conf";
+        if((role=="resource" || role=="entry") && (path.startsWith("runtime/") || path.startsWith("licenses/")) && !workerEntry && !workerConfig) return "Business file in reserved directory";
     }
     return entries==1 ? QString() : QString("Bundle needs exactly one entry");
 }
@@ -73,7 +78,7 @@ QString readBundle(const PackageResult &p,const QString &destination,bool licens
     if(sodium_init()<0) return "Crypto initialization failed";
     auto error=validBundle(p.info); if(!error.isEmpty()) return error;
     QFile input(p.path); if(!input.open(QIODevice::ReadOnly)) return input.errorString();
-    if(input.size()!=containerSize(p) || input.read(6)!="ZTPK2\n") return "Package changed or invalid size";
+    if(input.size()!=containerSize(p) || input.read(6)!=(p.info["formatVersion"].toInt()==3?"ZTPK3\n":"ZTPK2\n")) return "Package changed or invalid size";
     const auto length=input.read(4);
     if(length.size()!=4 || qFromBigEndian<quint32>(reinterpret_cast<const uchar *>(length.constData()))!=p.header.size()
        || input.read(p.header.size())!=p.header) return "Package metadata changed";
@@ -117,15 +122,23 @@ QString writeBundle(const QJsonObject &manifest,const QString &output,QJsonObjec
         if(item["role"]=="entry") { entrySource=source; info["entry"]=item["path"]; }
         files.append(item);
     }
-    info["formatVersion"]=2; info["files"]=files; info["runtime"]=manifest["runtime"].toObject(); info["requiresHost"]=manifest["requiresHost"].toArray();
+    const bool v3=manifest.contains("execution");
+    info["formatVersion"]=v3?3:2; info["files"]=files; info["runtime"]=manifest["runtime"].toObject(); info["requiresHost"]=manifest["requiresHost"].toArray();
+    if(v3) {
+        auto execution=manifest["execution"].toObject(); execution["entry"]=info["entry"];
+        info["execution"]=execution; info["dependencies"]=manifest["dependencies"]; info["provides"]=manifest["provides"];
+    }
     auto error=validBundle(info); if(!error.isEmpty()) return error;
+    if(info.value("execution").toObject()["kind"]!="worker-process") {
     const auto compiled=QPluginLoader(entrySource).metaData(); if(compiled.isEmpty()) return "Input is not a Qt plugin library";
+    if(v3) for(const auto &key:{"dependencies","provides"}) if(compiled["MetaData"].toObject()[key]!=info[key]) return "Inner plugin service metadata mismatch";
     info["debug"]=compiled["debug"].toBool(); const int qt=compiled["version"].toInt();
     if((qt>>16)!=QString::fromLatin1(qVersion()).section('.',0,0).toInt()
        || ((qt>>8)&255)!=QString::fromLatin1(qVersion()).section('.',1,1).toInt()) return "Plugin and packaging Kit Qt versions differ";
+    }
     const auto header=QJsonDocument(info).toJson(QJsonDocument::Compact); if(header.size()>Chunk) return "Metadata too large";
     QSaveFile out(output); if(!out.open(QIODevice::WriteOnly)) return out.errorString();
-    QByteArray prefix("ZTPK2\n",6); prefix.resize(10); qToBigEndian(quint32(header.size()),reinterpret_cast<uchar *>(prefix.data()+6));
+    QByteArray prefix(v3?"ZTPK3\n":"ZTPK2\n",6); prefix.resize(10); qToBigEndian(quint32(header.size()),reinterpret_cast<uchar *>(prefix.data()+6));
     if(out.write(prefix)!=10 || out.write(header)!=header.size()) return out.errorString();
     for(int index=0;index<sources.size();++index) {
         const auto source=sources[index].toObject()["source"].toString(); error=regularSource(source); if(!error.isEmpty()) return error;
@@ -149,7 +162,7 @@ QString writeBundle(const QJsonObject &manifest,const QString &output,QJsonObjec
     return out.commit() ? QString() : out.errorString();
 }
 QString extractLicenses(const PackageResult &p,const QString &destination) {
-    if(!p.ok()) return p.error; if(p.info["formatVersion"].toInt()!=2) return "Legacy packages have no embedded licenses";
+    if(!p.ok()) return p.error; if(p.info["formatVersion"].toInt()<2) return "Legacy packages have no embedded licenses";
     QTemporaryDir staging; if(!staging.isValid()) return "Cannot create license staging";
     auto error=readBundle(p,staging.path(),true); if(!error.isEmpty()) return error;
     for(const auto &value:p.info["files"].toArray()) {

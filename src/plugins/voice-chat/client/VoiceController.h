@@ -1,11 +1,11 @@
 #pragma once
 #include <QObject>
-#include <QThread>
 #include <QVariantList>
 #include <QHash>
+#include <QPointer>
+#include <QJsonObject>
 #include <memory>
 #include <functional>
-class QMediaDevices;
 namespace vusiif::ztgui::voice_chat {
 class VoiceSession;
 class AudioDeviceCache;
@@ -20,6 +20,7 @@ class VoiceController final : public QObject {
     Q_PROPERTY(bool deafened READ deafened WRITE setDeafened NOTIFY stateChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY stateChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)
+    Q_PROPERTY(bool microphoneTesting READ microphoneTesting NOTIFY stateChanged)
     Q_PROPERTY(bool inRoom READ inRoom NOTIFY stateChanged)
     Q_PROPERTY(QString status READ status NOTIFY stateChanged)
     Q_PROPERTY(QString currentRoom READ currentRoom NOTIFY stateChanged)
@@ -32,6 +33,7 @@ class VoiceController final : public QObject {
 public:
     explicit VoiceController(QObject *parent, std::shared_ptr<AudioDeviceCache> cache);
     ~VoiceController() override;
+    void stopForUnload();
     QString address() const { return m_address; }
     QString nickname() const { return m_nickname; }
     int inputVolume() const { return m_inputVolume; }
@@ -40,6 +42,7 @@ public:
     bool deafened() const { return m_deafened; }
     bool connected() const { return m_connected; }
     bool busy() const { return m_busy; }
+    bool microphoneTesting() const { return m_microphoneTesting; }
     bool inRoom() const { return m_inRoom; }
     QString status() const { return m_status; }
     QString currentRoom() const { return m_currentRoom; }
@@ -55,11 +58,13 @@ public:
     void setInputVolume(int value);
     Q_INVOKABLE void setMemberVolume(quint32 member,int value);
     Q_INVOKABLE int memberVolume(quint32 member) const { return m_memberVolumes.value(member,100); }
+    Q_INVOKABLE void setMemberRemark(quint32 member, const QString &remark);
     void setMuted(bool value);
     void setDeafened(bool value);
     void setInput(const QString &value);
     void setOutput(const QString &value);
     Q_INVOKABLE void toggleConnection();
+    Q_INVOKABLE void setMicrophoneTesting(bool enabled);
     Q_INVOKABLE void createRoom(const QString &name);
     Q_INVOKABLE void joinRoom(quint32 id);
     Q_INVOKABLE void leaveRoom();
@@ -68,17 +73,21 @@ signals:
     void roomsChanged();
     void devicesChanged();
 private:
-    QThread m_thread;
     VoiceSession *m_session;
     std::shared_ptr<AudioDeviceCache> m_cache;
-    QMediaDevices *m_devices;
     QString m_address, m_nickname, m_status = QStringLiteral("未连接"), m_currentRoom = QStringLiteral("尚未加入房间");
     int m_volume = 80, m_inputVolume = 100;
     QHash<quint32,int> m_memberVolumes;
     bool m_connected = false, m_busy = false, m_inRoom = false, m_muted = false, m_deafened = false, m_recordAllowed = true;
     bool m_monitoring = false, m_refreshPending = false;
+    bool m_stopping=false;
+    bool m_microphoneTesting=false, m_testRequested=false;
+    QPointer<QObject> m_identityRequest;
     QByteArray m_input, m_output;
     QVariantList m_rooms, m_members, m_inputs, m_outputs;
+    QJsonObject m_remarks;
+    bool m_remarksWritable=true;
+    void updateMemberNames();
     void save();
     void configureAudio();
     void refreshDevices();

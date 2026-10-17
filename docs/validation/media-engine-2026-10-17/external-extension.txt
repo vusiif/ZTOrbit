@@ -1,0 +1,15 @@
+********* Start testing of MediaIntegrationTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : MediaIntegrationTests::initTestCase()
+QINFO  : MediaIntegrationTests::workerExtensionRoundtrip() [worker] Owned process started; pid 13632
+QINFO  : MediaIntegrationTests::workerExtensionRoundtrip() [worker] IPC authenticated; waiting for service preparation; pid 13632
+QWARN  : MediaIntegrationTests::workerExtensionRoundtrip() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : MediaIntegrationTests::workerExtensionRoundtrip() [worker] Service preparation completed; pid 13632
+QWARN  : MediaIntegrationTests::workerExtensionRoundtrip() [worker] [input @ 000001E09EBC7C00] Changing video frame properties on the fly is not supported by all filters.?
+[input @ 000001E09EBC7C00] filter context - w: 1280 h: 720 fmt: 0 csp: unknown range: unknown, incoming frame - w: 1280 h: 720 fmt: 0 csp: bt709 range: tv pts_time: 0?
+
+PASS   : MediaIntegrationTests::workerExtensionRoundtrip()
+PASS   : MediaIntegrationTests::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 7144ms
+********* Finished testing of MediaIntegrationTests *********

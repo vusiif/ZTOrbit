@@ -60,8 +60,6 @@ Result PluginRegistry::registerPlugin(PluginDefinition definition, PluginLifecyc
         return {Error::DuplicatePlugin, QStringLiteral("插件 ID 已注册：%1").arg(info.id)};
     for(const auto &registered:m_plugins) if(registered.info.name.compare(info.name,Qt::CaseInsensitive)==0)
         return {Error::DuplicatePlugin,QStringLiteral("插件显示名对应的数据目录已被使用")};
-    if (definition.menus.isEmpty())
-        return {Error::InvalidMenu, QStringLiteral("插件至少需要声明一个菜单")};
     QSet<QString> ids;
     for (const auto &menu : definition.menus) {
         if (!validId(menu.id) || ids.contains(menu.id) || menu.title.trimmed().isEmpty() || !menu.createPage)

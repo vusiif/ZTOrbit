@@ -32,7 +32,7 @@ bool sessionReady() { return QFileInfo::exists(macSession()->filePath("authtoken
 #endif
 }
 
-void vusiif::ztgui::zerotier::startServiceMonitor(QObject *owner)
+std::function<void(bool)> vusiif::ztgui::zerotier::createServiceMonitor(QObject *owner)
 {
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
     auto *process = new QProcess(owner);
@@ -41,25 +41,38 @@ void vusiif::ztgui::zerotier::startServiceMonitor(QObject *owner)
     auto *timeout = new QTimer(process);
     timeout->setSingleShot(true);
     timeout->setInterval(5000);
+    auto pending = std::make_shared<bool>(false);
+    const auto refresh = [process, timeout, pending] {
+        if (process->state() != QProcess::NotRunning) return;
+        *pending = true;
+        process->start("/bin/launchctl", {"print", "system/com.zerotier.one"});
+        timeout->start();
+    };
     QObject::connect(timeout, &QTimer::timeout, process, [process] { process->kill(); });
     QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), process,
-        [process, timeout](int code, QProcess::ExitStatus status) {
+        [process, timer, timeout, pending, refresh](int code, QProcess::ExitStatus status) {
             timeout->stop();
+            if (!*pending) {
+                process->readAllStandardOutput();
+                if (timer->isActive()) QTimer::singleShot(0, process, refresh);
+                return;
+            }
+            *pending = false;
+            if (!timer->isActive()) return;
             macService.exists = QFileInfo::exists("/Library/LaunchDaemons/com.zerotier.one.plist");
             macService.running = macApiAvailable || (code == 0 && status == QProcess::NormalExit
                 && QRegularExpression("state\\s*=\\s*running").match(QString::fromUtf8(process->readAllStandardOutput())).hasMatch());
             macService.known = status == QProcess::NormalExit;
         });
-    const auto refresh = [process, timeout] {
-        if (process->state() != QProcess::NotRunning) return;
-        process->start("/bin/launchctl", {"print", "system/com.zerotier.one"});
-        timeout->start();
-    };
     QObject::connect(timer, &QTimer::timeout, process, refresh);
-    timer->start();
-    QTimer::singleShot(0, process, refresh);
+    return [process, timer, timeout, pending, refresh](bool active) {
+        if (active == timer->isActive()) return;
+        if (active) { timer->start(); refresh(); }
+        else { timer->stop(); timeout->stop(); *pending = false; if (process->state() != QProcess::NotRunning) process->kill(); }
+    };
 #else
     Q_UNUSED(owner)
+    return {};
 #endif
 }
 
@@ -404,7 +417,13 @@ vusiif::ztgui::zerotier::JsonPoller::JsonPoller(QObject *owner, const QString &c
     });
     connect(&m_process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
             [this](int code, QProcess::ExitStatus status) {
-        if (!m_requestPending) return;
+        if (!m_requestPending) {
+            m_process.readAllStandardOutput(); m_process.readAllStandardError();
+            const bool restart = m_restartWhenFinished && m_active;
+            m_restartWhenFinished = false;
+            if (restart) QTimer::singleShot(0, this, &JsonPoller::refresh);
+            return;
+        }
         m_requestPending = false;
         m_timeout.stop();
         auto document = QJsonDocument::fromJson(m_process.readAllStandardOutput());
@@ -455,6 +474,7 @@ vusiif::ztgui::zerotier::JsonPoller::~JsonPoller()
 void vusiif::ztgui::zerotier::JsonPoller::refresh()
 {
     if (!m_active || m_process.state() != QProcess::NotRunning) return;
+    m_restartWhenFinished = false;
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
     if (!sessionReady()) { failed(QStringLiteral("等待授权读取 ZeroTier")); return; }
 #endif
@@ -473,5 +493,10 @@ void vusiif::ztgui::zerotier::JsonPoller::setActive(bool active)
     if (m_active == active) return;
     m_active = active;
     if (active) { m_interval.start(); refresh(); }
-    else m_interval.stop();
+    else {
+        m_interval.stop(); m_timeout.stop(); m_requestPending = false;
+        m_failures = 0; m_failurePeriod.invalidate();
+        m_restartWhenFinished = m_process.state() != QProcess::NotRunning;
+        if (m_process.state() != QProcess::NotRunning) m_process.kill();
+    }
 }

@@ -9,9 +9,9 @@
 #include <QQmlEngine>
 
 static_assert(vusiif::ztgui::api::ApiMajor == 0);
-static_assert(vusiif::ztgui::api::ApiMinor == 4);
-static_assert(vusiif::ztgui::api::isApiCompatible(0, 4));
-static_assert(!vusiif::ztgui::api::isApiCompatible(0, 3));
+static_assert(vusiif::ztgui::api::ApiMinor == 5);
+static_assert(vusiif::ztgui::api::isApiCompatible(0, 5));
+static_assert(!vusiif::ztgui::api::isApiCompatible(0, 4));
 static_assert(!vusiif::ztgui::api::isApiCompatible(0, 2));
 static_assert(std::is_abstract_v<vusiif::ztgui::util::HostServices>);
 static_assert(std::is_abstract_v<vusiif::ztgui::util::PluginFiles>);

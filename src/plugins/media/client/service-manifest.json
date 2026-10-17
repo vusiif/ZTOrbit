@@ -1,0 +1,5 @@
+{
+  "execution": {"kind":"worker-process", "protocol":"ztgui-service/1"},
+  "dependencies": [],
+  "provides": [{"service":"media.session", "api":"1"}]
+}

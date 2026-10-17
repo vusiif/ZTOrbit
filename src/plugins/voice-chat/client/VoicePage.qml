@@ -23,6 +23,10 @@ Pane {
     Behavior on selectedColor { ColorAnimation { duration: 220 } }
     background: Rectangle { color: page.palette.window }
     padding: 0
+    onVisibleChanged: if (!visible) {
+        if (audioLoader.item) audioLoader.item.close()
+        if (memberLoader.item) memberLoader.item.close()
+    }
     component VoiceButton: Button {
         id: button
         implicitHeight: 36
@@ -124,7 +128,7 @@ Pane {
                         }
                         RowLayout {
                             Label { text: "昵称"; Layout.preferredWidth: 48 }
-                            VoiceField { objectName: "voiceNickname"; text: controller.nickname; maximumLength: 64; onTextEdited: controller.nickname = text; enabled: !controller.connected && !controller.busy; Layout.fillWidth: true }
+                            VoiceField { objectName: "voiceNickname"; placeholderText: "留空使用 ZeroTier ID"; text: controller.nickname; maximumLength: 64; onTextEdited: controller.nickname = text; enabled: !controller.connected && !controller.busy; Layout.fillWidth: true }
                         }
                     }
                     VoiceButton { objectName: "voiceConnect"; text: controller.connected ? "断开" : controller.busy ? "取消" : "连接"; onClicked: controller.toggleConnection() }
@@ -180,6 +184,7 @@ Pane {
                             ScrollBar.vertical: ScrollBar {}
                             delegate: ItemDelegate {
                                 id: room
+                                font.pixelSize: 16
                                 contentItem: Text { text: room.text; font: room.font; color: page.ink; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
                                 background: Rectangle { radius: 4; color: room.highlighted || room.hovered ? page.selectedColor : "transparent"; Behavior on color { enabled: !page.themeTransitioning; ColorAnimation { duration: 120 } } }
                                 required property var modelData
@@ -218,16 +223,24 @@ Pane {
                             boundsBehavior: Flickable.StopAtBounds
                             model: controller.members
                             ScrollBar.vertical: ScrollBar {}
-                            delegate: ColumnLayout {
+                            delegate: ItemDelegate {
+                                id: member
                                 required property var modelData
                                 width: ListView.view.width
-                                spacing: 4
-                                Label { text: modelData.nickname + (modelData.self ? "（自己）" : "") + (modelData.muted ? "（静音）" : ""); elide: Text.ElideRight; Layout.fillWidth: true }
-                                RowLayout {
-                                    visible: !modelData.self
-                                    Layout.fillWidth: true
-                                    Slider { objectName: "voiceMemberVolume"; from: 0; to: 200; value: modelData.volume === undefined ? 100 : modelData.volume; onMoved: controller.setMemberVolume(modelData.id,Math.round(value)); Layout.fillWidth: true }
-                                    Label { text: (modelData.volume === undefined ? 100 : modelData.volume)+"%"; Layout.preferredWidth: 48 }
+                                font.pixelSize: 16
+                                contentItem: Text { text: member.modelData.displayName + (member.modelData.self ? "（自己）" : "") + (member.modelData.muted ? "（静音）" : ""); font: member.font; color: page.ink; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
+                                background: Rectangle { radius: 4; color: member.hovered ? page.selectedColor : "transparent" }
+                                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                                TapHandler {
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    onTapped: (eventPoint, button) => {
+                                        const popup = memberLoader.item || memberLoader.activate()
+                                        popup.memberId = member.modelData.id
+                                        const position = member.mapToItem(popup.parent, eventPoint.position.x, eventPoint.position.y)
+                                        popup.x = Math.max(0, Math.min(popup.parent.width - popup.width, position.x))
+                                        popup.y = Math.max(0, Math.min(popup.parent.height - popup.height, position.y))
+                                        popup.open()
+                                    }
                                 }
                             }
                         }
@@ -235,6 +248,50 @@ Pane {
                 }
             }
             Label { objectName: "voiceStatus"; text: controller.status; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20; Layout.bottomMargin: 20 }
+        }
+    }
+    Loader {
+        id: memberLoader
+        active: false
+        function activate() { active = true; return item }
+        sourceComponent: Popup {
+            id: memberPopup
+            objectName: "voiceMemberPopup"
+            property double memberId: 0
+            readonly property var memberData: {
+                for (const member of controller.members) if (member.id === memberId) return member
+                return null
+            }
+            onMemberDataChanged: if (!memberData) close()
+            onOpened: remarkField.text = memberData ? memberData.remark : ""
+            parent: Overlay.overlay
+            width: Math.min(300, parent.width - 40)
+            padding: 16
+            focus: true
+            background: Rectangle { color: page.popupColor; border.color: page.edgeColor; radius: 7 }
+            enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180 } }
+            exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 140 } }
+            contentItem: ColumnLayout {
+                Label { text: memberPopup.memberData ? memberPopup.memberData.displayName : ""; font.pixelSize: 16; elide: Text.ElideRight; Layout.fillWidth: true }
+                Label { text: memberPopup.memberData ? memberPopup.memberData.ztid : ""; visible: text.length > 0; Layout.fillWidth: true; elide: Text.ElideRight }
+                Label { text: memberPopup.memberData && memberPopup.memberData.self ? "这是你自己" : "成员音量" }
+                RowLayout {
+                    visible: memberPopup.memberData !== null && !memberPopup.memberData.self
+                    Slider { objectName: "voiceMemberVolume"; from: 0; to: 200; value: memberPopup.memberData ? memberPopup.memberData.volume : 100; onMoved: controller.setMemberVolume(memberPopup.memberId, Math.round(value)); Layout.fillWidth: true }
+                    Label { text: (memberPopup.memberData ? memberPopup.memberData.volume : 100) + "%"; Layout.preferredWidth: 48 }
+                }
+                ColumnLayout {
+                    visible: memberPopup.memberData !== null && !memberPopup.memberData.self
+                    Layout.fillWidth: true
+                    Label { text: "本地备注" }
+                    VoiceField { id: remarkField; objectName: "voiceMemberRemark"; placeholderText: "留空恢复服务器昵称"; maximumLength: 64; enabled: memberPopup.memberData ? memberPopup.memberData.canRemark : false; Layout.fillWidth: true; onAccepted: { controller.setMemberRemark(memberPopup.memberId, text); memberPopup.close() } }
+                    Label { text: "无法设置备注：需要服务器提供 ZeroTier ID，并允许保存插件数据。"; visible: memberPopup.memberData !== null && !memberPopup.memberData.canRemark; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    RowLayout {
+                        Layout.alignment: Qt.AlignRight
+                        VoiceButton { objectName: "voiceSaveMemberRemark"; text: "保存备注"; enabled: remarkField.enabled; onClicked: { controller.setMemberRemark(memberPopup.memberId, remarkField.text); memberPopup.close() } }
+                    }
+                }
+            }
         }
     }
     Loader {
@@ -250,6 +307,7 @@ Pane {
             y: Math.max(20, Math.min(parent.height - height - 20, audioGear.mapToItem(parent, 0, 0).y + audioGear.height + 8))
             padding: 20
             focus: true
+            onAboutToHide: controller.setMicrophoneTesting(false)
             background: Rectangle { color: page.popupColor; border.color: page.edgeColor; radius: 8 }
             enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic } }
             exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 140 } }
@@ -263,6 +321,7 @@ Pane {
                     width: audioScroll.availableWidth
                     spacing: 14
                     Label { text: "音频设置"; font.pixelSize: 18; font.bold: true }
+                    VoiceButton { objectName: "voiceTestMicrophone"; text: controller.microphoneTesting ? "停止测试" : "麦克风测试"; onClicked: controller.setMicrophoneTesting(!controller.microphoneTesting); Layout.fillWidth: true }
                     Label { text: "麦克风" }
                     AudioChoice { objectName: "voiceInputDevice"; model: controller.inputs; selectedValue: controller.input; onActivated: controller.input = currentValue; Layout.fillWidth: true }
                     Label { text: "输出设备" }

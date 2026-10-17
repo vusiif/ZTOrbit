@@ -1,4 +1,8 @@
 #include "PluginImport.h"
+#include "ClientNetworkService.h"
+#include "NetworkTransport.h"
+#include <ztprotocol/NetworkDelivery.h>
+#include <QNetworkDatagram>
 #include <future>
 #include "ZeroTierClient.h"
 #include "AppLog.h"
@@ -112,11 +116,89 @@ private slots:
         qunsetenv("ZT_TEST_WINGET_CODE");
         qunsetenv("ZT_TEST_START_FAILURE");
         qunsetenv("ZT_TEST_COMMAND_LOG");
+        qunsetenv("ZT_TEST_QUERY_LOG");
         QSettings().clear();
     }
     void cleanupTestCase() {
         qputenv("PATH", m_oldPath); qputenv("ProgramData", m_oldProgramData);
         qunsetenv("ZT_TEST_DATA_DIRECTORY");
+    }
+    void pluginNetworkPollingFollowsRequestsAndSubscriptions() {
+        QTemporaryDir directory; const auto path=directory.filePath("queries.log");
+        qputenv("ZT_TEST_QUERY_LOG",path.toUtf8()); qputenv("ZT_TEST_MODE","empty");
+        const auto queries=[&] { QFile file(path); return file.open(QIODevice::ReadOnly)?file.readAll():QByteArray(); };
+        auto &service=vusiif::ztgui::network::ClientNetworkService::instance();
+        QTest::qWait(1200); QVERIFY(queries().isEmpty());
+        auto *context=new QObject; bool invoked=false;
+        service.withTransport(context,[&](vusiif::ztgui::network::NetworkTransport &) { invoked=true; });
+        QTRY_VERIFY(invoked); QVERIFY(queries().contains("info")); QVERIFY(queries().contains("listnetworks"));
+        delete context; QTest::qWait(150); const auto idle=queries(); QTest::qWait(1300); QCOMPARE(queries(),idle);
+        QObject parent;
+        auto *first=service.subscribe("fixture","0123456789abcdef",&parent,[](const NetworkMessage &) {});
+        auto *second=service.subscribe("fixture","0123456789abcdef",&parent,[](const NetworkMessage &) {});
+        QVERIFY(first); QVERIFY(second); QTRY_VERIFY(queries().size()>idle.size());
+        QTest::qWait(200); first->cancel(); const auto one=queries();
+        QTRY_VERIFY(queries().size()>one.size()); // The second subscription retains background polling.
+        second->cancel(); QTest::qWait(150); const auto stopped=queries(); QTest::qWait(1300); QCOMPARE(queries(),stopped);
+        qputenv("ZT_TEST_MODE","slow"); bool cancelled=false; auto *pending=new QObject;
+        service.withTransport(pending,[&](vusiif::ztgui::network::NetworkTransport &) { cancelled=true; });
+        QTRY_VERIFY(queries().contains("slow|")); delete pending; QTest::qWait(150);
+        QVERIFY(!cancelled);
+        qputenv("ZT_TEST_MODE","empty"); auto *resumed=new QObject; bool ready=false;
+        service.withTransport(resumed,[&](vusiif::ztgui::network::NetworkTransport &) { ready=true; });
+        QTRY_VERIFY(ready); delete resumed; QTest::qWait(150);
+    }
+    void pluginNetworkRequestsReleaseDemandAfterCompletionAndUnload() {
+        QTemporaryDir directory; const auto path=directory.filePath("queries.log");
+        qputenv("ZT_TEST_QUERY_LOG",path.toUtf8()); qputenv("ZT_TEST_MODE","empty");
+        const auto queries=[&] { QFile file(path); return file.open(QIODevice::ReadOnly)?file.readAll():QByteArray(); };
+        HostServicesImpl host("IdleFixture",directory.path(),"idle-fixture"); QObject context;
+        bool completed=false;
+        host.getNetworkRelays("0123456789abcdef",&context,[&](const RelayResult &result) { QVERIFY(!result.ok()); completed=true; });
+        QTRY_VERIFY(completed); QTRY_VERIFY(!host.hasCallbacks());
+        QTest::qWait(150); const auto idle=queries(); QTest::qWait(1300); QCOMPARE(queries(),idle);
+        auto *subscription=host.subscribeNetworkData("0123456789abcdef",&context,[](const NetworkMessage &) {}); QVERIFY(subscription);
+        QTRY_VERIFY(queries().size()>idle.size()); host.stopRequests(); QTRY_VERIFY(!host.hasCallbacks());
+        QTest::qWait(150); const auto unloaded=queries(); QTest::qWait(1300); QCOMPARE(queries(),unloaded);
+    }
+    void pluginSubscriptionReceivesDataAndClosesIdleSocket() {
+        qputenv("ZT_TEST_MODE","members");
+        QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost,vusiif::ztgui::protocol::NetworkPort));
+        connect(&server,&QTcpServer::newConnection,this,[&] {
+            auto *socket=server.nextPendingConnection(); auto input=std::make_shared<QByteArray>();
+            connect(socket,&QTcpSocket::readyRead,socket,[socket,input] {
+                *input+=socket->readAll(); vusiif::ztgui::protocol::Packet packet;
+                if(vusiif::ztgui::protocol::takeFrame(*input,packet)!=vusiif::ztgui::protocol::ReadResult::Packet) return;
+                const auto request=QJsonDocument::fromJson(packet.payload).object();
+                const QJsonArray members{QJsonObject{{"nodeId","0123456789"},{"authorized",true},{"ipAssignments",QJsonArray{"127.0.0.2"}}},
+                    QJsonObject{{"nodeId","abcdef0123"},{"authorized",true},{"ipAssignments",QJsonArray{"127.0.0.3"}}}};
+                const QJsonValue data=request["op"]=="controller.members"?QJsonValue(members):QJsonValue(QJsonObject{});
+                socket->write(vusiif::ztgui::protocol::frame("builtin",QJsonDocument(QJsonObject{{"v",1},{"id",1},{"ok",true},{"data",data}}).toJson(QJsonDocument::Compact)));
+            });
+            connect(socket,&QTcpSocket::disconnected,socket,&QObject::deleteLater);
+        });
+        QTemporaryDir directory; HostServicesImpl host("SubscriptionFixture",directory.path(),"idle-fixture"); QObject context;
+        int received=0; auto *sub=host.subscribeNetworkData("0123456789abcdef",&context,[&](const NetworkMessage &message) { QCOMPARE(message.data,QByteArray("background")); ++received; }); QVERIFY(sub);
+        bool ready=false; host.getNetworkRelays("0123456789abcdef",&context,[&](const RelayResult &result) { QVERIFY(result.ok()); ready=true; }); QTRY_VERIFY(ready);
+        QUdpSocket sender; QVERIFY(sender.bind(QHostAddress("127.0.0.3"),0));
+        const auto payload=vusiif::ztgui::protocol::encodeDelivery({"0123456789abcdef","abcdef0123","0123456789","idle-fixture",QByteArray(16,'a'),"background"});
+        sender.writeDatagram(payload,QHostAddress("127.0.0.2"),vusiif::ztgui::protocol::ClientNetworkPort);
+        QTRY_COMPARE(received,1); sub->cancel(); QTRY_VERIFY(!host.hasCallbacks()); QTest::qWait(100);
+        QUdpSocket replacement;
+        QTRY_VERIFY(replacement.state()==QAbstractSocket::BoundState || replacement.bind(QHostAddress("127.0.0.2"),vusiif::ztgui::protocol::ClientNetworkPort));
+    }
+    void pausedSlowPollerResumesWithoutReportingFailure() {
+        QTemporaryDir directory; const auto path=directory.filePath("queries.log");
+        qputenv("ZT_TEST_QUERY_LOG",path.toUtf8()); qputenv("ZT_TEST_MODE","slow");
+        const auto queries=[&] { QFile file(path); return file.open(QIODevice::ReadOnly)?file.readAll():QByteArray(); };
+        vusiif::ztgui::zerotier::JsonPoller poller(this,"info",true);
+        QSignalSpy updated(&poller,&vusiif::ztgui::zerotier::JsonPoller::updated);
+        QSignalSpy availability(&poller,&vusiif::ztgui::zerotier::JsonPoller::availabilityChanged);
+        poller.setActive(true); QTRY_VERIFY(queries().contains("slow|"));
+        poller.setActive(false); qputenv("ZT_TEST_MODE","empty"); poller.setActive(true);
+        QTRY_VERIFY_WITH_TIMEOUT(!updated.isEmpty(),3000);
+        for(const auto &event:availability) QVERIFY(event.first().toBool());
+        poller.setActive(false); QTest::qWait(150); const auto idle=queries(); QTest::qWait(1200); QCOMPARE(queries(),idle);
     }
     void pluginImportIsAtomicAndDoesNotOverwrite() {
         QTemporaryDir directory;
@@ -503,8 +585,8 @@ const QString name = "example.ztplugin";
     void pluginRegistrationIsAtomicAndVersioned() {
         using namespace vusiif::ztgui::api;
         QCOMPARE(ApiMajor, 0);
-        QCOMPARE(ApiMinor, 4);
-        QCOMPARE(QString::fromLatin1(ApiVersion), QStringLiteral(ZEROTIER_GUI_VERSION).section('.', 0, 1));
+        QCOMPARE(ApiMinor, 5);
+        QCOMPARE(QString::fromLatin1(ApiVersion), QStringLiteral(ZTGUI_API_VERSION));
         PluginRegistry registry;
         QSignalSpy changes(&registry, &PluginRegistry::menusChanged);
         MenuContribution menu;

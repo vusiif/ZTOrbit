@@ -1,0 +1,1 @@
+{"apiVersion":"@FIXTURE_API_VERSION@", "dependencies":[{"pluginId":"fixture-provider","versionRange":">=1.0.0 <2.0.0","services":[{"service":"@service_name@","api":"1"}]}], "provides":[]}

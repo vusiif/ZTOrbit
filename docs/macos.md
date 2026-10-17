@@ -4,7 +4,7 @@
 
 ## 构建
 
-在 Apple Silicon Mac 上安装 Xcode Command Line Tools、CMake 和支持 arm64 的动态 Qt 6.8 或更新 SDK（包括 Multimedia）。
+在 Apple Silicon Mac 上安装 Xcode Command Line Tools、CMake 和支持 arm64 的动态 Qt 6.8 或更新 SDK。
 Qt 6.8 的目标系统为 macOS 12 或更新版本；使用更新 Qt 时，以该 Qt SDK 的系统要求为准。
 
 若使用 Homebrew，可先执行：
@@ -26,11 +26,11 @@ bash scripts/build-macos.sh
 QT_ROOT="$HOME/Qt/6.8.3/macos" bash scripts/build-macos.sh
 ```
 
-脚本只构建 `arm64`，先运行 GUI 回归测试，再独立编译语音插件并生成包含 Qt Frameworks 和插件的独立应用。应用插件位于 `Contents/MacOS/plugins/`，与 Qt 自身后端插件目录分开；宿主已声明麦克风用途，首次入房时请求录音权限。
+脚本只构建 `arm64`，先运行 GUI 回归测试，再生成包含 Qt Frameworks 的独立应用。当前脚本不编译或打包应用插件；语音与媒体依赖的独立 worker 尚无 macOS 交付，`.ztplugin` 加载和录音权限均未实机验证。宿主 `Info.plist` 已声明麦克风用途，但没有可用的媒体工作进程时不会启用录音。
 输出文件：
 
-- `dist/macos-arm64/ZTGUI-arm64.dmg`
-- `dist/macos-arm64/ZTGUI-arm64.app.zip`，解压后是 `ZTGUI.app`
+- `build/dist/macos-arm64/ZTGUI-arm64.dmg`
+- `build/dist/macos-arm64/ZTGUI-arm64.app.zip`，解压后是 `ZTGUI.app`
 
 构建脚本使用本机 ad-hoc 签名，不包含 Apple Developer ID 签名或公证。
 面向其他用户正式分发前，需要使用自己的 Apple Developer ID 进行签名和公证，并做实机安装验证。
@@ -45,7 +45,7 @@ QT_ROOT="$HOME/Qt/6.8.3/macos" bash scripts/build-macos.sh
 - 初次读取节点时需要授权。认证文件、端口文件和已签名 Moon 文件缓存到当前 GUI 进程的私有临时目录，CLI 通过 `-D` 指定该目录。认证令牌不放入命令行参数，也不写入日志。
 - 服务或 Moon 操作结束后更新临时目录。若通过其他软件修改 Moon 文件，可重开 ZTGUI 更新本地文件缓存。
 - Moon 导入、删除和 `.ztbundle` 配置包使用与 Windows 相同的界面；实际文件写入系统目录。
-- 日志位于程序可执行文件所在目录的 `logs/YYMMDD-{num}.log`（`.app` 内为 `Contents/MacOS/logs/`），每日从 1 开始，每次启动按已有最大编号递增。该目录需要可写；版本由根目录 `VERSION` 同步到 macOS 应用元数据。
+- 日志位于程序可执行文件所在目录的 `logs/YYMMDD-{num}.log`（`.app` 内为 `Contents/MacOS/logs/`），每日从 1 开始，每次启动按已有最大编号递增。该目录需要可写；客户端版本由根目录 `VERSION` 同步，BundleVersion／ShortVersion 使用其数字部分（`0.5.1`），关于界面显示完整版本（`0.5.1-alpha`）。
 - 中文字体使用 PingFang SC，应用图标在打包时生成 ICNS。
 
 ## 首次实机验证

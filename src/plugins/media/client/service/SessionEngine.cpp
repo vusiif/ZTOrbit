@@ -1,0 +1,822 @@
+#include "SessionEngine.h"
+#include "VideoCodec.h"
+#include "AudioMath.h"
+#include "MediaClock.h"
+#include <ztmedia/SharedFrames.h>
+#include <QElapsedTimer>
+#include <QPointer>
+#include <QUuid>
+#include <QPainter>
+#include <chrono>
+#include <mutex>
+
+namespace vusiif::ztgui::media::engine {
+namespace {
+qint64 clockUs(){return monotonicTimeUs();}
+QString validate(TrackConfig &c) {
+    if (c.direction != "send" && c.direction != "receive")
+        return "Unsupported track direction";
+    if (!std::isfinite(c.gain) || c.gain < 0 || c.gain > 4)
+        return "Gain must be within 0..4";
+    if (c.kind == "audio") {
+        if (c.codec.codec != "opus" || c.audio.sampleRate != 48000 || c.audio.channels != 1 ||
+            c.audio.sampleFormat != "f32")
+            return "Audio requires Opus, 48000 Hz mono f32";
+        if (c.codec.bitrate < 6000 || c.codec.bitrate > 128000)
+            return "Invalid Opus bitrate";
+    } else if (c.kind == "video") {
+        if (c.codec.codec != "h264" || c.codec.preferHardware)
+            return "This build provides software H.264";
+        if (c.video.width < 16 || c.video.height < 16 || c.video.width > 1920 || c.video.height > 1080 ||
+            c.video.width % 2 || c.video.height % 2 || c.video.pixelFormat != "bgra" ||
+            c.video.colorSpace != "bt709" || c.video.colorRange != "limited")
+            return "Unsupported video format";
+        if (c.codec.frameRate < 1 || c.codec.frameRate > 60 || c.codec.bitrate < 64000 ||
+            c.codec.bitrate > 20000000 || c.codec.keyFrameInterval < 1 || c.codec.keyFrameInterval > 300)
+            return "Invalid video encoding parameters";
+    } else
+        return "Unsupported media kind";
+    return {};
+}
+struct VideoPermit {
+    std::shared_ptr<std::atomic<int>> count;
+    explicit VideoPermit(std::shared_ptr<std::atomic<int>> value) : count(std::move(value)) {}
+    ~VideoPermit() { count->fetch_sub(1); }
+};
+struct VideoMailbox {
+    std::mutex mutex;
+    QVideoFrame latest;
+    bool queued = false;
+    quint64 replaced = 0;
+};
+struct Track {
+    QString id;
+    TrackConfig config;
+    quint64 configuration = 1, sequence = 0, captured = 0, received = 0, dropped = 0, frames = 0;
+    quint64 processingUs = 0, peakProcessingUs = 0;
+    bool running = false, muted = false, discontinuous = false;
+    qint64 nextTick = 0, audioPts = 0, anchor = -1, remoteAnchor = 0;
+    std::unique_ptr<VideoCodec> video;
+    std::shared_ptr<VideoPermit> videoPermit;
+    OpusEncoder *encoder = nullptr;
+    std::unique_ptr<JitterStream> jitter;
+    PcmConverter converter;
+    QByteArray input;
+    ProcessorChain processors;
+    std::unique_ptr<detail::SharedFrames> preview;
+    QQueue<QPair<QImage, qint64>> decoded;
+    ~Track() {
+        if (encoder)
+            opus_encoder_destroy(encoder);
+    }
+};
+} // namespace
+class SessionActor final : public QObject {
+  public:
+    using Reply = SessionEngine::Reply;
+    QTimer *timer;
+    ExtensionRegistry &extensions;
+    std::map<QString, std::unique_ptr<Track>> tracks;
+    PlaybackTimeline timeline;
+    quint64 generation;
+    std::shared_ptr<std::atomic<int>> videoCount;
+    std::function<bool(QJsonObject, QByteArray)> data;
+    std::function<void(QString, QString)> failed;
+    std::function<void(QString, QString, QVector<float>)> playback;
+    explicit SessionActor(ExtensionRegistry &e, quint64 g, std::shared_ptr<std::atomic<int>> budget)
+        : timer(new QTimer(this)), extensions(e), generation(g), videoCount(std::move(budget)) {
+        timer->setTimerType(Qt::PreciseTimer);
+        timer->setInterval(5);
+        connect(timer, &QTimer::timeout, this, [this] { tick(); });
+    }
+    QString initialize(Track &t, std::shared_ptr<VideoPermit> permit = {}) {
+        auto error = validate(t.config);
+        if (!error.isEmpty())
+            return error;
+        if (t.config.kind == "video") {
+            if (!permit) {
+                if (videoCount->fetch_add(1) >= 16) {
+                    videoCount->fetch_sub(1);
+                    return "Worker video pipeline limit reached";
+                }
+                permit = std::make_shared<VideoPermit>(videoCount);
+            }
+            t.videoPermit = std::move(permit);
+            t.video = std::make_unique<VideoCodec>();
+            error = t.video->open(t.config, extensions);
+            if (!error.isEmpty())
+                return error;
+        } else {
+            if (t.config.direction == "send") {
+                int code = 0;
+                t.encoder = opus_encoder_create(48000, 1, OPUS_APPLICATION_VOIP, &code);
+                if (!t.encoder || code != OPUS_OK)
+                    return "Cannot create Opus encoder";
+                opus_encoder_ctl(t.encoder, OPUS_SET_BITRATE(t.config.codec.bitrate));
+                opus_encoder_ctl(t.encoder, OPUS_SET_COMPLEXITY(5));
+            } else
+                t.jitter = std::make_unique<JitterStream>(0);
+            error = t.processors.create(t.config.processors, "audio", extensions);
+            if (!error.isEmpty())
+                return error;
+        }
+        if (t.config.kind == "video" && t.config.preview) {
+            t.preview = std::make_unique<detail::SharedFrames>();
+            if (!t.preview->create(generation))
+                return "Cannot allocate shared preview frames";
+        }
+        return {};
+    }
+    QJsonObject descriptor(const Track &t) {
+        return {
+            {"id", t.id}, {"configuration", QString::number(t.configuration)}, {"config", toJson(t.config)}};
+    }
+    void command(const QString &method, const QJsonObject &d, Reply reply) {
+        if (method == "statistics") {
+            QJsonArray values;
+            for (const auto &p : tracks) {
+                const auto &t = *p.second;
+                values.append(QJsonObject{{"id", t.id},
+                                          {"running", t.running},
+                                          {"captured", QString::number(t.captured)},
+                                          {"received", QString::number(t.received)},
+                                          {"frames", QString::number(t.frames)},
+                                          {"processingUs", QString::number(t.processingUs)},
+                                          {"peakProcessingUs", QString::number(t.peakProcessingUs)},
+                                          {"dropped", QString::number(t.dropped)}});
+            }
+            reply({{"tracks", values}}, {}, {});
+            return;
+        }
+        if (method == "track.create") {
+            if (tracks.size() >= 128) {
+                reply({}, {}, "Track limit reached");
+                return;
+            }
+            auto t = std::make_unique<Track>();
+            t->id = QString::number(generation) + "-" + QUuid::createUuid().toString(QUuid::Id128);
+            t->config = trackConfig(d["config"].toObject());
+            auto error = initialize(*t);
+            if (!error.isEmpty()) {
+                reply({}, {}, error);
+                return;
+            }
+            auto result = descriptor(*t);
+            tracks.emplace(t->id, std::move(t));
+            reply(result, {}, {});
+            return;
+        }
+        const auto id = d["id"].toString();
+        auto it = tracks.find(id);
+        if (it == tracks.end()) {
+            reply({}, {}, "Unknown or stale track");
+            return;
+        }
+        auto &t = *it->second;
+        if (method == "track.configure") {
+            if (t.running) {
+                reply({}, {}, "Stop the track before reconfiguring");
+                return;
+            }
+            auto replacement = std::make_unique<Track>();
+            replacement->id = t.id;
+            replacement->config = trackConfig(d["config"].toObject());
+            replacement->configuration = t.configuration + 1;
+            auto error = initialize(*replacement, t.videoPermit);
+            if (!error.isEmpty()) {
+                reply({}, {}, error);
+                return;
+            }
+            it->second = std::move(replacement);
+            reply(descriptor(*it->second), {}, {});
+            return;
+        }
+        if (method == "track.start") {
+            t.running = true;
+            t.nextTick = clockUs();
+            timer->start();
+        } else if (method == "track.stop") {
+            t.running = false;
+            t.input.clear();
+            t.decoded.clear();
+            t.converter.clear();
+            t.anchor = -1;
+            t.audioPts = 0;
+            if (t.jitter)
+                t.jitter = std::make_unique<JitterStream>(0);
+            if (t.video) {
+                auto error = t.video->open(t.config, extensions);
+                if (!error.isEmpty()) {
+                    reply({}, {}, error);
+                    return;
+                }
+            }
+        } else if (method == "track.remove") {
+            auto group = t.config.syncGroup.isEmpty() ? t.id : t.config.syncGroup;
+            tracks.erase(it);
+            bool used = false;
+            for (const auto &entry : tracks)
+                used |= (entry.second->config.syncGroup.isEmpty() ? entry.second->id
+                                                                  : entry.second->config.syncGroup) == group;
+            if (!used)
+                timeline.reset(group);
+        } else if (method == "track.keyframe") {
+            if (t.video)
+                t.video->keyFrame();
+        } else if (method == "track.gain") {
+            double gain = d["gain"].toDouble(-1);
+            if (!std::isfinite(gain) || gain < 0 || gain > 4) {
+                reply({}, {}, "Invalid gain");
+                return;
+            }
+            t.config.gain=float(gain);
+            if(t.config.direction=="send"&&t.muted!=d["muted"].toBool()){t.input.clear();t.converter.clear();t.audioPts=0;t.discontinuous=true;}
+            t.muted=d["muted"].toBool();
+        } else {
+            reply({}, {}, "Unknown session command");
+            return;
+        }
+        bool active = false;
+        for (const auto &p : tracks)
+            active |= p.second->running;
+        if (!active)
+            timer->stop();
+        reply({}, {}, {});
+    }
+    void emitPacket(Track &t, EncodedPacket p) {
+        p.track = t.id;
+        p.generation = generation;
+        p.configuration = t.configuration;
+        p.discontinuity = t.discontinuous;
+        t.discontinuous = false;
+        auto h = toJson(p);
+        h["type"] = "packet";
+        if (data && !data(h, p.data)) {
+            ++t.dropped;
+            t.discontinuous = true;
+            if (t.video)
+                t.video->keyFrame();
+        }
+    }
+    void preview(Track &t, const QImage &source, qint64 pts, bool decoded) {
+        if (!t.preview)
+            return;
+        auto image = source.convertToFormat(QImage::Format_ARGB32);
+        auto size = image.sizeInBytes();
+        const auto serial = t.frames++;
+        const auto previous = t.preview->overwritten();
+        int slot = t.preview->publish(image.constBits(), size, serial);
+        t.dropped += t.preview->overwritten() - previous;
+        if (slot < 0) {
+            ++t.dropped;
+            return;
+        }
+        QJsonObject h{{"type", "frame"},
+                      {"track", t.id},
+                      {"generation", QString::number(generation)},
+                      {"configuration", QString::number(t.configuration)},
+                      {"sequence", QString::number(serial)},
+                      {"pts", QString::number(pts)},
+                      {"duration", QString::number(1000000 / t.config.codec.frameRate)},
+                      {"width", image.width()},
+                      {"height", image.height()},
+                      {"stride", image.bytesPerLine()},
+                      {"size", double(size)},
+                      {"mapping", t.preview->key()},
+                      {"slot", slot},
+                      {"decoded", decoded}};
+        if (!data || !data(h, {}))
+            t.preview->discard(slot, serial);
+    }
+    void video(const QString &id, QVideoFrame frame) {
+        if (frame.isValid())
+            image(id, frame.toImage(),frame.startTime());
+    }
+    void image(const QString &id, const QImage &image,qint64 capturedAt=-1) {
+        auto it = tracks.find(id);
+        if (it == tracks.end() || !it->second->running)
+            return;
+        auto &t = *it->second;
+        auto now=clockUs();const auto pts=capturedAt>0?capturedAt:now;
+        if (t.config.source != "synthetic" && pts < t.nextTick) {
+            ++t.dropped;
+            return;
+        }
+        t.nextTick = pts + 1000000 / t.config.codec.frameRate;
+        ++t.captured;
+        auto scaled = image.scaled(t.config.video.width, t.config.video.height, Qt::IgnoreAspectRatio,
+                                   Qt::FastTransformation);
+        preview(t, scaled, pts, false);
+        QString error;
+        for (auto p : t.video->encode(scaled, pts, error))
+            emitPacket(t, std::move(p));
+        auto elapsed = quint64(clockUs() - now);
+        t.processingUs += elapsed;
+        t.peakProcessingUs = std::max(t.peakProcessingUs, elapsed);
+        if (!error.isEmpty() && failed)
+            failed(t.id, error);
+    }
+    void audio(const QString &id, const QByteArray &bytes, const QAudioFormat &format,qint64 capturedAt) {
+        auto it = tracks.find(id);
+        if (it == tracks.end() || !it->second->running)
+            return;
+        auto &t = *it->second;
+        if (t.muted)
+            return;
+        t.input += t.converter.process(bytes, format, PcmConverter::mono());
+        if (t.input.size() > FrameSamples * 4 * 5) {
+            const auto removed=t.input.size()-FrameSamples*4*5;t.input.remove(0,removed);
+            if(t.audioPts)t.audioPts+=(removed/4)*1000000/48000;t.discontinuous=true;++t.dropped;
+        }
+        if(!t.audioPts)t.audioPts=capturedAt-(t.input.size()/4)*1000000/48000;
+        while (t.input.size() >= FrameSamples * 4) {
+            AVFrame *frame = av_frame_alloc();
+            if (!frame)
+                return;
+            frame->format = AV_SAMPLE_FMT_FLT;
+            frame->sample_rate = 48000;
+            frame->nb_samples = FrameSamples;
+            const auto framePts=t.audioPts;t.audioPts+=20000;frame->pts=framePts;frame->time_base={1,1000000};
+            av_channel_layout_default(&frame->ch_layout, 1);
+            if (av_frame_get_buffer(frame, 0) < 0) {
+                av_frame_free(&frame);
+                return;
+            }
+            std::memcpy(frame->data[0], t.input.constData(), FrameSamples * 4);
+            t.input.remove(0, FrameSamples * 4);
+            QString error;
+            auto *processed = t.processors.process(frame, error);
+            av_frame_free(&frame);
+            if (!processed) {
+                if (!error.isEmpty() && failed)
+                    failed(id, error);
+                continue;
+            }
+            if (processed->format != AV_SAMPLE_FMT_FLT || processed->nb_samples != FrameSamples ||
+                processed->ch_layout.nb_channels != 1) {
+                av_frame_free(&processed);
+                if (failed)
+                    failed(id, "Processor changed the negotiated audio format");
+                continue;
+            }
+            if (av_frame_make_writable(processed) < 0) {
+                av_frame_free(&processed);
+                return;
+            }
+            auto *samples = reinterpret_cast<float *>(processed->data[0]);
+            for (int i = 0; i < FrameSamples; ++i)
+                samples[i] = clampSample(samples[i] * t.config.gain);
+            QByteArray encoded(MaxOpusBytes, Qt::Uninitialized);
+            int count = opus_encode_float(t.encoder, samples, FrameSamples,
+                                          reinterpret_cast<unsigned char *>(encoded.data()), MaxOpusBytes);
+            av_frame_free(&processed);
+            if (count > 0) {
+                encoded.resize(count);
+                EncodedPacket p;
+                p.codec = "opus";
+                p.sequence = t.sequence++;
+                p.pts=framePts;
+                p.data = std::move(encoded);
+                ++t.captured;
+                emitPacket(t, std::move(p));
+            }
+        }
+    }
+    void submit(const QJsonObject &h, const QByteArray &bytes) {
+        auto p = encodedPacket(h, bytes);
+        auto it = tracks.find(p.track);
+        if (it == tracks.end() || p.generation != generation || p.configuration != it->second->configuration)
+            return;
+        auto &t = *it->second;
+        if (!t.running || t.config.direction != "receive" || p.codec != t.config.codec.codec ||
+            p.timeBase.numerator <= 0 || p.timeBase.denominator <= 0 || bytes.isEmpty())
+            return;
+        ++t.received;
+        if (t.config.kind == "audio") {
+            if (bytes.size() > MaxOpusBytes)
+                return;
+            auto group = t.config.syncGroup.isEmpty() ? t.id : t.config.syncGroup;
+            if(t.anchor<0||p.discontinuity){t.anchor=timeline.schedule(group,p.pts,p.timeBase,clockUs());t.nextTick=t.anchor;if(p.discontinuity)t.jitter=std::make_unique<JitterStream>(0);}
+            t.jitter->push(quint32(p.sequence), bytes);
+        } else {
+            QString error;
+            auto decoded = t.video->decode(p, error);
+            if (!error.isEmpty() && failed)
+                failed(t.id, error);
+            for (auto &f : decoded) {
+                if (t.decoded.size() >= 3) {
+                    t.decoded.dequeue();
+                    ++t.dropped;
+                }
+                auto group = t.config.syncGroup.isEmpty() ? t.id : t.config.syncGroup;
+                f.second=timeline.schedule(group,f.second,{1,1000000},clockUs());
+                t.decoded.enqueue(std::move(f));
+            }
+        }
+    }
+    void tick() {
+        auto now = clockUs();
+        for (auto &p : tracks) {
+            auto &t = *p.second;
+            if (!t.running)
+                continue;
+            if (t.config.kind == "audio" && t.config.direction == "receive" && t.anchor >= 0 &&
+                now >= t.nextTick) {
+                t.nextTick = std::max(t.nextTick + 20000, now - 20000);
+                auto frame = t.jitter->pull();
+                for (auto &sample : frame)
+                    sample = std::isfinite(sample) ? sample * (t.muted ? 0.f : t.config.gain) : 0.f;
+                if (playback)
+                    playback(t.id, t.config.output, std::move(frame));
+            }
+            if (t.config.kind == "video" && t.config.direction == "send" && t.config.source == "synthetic" &&
+                now >= t.nextTick) {
+                QImage image(t.config.video.width, t.config.video.height, QImage::Format_ARGB32);
+                image.fill(QColor::fromHsv(int(t.captured * 3 % 360), 180, 180));
+                QPainter painter(&image);
+                painter.fillRect(0, 0, image.width() / 3, image.height(), Qt::red);
+                painter.end();
+                imageFunc(t.id, image);
+            }
+            while (!t.decoded.isEmpty() && t.decoded.front().second <= now) {
+                auto f = t.decoded.dequeue();
+                preview(t, f.first, f.second, true);
+            }
+        }
+    }
+    void imageFunc(const QString &id, const QImage &imageValue) { image(id, imageValue); }
+};
+SessionEngine::SessionEngine(protocol::service::Worker &w, DeviceManager &d, ExtensionRegistry &e,
+                             QObject *parent)
+    : QObject(parent), worker(w), devices(d), extensions(e) {
+    QMetaObject::invokeMethod(&devices, [this] {
+        devices.changed = [this] {
+            QMetaObject::invokeMethod(this, [this] {
+                for (const auto &s : sessions)
+                    worker.event(s.first, {{"event", "sources"}});
+            });
+        };
+    });
+}
+SessionEngine::~SessionEngine() { shutdown(); }
+SessionEngine::Session *SessionEngine::session(const QString &lease) {
+    auto found = sessions.find(lease);
+    if (found != sessions.end())
+        return found->second.get();
+    if (sessions.size() >= 32)
+        return nullptr;
+    auto s = std::make_unique<Session>();
+    s->thread = std::make_unique<QThread>();
+    s->actor = new SessionActor(extensions, worker.generation().toULongLong(), videoCount);
+    s->actor->moveToThread(s->thread.get());
+    connect(s->thread.get(), &QThread::finished, s->actor, &QObject::deleteLater);
+    s->actor->failed = [this, lease](QString id, QString message) {
+        QMetaObject::invokeMethod(this, [this, lease, id, message] {
+            worker.event(lease, {{"event", "error"}, {"code", "track"}, {"track", id}, {"message", message}});
+        });
+    };
+    s->actor->playback = [this, lease](QString id, QString output, QVector<float> samples) {
+        QMetaObject::invokeMethod(this, [this, lease, id, output, samples = std::move(samples)]() mutable {
+            auto s = sessions.find(lease);
+            if (s != sessions.end() && !s->second->closing && s->second->active.contains(id))
+                QMetaObject::invokeMethod(&devices,
+                                          [this, id, output, samples = std::move(samples)]() mutable {
+                                              devices.play(id, output, std::move(samples));
+                                          });
+        });
+    };
+    auto queued = s->queued;
+    s->actor->data = [this, lease, queued](QJsonObject h, QByteArray p) {
+        if (!queued->reserve(p.size()))
+            return false;
+        if (queued->fetch_add(1) >= 32) {
+            queued->fetch_sub(1);
+            queued->release(p.size());
+            return false;
+        }
+        QMetaObject::invokeMethod(this, [this, lease, queued, h = std::move(h), p = std::move(p)] {
+            queued->fetch_sub(1);
+            queued->release(p.size());
+            if (!worker.sendData(lease, h, p)) {
+                if (h["type"] == "frame") {
+                    detail::SharedFrames m;
+                    if (m.open(h["mapping"].toString(), worker.generation().toULongLong()))
+                        m.discard(h["slot"].toInt(), h["sequence"].toString().toULongLong());
+                } else {
+                    auto it = sessions.find(lease);
+                    if (it != sessions.end() && !it->second->closing) {
+                        auto *actor = it->second->actor;
+                        auto id = h["track"].toString();
+                        QMetaObject::invokeMethod(actor, [actor, id] {
+                            auto t = actor->tracks.find(id);
+                            if (t != actor->tracks.end()) {
+                                t->second->discontinuous = true;
+                                if (t->second->video)
+                                    t->second->video->keyFrame();
+                            }
+                        });
+                    }
+                    worker.event(lease, {{"event", "error"},
+                                         {"code", "backpressure"},
+                                         {"message", "Encoded output queue full; restart at a keyframe"}});
+                }
+            }
+        });
+        return true;
+    };
+    s->thread->start();
+    auto *result = s.get();
+    sessions.emplace(lease, std::move(s));
+    return result;
+}
+void SessionEngine::call(const QString &lease, const QString &method, const QJsonObject &d, Reply reply) {
+    auto *s = session(lease);
+    if (!s || s->closing) {
+        reply({}, {}, "Session unavailable");
+        return;
+    }
+    if (method == "sources") {
+        QMetaObject::invokeMethod(&devices, [this, reply] {
+            auto sources = devices.sources();
+            QMetaObject::invokeMethod(this, [reply, sources] { reply({{"sources", sources}}, {}, {}); });
+        });
+        return;
+    }
+    if (method == "capabilities") {
+        QJsonArray processors;
+        for (const auto &id : extensions.ids())
+            processors.append(id);
+        reply(
+            {{"compiled", QJsonObject{{"ffmpeg", av_version_info()},
+                                      {"ffmpegFingerprint", ZTMEDIA_FFMPEG_FINGERPRINT},
+                                      {"audio", QJsonArray{"opus"}},
+                                      {"video", QJsonArray{"h264"}},
+                                      {"processors", processors}}},
+             {"runtime", QJsonObject{{"softwareH264", avcodec_find_encoder_by_name("libopenh264") != nullptr},
+                                     {"hardwareEncoding", false}}},
+             {"limits", QJsonObject{{"tracks", 128},
+                                    {"workerVideoTracks", 16},
+                                    {"width", 1920},
+                                    {"height", 1080},
+                                    {"packetBytes", double(protocol::service::BulkChannel::MessageBytes)},
+                                    {"queueBytes", double(protocol::service::BulkChannel::QueueBytes)},
+                                    {"previewSlots", 3}}}},
+            {}, {});
+        return;
+    }
+    auto id = d["id"].toString();
+    if (method == "track.stop" || method == "track.remove") {
+        if (s->operations.contains(id))
+            s->operations[id]->store(true);
+        s->active.remove(id);
+        detach(id);
+    }
+    auto *actor = s->actor;
+    if (method == "track.start") {
+        if (s->active.contains(id)) {
+            reply({}, {}, {});
+            return;
+        }
+        if (s->operations.contains(id))
+            s->operations[id]->store(true);
+        auto cancelled = std::make_shared<std::atomic<bool>>(false);
+        s->operations[id] = cancelled;
+        QMetaObject::invokeMethod(actor, [this, lease, actor, id, cancelled,
+                                          reply = std::move(reply)]() mutable {
+            auto track = actor->tracks.find(id);
+            if (track == actor->tracks.end()) {
+                QMetaObject::invokeMethod(this, [reply] { reply({}, {}, "Unknown or stale track"); });
+                return;
+            }
+            auto config = track->second->config;
+            QMetaObject::invokeMethod(this, [this, lease, actor, id, config, cancelled,
+                                             reply = std::move(reply)]() mutable {
+                auto found = sessions.find(lease);
+                if (found == sessions.end() || found->second->closing || cancelled->load()) {
+                    reply({}, {}, "Session closing");
+                    return;
+                }
+                auto queue = found->second->queued;
+                DeviceManager::Consumer consumer;
+                consumer.audio = [actor, id, queue, cancelled](QByteArray bytes, QAudioFormat format,qint64 capturedAt) {
+                    if (cancelled->load())
+                        return;
+                    if (queue->fetch_add(1) >= 32) {
+                        queue->fetch_sub(1);
+                        return;
+                    }
+                    QMetaObject::invokeMethod(
+                        actor, [actor, id, queue, cancelled,capturedAt, bytes = std::move(bytes), format] {
+                            queue->fetch_sub(1);
+                            if (!cancelled->load())
+                                actor->audio(id, bytes, format,capturedAt);
+                        });
+                };
+                auto mailbox = std::make_shared<VideoMailbox>();
+                consumer.video = [actor, id, queue, mailbox, cancelled](QVideoFrame frame) {
+                    if (cancelled->load())
+                        return;
+                    {
+                        std::lock_guard<std::mutex> guard(mailbox->mutex);
+                        mailbox->latest = std::move(frame);
+                        if (mailbox->queued) {
+                            ++mailbox->replaced;
+                            return;
+                        }
+                        mailbox->queued = true;
+                    }
+                    if (queue->fetch_add(1) >= 32) {
+                        queue->fetch_sub(1);
+                        std::lock_guard<std::mutex> guard(mailbox->mutex);
+                        mailbox->queued = false;
+                        return;
+                    }
+                    QMetaObject::invokeMethod(actor, [actor, id, queue, mailbox, cancelled] {
+                        queue->fetch_sub(1);
+                        QVideoFrame frame;
+                        quint64 replaced = 0;
+                        {
+                            std::lock_guard<std::mutex> guard(mailbox->mutex);
+                            frame = std::move(mailbox->latest);
+                            replaced = mailbox->replaced;
+                            mailbox->replaced = 0;
+                            mailbox->queued = false;
+                        }
+                        if (cancelled->load())
+                            return;
+                        auto track = actor->tracks.find(id);
+                        if (track != actor->tracks.end())
+                            track->second->dropped += replaced;
+                        actor->video(id, std::move(frame));
+                    });
+                };
+                consumer.failed = [this, lease, id](QString error) {
+                    QTimer::singleShot(0, this, [this, lease, id, error] {
+                        auto s = sessions.find(lease);
+                        if (s == sessions.end() || s->second->closing)
+                            return;
+                        s->second->active.remove(id);
+                        detach(id);
+                        auto *a = s->second->actor;
+                        QMetaObject::invokeMethod(a, [a, id] {
+                            auto t = a->tracks.find(id);
+                            if (t != a->tracks.end())
+                                t->second->running = false;
+                        });
+                        worker.event(
+                            lease,
+                            {{"event", "error"}, {"code", "device"}, {"track", id}, {"message", error}});
+                    });
+                };
+                QMetaObject::invokeMethod(&devices, [this, lease, id, config, actor, cancelled,
+                                                     consumer = std::move(consumer),
+                                                     reply = std::move(reply)]() mutable {
+                    auto error = cancelled->load() ? QString("Track start cancelled")
+                                                   : devices.attach(id, config, std::move(consumer));
+                    if (cancelled->load())
+                        devices.detach(id);
+                    QMetaObject::invokeMethod(this, [this, lease, id, actor, error, cancelled,
+                                                     reply = std::move(reply)] {
+                        auto found = sessions.find(lease);
+                        if (found == sessions.end() || found->second->closing || cancelled->load()) {
+                            reply({}, {}, "Track start cancelled or session closing");
+                            return;
+                        }
+                        if (!error.isEmpty()) {
+                            reply({}, {}, error);
+                            return;
+                        }
+                        found->second->active.insert(id);
+                        QMetaObject::invokeMethod(actor, [this, actor, id, reply] {
+                            actor->command(
+                                "track.start", {{"id", id}},
+                                [this, reply](const QJsonObject &d, const QByteArray &p, const QString &e) {
+                                    QMetaObject::invokeMethod(this, [reply, d, p, e] { reply(d, p, e); });
+                                });
+                        });
+                    });
+                });
+            });
+        });
+        return;
+    }
+    QMetaObject::invokeMethod(actor, [this, lease, actor, method, d, id, reply = std::move(reply)]() mutable {
+        actor->command(method, d,
+                       [this, lease, method, id, reply = std::move(reply)](
+                           const QJsonObject &result, const QByteArray &bytes, const QString &error) mutable {
+                           QMetaObject::invokeMethod(this, [this, lease, method, id, reply = std::move(reply),
+                                                            result, bytes, error]() mutable {
+                               auto it = sessions.find(lease);
+                               if (it == sessions.end() || it->second->closing) {
+                                   reply({}, {}, "Session closing");
+                                   return;
+                               }
+                               if (error.isEmpty() && method == "track.create")
+                                   it->second->tracks.insert(result["id"].toString());
+                               if (error.isEmpty() && method == "track.remove")
+                                   it->second->tracks.remove(id);
+                               auto response = result;
+                               if (method == "statistics") {
+                                   response["queueDepth"] = it->second->queued->load();
+                                   response["queuePeak"] = it->second->queued->peak.load();
+                                   response["queueBytes"] = QString::number(it->second->queued->bytes.load());
+                                   response["queuePeakBytes"] =
+                                       QString::number(it->second->queued->peakBytes.load());
+                               }
+                               QMetaObject::invokeMethod(
+                                   &devices, [this, response, bytes, error, reply, method]() mutable {
+                                       if (method == "statistics")
+                                           response["devices"] = devices.statistics();
+                                       QMetaObject::invokeMethod(this, [response, bytes, error, reply] {
+                                           reply(response, bytes, error);
+                                       });
+                                   });
+                           });
+                       });
+    });
+}
+void SessionEngine::submit(const QString &lease, const QJsonObject &h, const QByteArray &p) {
+    auto it = sessions.find(lease);
+    if (it == sessions.end() || it->second->closing)
+        return;
+    auto queue = it->second->queued;
+    if (!queue->reserve(p.size())) {
+        worker.event(
+            lease, {{"event", "error"}, {"code", "backpressure"}, {"message", "Input byte budget exceeded"}});
+        return;
+    }
+    if (queue->fetch_add(1) >= 32) {
+        queue->fetch_sub(1);
+        queue->release(p.size());
+        worker.event(lease, {{"event", "error"}, {"code", "backpressure"}, {"message", "Input queue full"}});
+        return;
+    }
+    auto *actor = it->second->actor;
+    QMetaObject::invokeMethod(actor, [actor, queue, h, p] {
+        queue->fetch_sub(1);
+        queue->release(p.size());
+        actor->submit(h, p);
+    });
+}
+void SessionEngine::release(const QString &lease, Reply reply) {
+    auto it = sessions.find(lease);
+    if (it == sessions.end()) {
+        reply({}, {}, {});
+        return;
+    }
+    auto *s = it->second.get();
+    s->closing = true;
+    for (const auto &cancel : s->operations)
+        cancel->store(true);
+    for (const auto &id : s->tracks)
+        detach(id);
+    auto *actor = s->actor;
+    connect(s->thread.get(), &QThread::finished, this, [this, lease, reply] {
+        QMetaObject::invokeMethod(&devices, [this, lease, reply] {
+            QMetaObject::invokeMethod(this, [this, lease, reply] {
+                sessions.erase(lease);
+                reply({}, {}, {});
+            });
+        });
+    });
+    // Unbind producers before destroying their callback target. The device
+    // event queue is a barrier for all preceding detach and readyRead callbacks.
+    QMetaObject::invokeMethod(&devices, [actor] {
+        QMetaObject::invokeMethod(actor, [actor] {
+            actor->timer->stop();
+            actor->tracks.clear();
+            QThread::currentThread()->quit();
+        });
+    });
+}
+void SessionEngine::shutdown() {
+    for (auto &s : sessions) {
+        s.second->closing = true;
+        for (const auto &cancel : s.second->operations)
+            cancel->store(true);
+    }
+    auto releaseDevices = [this] {
+        devices.changed = {};
+        for (const auto &entry : sessions)
+            for (const auto &id : entry.second->tracks)
+                devices.detach(id);
+    };
+    if (devices.thread() == QThread::currentThread())
+        releaseDevices();
+    else if (devices.thread()->isRunning())
+        QMetaObject::invokeMethod(&devices, releaseDevices, Qt::BlockingQueuedConnection);
+    for (auto &entry : sessions) {
+        auto &s = *entry.second;
+        if (s.thread->isRunning()) {
+            auto *actor = s.actor;
+            QMetaObject::invokeMethod(actor, [actor] {
+                actor->timer->stop();
+                actor->tracks.clear();
+                QThread::currentThread()->quit();
+            });
+            s.thread->wait();
+        }
+    }
+    sessions.clear();
+}
+} // namespace vusiif::ztgui::media::engine

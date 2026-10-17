@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21.1)
 include(../../cmake/Version.cmake)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(zerotier_gui VERSION "${ZEROTIER_VERSION}" LANGUAGES CXX)
+    project(zerotier_gui VERSION "${ZEROTIER_VERSION_NUMERIC}" LANGUAGES CXX)
     set(ZTGUI_ROOT_DIR "${ZTGUI_REPOSITORY}")
     set(ZTGUI_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}")
     option(ZEROTIER_BUILD_TESTS "Build client regression tests" OFF)

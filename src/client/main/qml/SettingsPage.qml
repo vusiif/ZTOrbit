@@ -54,16 +54,7 @@ Pane {
                         HoverHandler { cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
                     }
                 }
-                Label {
-                    objectName: "gpuAccelerationHint"
-                    Layout.fillWidth: true
-                    text: backend.gpuAccelerationForcedOff
-                        ? "本次启动已由启动参数禁用GPU加速。"
-                        : "开启后使用CPU绘制。\n完全退出并重启程序后生效。"
-                    wrapMode: Text.Wrap
-                    color: Theme.muted
-                }
-                ActionButton { text: "插件"; Layout.fillWidth: true; onClicked: { root.openPlugins() } }
+                ActionButton { objectName: "openPluginsButton"; text: "插件"; Layout.fillWidth: true; onClicked: { root.openPlugins() } }
                 ActionButton { objectName: "aboutButton"; text: "关于"; Layout.fillWidth: true; onClicked: { root.openAbout() } }
                 ActionButton { text: "退出"; Layout.fillWidth: true; onClicked: backend.requestQuit() }
             }

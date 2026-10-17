@@ -24,7 +24,7 @@ int main(int argc, char *argv[])
     // Select the renderer before creating any Quick window, including errors.
     // The command-line option overrides the saved preference for this run only.
     if (app.arguments().contains("--disable-gpu-acceleration") ||
-        settings.value("rendering/disableGpuAcceleration", false).toBool())
+        settings.value("rendering/disableGpuAcceleration", true).toBool())
         QQuickWindow::setSceneGraphBackend("software");
     QQuickStyle::setStyle("Basic");
 #ifdef Q_OS_MACOS

@@ -1,0 +1,30 @@
+********* Start testing of QmlTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : QmlTests::initTestCase()
+QINFO  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(light) [worker] Owned process started; pid 19192
+QWARN  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(light) [worker] [media] Initializing media service?
+
+QINFO  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(light) [worker] IPC authenticated; waiting for service preparation; pid 19192
+QWARN  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(light) [worker] [media] Preparing audio devices?
+
+QWARN  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(light) [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(light) [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(light) [worker] Service preparation completed; pid 19192
+PASS   : QmlTests::serviceDependenciesAndCascadeUseNativeControls(light)
+QINFO  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(dark) [worker] Owned process started; pid 18880
+QWARN  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(dark) [worker] [media] Initializing media service?
+
+QINFO  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(dark) [worker] IPC authenticated; waiting for service preparation; pid 18880
+QWARN  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(dark) [worker] [media] Preparing audio devices?
+
+QWARN  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(dark) [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(dark) [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : QmlTests::serviceDependenciesAndCascadeUseNativeControls(dark) [worker] Service preparation completed; pid 18880
+PASS   : QmlTests::serviceDependenciesAndCascadeUseNativeControls(dark)
+PASS   : QmlTests::cleanupTestCase()
+Totals: 4 passed, 0 failed, 0 skipped, 0 blacklisted, 12246ms
+********* Finished testing of QmlTests *********

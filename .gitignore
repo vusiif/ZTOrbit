@@ -1,14 +1,15 @@
-cmake-build-*/
-dist/
+build/
 .idea/
 *.user
 *.log
 logs/
 screenshots/
+target/
+*.class
+
+# Maven flatten-maven-plugin output
+.flattened-pom.xml
 
 .tmp/
 __pycache__/
 *.pyc
-
-# Generated plugin UI test capture
-/voice-qml.png

@@ -1,6 +1,5 @@
 #include "AppController.h"
-#include "ClientNetworkService.h"
-#include "NetworkTransport.h"
+#include "MemberPing.h"
 #include "PluginPackage.h"
 #include "AppLog.h"
 #include "NetworkBundle.h"
@@ -76,9 +75,11 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
     m_serviceStatus.known = false;
     connect(&m_loader,&plugins::PluginLoader::stateChanged,this,&AppController::menusChanged);
     connect(&m_loader,&plugins::PluginLoader::loadFinished,this,[this](const QString &id,bool success,const QString &message) {
-        if(!success && !m_closing) feedback(QStringLiteral("插件 %1 加载失败：%2").arg(id,message));
+        if(!success && !m_closing) {
+            const auto detail=QStringLiteral("插件 %1 加载失败：%2").arg(id,message);
+            feedback(detail); emit pluginNoticeRequested(QStringLiteral("无法加载插件"),detail);
+        }
     });
-    network::ClientNetworkService::instance();
     connect(&m_registry, &plugins::PluginRegistry::menusChanged, this, [this] {
         bool exists = m_activeMenu == QLatin1String(api::ZeroTierMenuId) || m_activeMenu == QLatin1String(api::SettingsMenuId);
         for (const auto &menu : m_registry.menus()) exists |= menu.id == m_activeMenu;
@@ -111,13 +112,11 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
         for(const auto &id:m_memberProbeContexts.keys()) if(m_networks.record(id).isEmpty()) delete m_memberProbeContexts.take(id).data();
     });
     connect(m_peerPoller, &zerotier::JsonPoller::updated, this, [this](const QJsonDocument &doc) {
-        m_peerLatencies.clear();
         QList<QVariantMap> rows;
         for (const auto &value : doc.array()) {
             const auto object = value.toObject();
             const auto role = object["role"].toString();
             const int latency = object["latency"].toInt(-1);
-            m_peerLatencies[object["address"].toString().toLower()]=latency;
             if (role == "LEAF" && latency < 0) continue;
             bool direct = false;
             QStringList ips;
@@ -146,10 +145,8 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
     });
     m_statusTimer.setInterval(1000);
     connect(&m_statusTimer, &QTimer::timeout, this, &AppController::updateService);
-    m_statusTimer.start();
-    m_memberTimer.setInterval(2000);
+    m_memberTimer.setInterval(5000);
     connect(&m_memberTimer, &QTimer::timeout, this, &AppController::refreshMembers);
-    m_memberTimer.start();
     connect(m_operations, &SystemOperations::output, this, [this](const QString &text) { feedback(text.trimmed()); });
     connect(&m_loader, &plugins::PluginLoader::shutdownProgress, this, [this](const QStringList &pending) {
         m_shutdownMessage = QStringLiteral("正在退出，正在停止插件初始化…");
@@ -161,7 +158,7 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
         if (!m_busy) emit exitFinished();
     });
 #ifndef ZEROTIER_TESTING
-    zerotier::startServiceMonitor(this);
+    m_serviceMonitor = zerotier::createServiceMonitor(this);
     for (const auto &message : m_loader.scan(m_pluginDirectory, m_registry)) util::log::write(message);
 #else
     if (!pluginDirectory.isEmpty()) m_loader.scan(m_pluginDirectory, m_registry);
@@ -210,15 +207,18 @@ void AppController::setTheme(const QString &value)
 }
 bool AppController::disableGpuAcceleration() const
 {
-    return QSettings().value("rendering/disableGpuAcceleration", false).toBool();
+    return QSettings().value("rendering/disableGpuAcceleration", true).toBool();
 }
 void AppController::setDisableGpuAcceleration(bool disabled)
 {
     if (disableGpuAcceleration() == disabled) return;
     QSettings settings;
     settings.setValue("rendering/disableGpuAcceleration", disabled);
+    const bool showHint=!settings.value("rendering/restartHintShown",false).toBool();
+    settings.setValue("rendering/restartHintShown",true);
     settings.sync();
     emit disableGpuAccelerationChanged();
+    if(showHint) emit pluginNoticeRequested(QStringLiteral("需要重启程序"),QStringLiteral("GPU 加速设置已保存，完全退出并重新启动程序后生效。"));
 }
 bool AppController::gpuAccelerationForcedOff() const
 {
@@ -226,6 +226,8 @@ bool AppController::gpuAccelerationForcedOff() const
 }
 QString AppController::version() const { return QCoreApplication::applicationVersion(); }
 QString AppController::apiVersion() const { return QString::fromLatin1(api::ApiVersion); }
+QString AppController::serverVersion() const { return QStringLiteral(ZTGUI_SERVER_VERSION); }
+QString AppController::serverApiVersion() const { return QStringLiteral(ZTGUI_SERVER_API_VERSION); }
 QString AppController::qtVersion() const { return QString::fromLatin1(qVersion()); }
 QVariantList AppController::menus() const
 {
@@ -265,7 +267,7 @@ void AppController::setWindow(QQuickWindow *window)
 #endif
     connect(window, &QWindow::visibleChanged, this, &AppController::setVisible);
     connect(window, &QWindow::windowStateChanged, this, [this] { setVisible(m_window && m_window->isVisible() && m_window->windowState() != Qt::WindowMinimized); });
-    setVisible(window->isVisible());
+    setVisible(window->isVisible() && window->windowState() != Qt::WindowMinimized);
 #if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
     if (!zerotier::executable().isEmpty()) {
         setBusy(true);
@@ -277,10 +279,22 @@ void AppController::setVisible(bool visible) { m_visible = visible; updatePollin
 void AppController::updatePolling()
 {
     const bool active = m_visible && !m_closing;
+    if (m_serviceMonitor) m_serviceMonitor(active);
+    if (active && !m_statusTimer.isActive()) { m_statusTimer.start(); updateService(); }
+    else if (!active) m_statusTimer.stop();
     m_infoPoller->setActive(active);
     m_networkPoller->setActive(active && m_activeMenu == QLatin1String(api::ZeroTierMenuId));
     m_peerPoller->setActive(active && m_activeMenu == QLatin1String(api::ZeroTierMenuId));
     m_moonPoller->setActive(active && m_moonsActive);
+    const bool membersActive = active && m_activeMenu == QLatin1String(api::ZeroTierMenuId);
+    if (membersActive && !m_memberTimer.isActive()) { m_memberTimer.start(); refreshMembers(); }
+    else if (!membersActive) {
+        m_memberTimer.stop();
+        const auto requests = std::move(m_memberRequests); m_memberRequests.clear();
+        const auto probes = std::move(m_memberProbeContexts); m_memberProbeContexts.clear();
+        for (auto context : requests) delete context.data();
+        for (auto context : probes) delete context.data();
+    }
 }
 void AppController::setMoonsActive(bool active) { m_moonsActive = active; updatePolling(); if (active) { refreshMoonFiles(); m_moonPoller->refresh(); } emit stateChanged(); }
 bool AppController::navigate(const QString &menuId, QQuickItem *container)
@@ -396,17 +410,15 @@ void AppController::refreshMembers()
             m_memberRequests.remove(id); context->deleteLater();
             const auto current = m_networks.record(id);
             if (!current["expanded"].toBool() || protocol::networkServer(QJsonObject::fromVariantMap(current["details"].toMap())) != server) return;
-            if (!result.ok()) { m_networks.update(id, {{"memberStatus", QStringLiteral("成员列表不可用：%1（2 秒后重试）").arg(result.error)}}); return; }
+            if (!result.ok()) { m_networks.update(id, {{"memberStatus", QStringLiteral("成员列表不可用：%1（每 5 秒重试）").arg(result.error)}}); return; }
             QVariantList members; QSet<QString> seen;
             for (const auto &value : result.document.array()) {
                 const auto object = value.toObject(); const auto memberId = object["nodeId"].toString().toLower();
                 if (!QRegularExpression("^[0-9a-f]{10}$").match(memberId).hasMatch() || seen.contains(memberId)) continue;
                 seen.insert(memberId); const auto ips = addresses(object["ipAssignments"].toArray());
-                const int peer=m_peerLatencies.value(memberId,-1);
-                const bool self=memberId==m_info["address"].toString();
-                QString latency=self?"0 ms":peer>=0?QString::number(peer)+" ms":QStringLiteral("—");
-                QString latencySource=self?QStringLiteral("本机"):peer>=0?QStringLiteral("ZeroTier peers 延迟"):QStringLiteral("尚无有效延迟");
-                for(const auto &old:current["members"].toList()) if(old.toMap()["id"].toString()==memberId && old.toMap()["latencySource"].toString()==QStringLiteral("虚拟 IP 应用 RTT")) {
+                QString latency=QStringLiteral("—");
+                QString latencySource=QStringLiteral("尚无 ICMP ping 结果");
+                for(const auto &old:current["members"].toList()) if(old.toMap()["id"].toString()==memberId) {
                     latency=old.toMap()["latency"].toString(); latencySource=old.toMap()["latencySource"].toString();
                 }
                 members.append(QVariantMap{{"id",memberId},{"name",localName("peers",memberId)},{"ip",ips.isEmpty()?QStringLiteral("—"):ips.join(", ")},
@@ -427,13 +439,21 @@ void AppController::refreshMembers()
             if(!probes) { probes=new QObject(this); m_memberProbeContexts[id]=probes; }
             for(const auto &value:members) {
                 const auto target=value.toMap()["id"].toString();
-                network::ClientNetworkService::instance().transport().probeMember(id,target,probes,[this,id,target](double rtt) {
+                if (probes->findChild<QObject *>(target, Qt::FindDirectChildrenOnly)) continue;
+                QHostAddress address;
+                for (const auto &ip : value.toMap()["ip"].toString().split(',')) {
+                    const QHostAddress candidate(ip.trimmed());
+                    if (candidate.protocol() == QAbstractSocket::IPv4Protocol) { address = candidate; break; }
+                }
+                auto *job = new QObject(probes); job->setObjectName(target);
+                const auto ips = value.toMap()["ip"].toString();
+                zerotier::pingMember(job,address,[this,id,target,ips,job](zerotier::PingResult result) {
+                    job->deleteLater();
                     const auto current=m_networks.record(id); if(!current["expanded"].toBool()) return;
                     auto rows=current["members"].toList();
-                    for(auto &value:rows) { auto row=value.toMap(); if(row["id"].toString()!=target) continue;
-                        const int peer=m_peerLatencies.value(target,-1);
-                        row["latency"]=rtt>=0?QString::number(rtt,'f',rtt==0?0:1)+" ms":peer>=0?QString::number(peer)+" ms":QStringLiteral("不可达");
-                        row["latencySource"]=rtt>=0?QStringLiteral("虚拟 IP 应用 RTT"):peer>=0?QStringLiteral("ZeroTier peers 延迟"):QStringLiteral("应用探测超时或目标未提供接收服务"); value=row;
+                    for(auto &value:rows) { auto row=value.toMap(); if(row["id"].toString()!=target || row["ip"].toString()!=ips) continue;
+                        row["latency"]=result.text;
+                        row["latencySource"]=result.detail; value=row;
                     }
                     m_networks.update(id,{{"members",rows}});
                 });
@@ -580,25 +600,48 @@ void AppController::deleteMoon(const QString &id)
 void AppController::importPlugin(const QUrl &source)
 {
     if (m_closing || !source.isLocalFile()) return;
+    const auto package=package::inspect(source.toLocalFile());
+    const auto id=package.info["id"].toString();
+    for(const auto &entry:m_loader.catalog()) if(!id.isEmpty() && entry.toMap()["id"].toString().compare(id,Qt::CaseInsensitive)==0) {
+        emit pluginNoticeRequested(QStringLiteral("无法加载插件"),QStringLiteral("同 ID 插件已存在：%1。请先卸载并删除旧插件。ID 不区分大小写。").arg(id)); return;
+    }
     const auto error = plugins::importPlugin(source.toLocalFile(), m_pluginDirectory);
-    if(!error.isEmpty()) { feedback(error); return; }
+    if(!error.isEmpty()) { feedback(error); emit pluginNoticeRequested(QStringLiteral("无法导入插件"),error); return; }
     const auto path=QDir(m_pluginDirectory).filePath(QFileInfo(source.toLocalFile()).fileName());
     const auto result=m_loader.loadFile(path,m_registry); feedback(result.ok()?QString():result.message);
+    if(!result.ok()) emit pluginNoticeRequested(QStringLiteral("无法加载插件"),result.message);
 }
 void AppController::loadPlugin(const QString &id) {
     if(m_closing) return;
-    for(const auto &value:m_loader.catalog()) if(value.toMap()["id"].toString()==id && value.toMap()["loadable"].toBool()) {
-        const auto result=m_loader.loadFile(value.toMap()["path"].toString(),m_registry); feedback(result.ok()?QString():result.message); return;
+    for(const auto &value:m_loader.catalog()) if(value.toMap()["path"].toString()==id || value.toMap()["id"].toString().compare(id,Qt::CaseInsensitive)==0) {
+        const auto result=m_loader.loadFile(value.toMap()["path"].toString(),m_registry); feedback(result.ok()?QString():result.message);
+        if(!result.ok()) emit pluginNoticeRequested(QStringLiteral("无法加载插件"),result.message);
+        return;
+    }
+}
+void AppController::deletePlugin(const QString &path) {
+    if(m_closing) return;
+    for(const auto &entry:m_loader.catalog()) {
+        const auto row=entry.toMap(); if(row["path"].toString()!=path) continue;
+        if(row["loaded"].toBool() || row["loading"].toBool() || row["stopping"].toBool()) return;
+        ask(QStringLiteral("删除插件"),QStringLiteral("确定删除“%1”？\n将从程序中移除此插件，并永久删除 plugins/ 下的插件包及 plugins-data/ 下对应的插件数据。此操作无法撤销。").arg(row["name"].toString()),QStringLiteral("删除"),[this,path] {
+            const auto result=m_loader.removeFile(path,m_pluginDirectory);
+            feedback(result.ok()?QString():result.message);
+            if(!result.ok()) emit pluginNoticeRequested(QStringLiteral("无法删除插件"),result.message);
+        }); return;
     }
 }
 void AppController::unloadPlugin(const QString &id) {
     if(m_closing) return;
-    if(m_activeMenu.startsWith(id+"/") && m_page) navigate(api::ZeroTierMenuId,m_page->parentItem());
-    const auto result=m_loader.unload(id,m_registry); feedback(result.ok()?QString():result.message);
+    const auto result=m_loader.unload(id,m_registry);
+    if(result.ok() && m_activeMenu.startsWith(id+"/",Qt::CaseInsensitive) && m_page)
+        navigate(api::ZeroTierMenuId,m_page->parentItem());
+    feedback(result.ok()?QString():result.message);
+    if(!result.ok()) emit pluginNoticeRequested(QStringLiteral("无法卸载插件"),result.message);
 }
 void AppController::requestQuit()
 {
-    if (m_closing) return;
+    if (m_closing) { m_loader.requestShutdown(); return; }
     m_closing = true; m_confirmation = {}; updatePolling();
     for (auto context : m_memberRequests) delete context.data(); m_memberRequests.clear();
     for(auto context:m_memberProbeContexts) delete context.data(); m_memberProbeContexts.clear();

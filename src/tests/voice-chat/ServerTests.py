@@ -3,6 +3,7 @@ or with --host/--port to validate an already deployed server.
 """
 import argparse
 import json
+import os
 import socket
 import struct
 import subprocess
@@ -40,7 +41,7 @@ class RoutedDatagram:
 
 
 class Client:
-    def __init__(self, host, port, nickname="test"):
+    def __init__(self, host, port, nickname="test", ztid=None):
         self.tcp = socket.create_connection((host, port), timeout=2)
         self.reader = self.tcp.makefile("rb")
         self.udp = RoutedDatagram()
@@ -49,7 +50,10 @@ class Client:
         self.serial = 0
         self.session = 0
         self.token = b""
-        hello = self.call("hello", {"nickname": nickname})
+        data = {"nickname": nickname}
+        if ztid is not None:
+            data["ztid"] = ztid
+        hello = self.call("hello", data)
         assert hello["ok"], hello
         self.session = hello["data"]["session"]
         self.destination = (host, hello["data"]["udpPort"])
@@ -91,7 +95,7 @@ class ServerTests(unittest.TestCase):
         self.directory = None
         self.clients = []
         self.host, self.port = OPTIONS.host, OPTIONS.port
-        if OPTIONS.binary:
+        if OPTIONS.binary or OPTIONS.jar:
             with socket.socket() as probe:
                 probe.bind(("127.0.0.1", 0))
                 self.port = probe.getsockname()[1]
@@ -99,14 +103,18 @@ class ServerTests(unittest.TestCase):
             self.directory = tempfile.TemporaryDirectory()
             root = Path(self.directory.name)
             (root/"plugins").mkdir()
-            for plugin in (Path(OPTIONS.binary).resolve().parent/"plugins").glob("*.ztplugin"):
-                shutil.copyfile(plugin,root/"plugins"/plugin.name)
+            if not OPTIONS.plugin:
+                self.fail("--plugin <jar or directory> is required in isolated mode")
+            plugin = Path(OPTIONS.plugin).resolve()
+            for jar in ([plugin] if plugin.is_file() else sorted(plugin.glob("*.jar"))):
+                shutil.copyfile(jar,root/"plugins"/jar.name)
             config = root/"plugins-data"/"语音聊天"
             config.mkdir(parents=True)
             (config/"settings.json").write_text(json.dumps({"maxRooms":2,"maxMembers":2}),encoding="utf-8")
-            self.process = subprocess.Popen([OPTIONS.binary,"--server","--listen",self.host,"--port",str(self.port)],
+            self.command = self.launch_command(root)
+            self.process = subprocess.Popen(self.command+["--server","--listen",self.host,"--port",str(self.port)],
                 cwd=root,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-            for _ in range(100):
+            for _ in range(200):
                 try:
                     with socket.create_connection((self.host, self.port), timeout=0.1):
                         break
@@ -116,6 +124,21 @@ class ServerTests(unittest.TestCase):
                     time.sleep(0.02)
             else:
                 self.fail("Server did not start")
+            time.sleep(0.2)
+
+    def launch_command(self, root):
+        if OPTIONS.binary and Path(OPTIONS.binary).suffix == ".jar":
+            return [java(),"-jar",str(Path(OPTIONS.binary).resolve())]
+        if OPTIONS.binary and Path(OPTIONS.binary).suffix == ".sh":
+            if not OPTIONS.jar:
+                self.fail("--jar is required when --binary is a launcher script")
+            launcher = root/"start-server.sh"
+            shutil.copyfile(OPTIONS.binary, launcher)
+            shutil.copyfile(OPTIONS.jar, root/"zt-server.jar")
+            return ["/bin/bash",str(launcher)]
+        if OPTIONS.binary:
+            return [str(Path(OPTIONS.binary).resolve())]
+        return [java(),"-jar",str(Path(OPTIONS.jar).resolve())]
 
     def tearDown(self):
         for client in self.clients:
@@ -125,10 +148,25 @@ class ServerTests(unittest.TestCase):
             self.process.wait(timeout=5)
         if self.directory: self.directory.cleanup()
 
-    def client(self, name="test"):
-        client = Client(self.host, self.port, name)
+    def client(self, name="test", ztid=None):
+        client = Client(self.host, self.port, name, ztid)
         self.clients.append(client)
         return client
+
+    def test_member_identity_and_legacy_clients(self):
+        a = self.client("Nickname", "A1B2C3D4E5")
+        reply = a.call("create", {"name": "identities"})
+        room = a.enter(reply)
+        self.assertEqual(reply["data"]["room"]["members"][0]["ztid"], "a1b2c3d4e5")
+        b = self.client("Legacy")
+        joined = b.call("join", {"room": room})
+        b.enter(joined)
+        members = {m["nickname"]: m for m in joined["data"]["room"]["members"]}
+        self.assertEqual(members["Nickname"]["ztid"], "a1b2c3d4e5")
+        self.assertEqual(members["Legacy"]["ztid"], "")
+        with socket.create_connection((self.host, self.port), timeout=2) as connection:
+            connection.sendall(frame(json.dumps({"v": 1, "id": 1, "op": "hello", "data": {"nickname": "Invalid", "ztid": "../bad"}}).encode()))
+            self.assertEqual(read_response(connection.makefile("rb"))["error"], "invalid_identity")
 
     def test_room_lifecycle_and_validation(self):
         a, b = self.client("A"), self.client("B")
@@ -201,15 +239,32 @@ class ServerTests(unittest.TestCase):
             self.skipTest("requires an isolated server for timeout testing")
         a = self.client()
         room = a.enter(a.call("create", {"name": "timeout"}))
-        time.sleep(16.2)
+        time.sleep(17.0)
         b = self.client()
         self.assertFalse(any(r["id"] == room for r in b.call("rooms")["data"]))
 
 
+def java():
+    executable = shutil.which("java")
+    if executable:
+        return executable
+    home = os.environ.get("JAVA_HOME")
+    if home:
+        candidate = Path(home)/"bin"/("java.exe" if os.name == "nt" else "java")
+        if candidate.is_file():
+            return str(candidate)
+    raise SystemExit("java not found")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--binary")
+    parser.add_argument("--binary", help="zt-server.jar, start-server.sh or native server binary")
+    parser.add_argument("--jar", help="zt-server.jar used with --binary start-server.sh")
+    parser.add_argument("--plugin", help="voice plugin jar or a directory containing it")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=18100)
     OPTIONS = parser.parse_args()
+    if OPTIONS.binary is None and OPTIONS.jar is None and OPTIONS.host == "127.0.0.1" \
+            and OPTIONS.port == 18100:
+        parser.error("pass --host/--port for a deployed server or --binary/--plugin for isolation")
     unittest.main(argv=[__file__], verbosity=2)

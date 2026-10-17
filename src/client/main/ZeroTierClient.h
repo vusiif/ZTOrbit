@@ -26,7 +26,7 @@ QString wrapScript(const QString &commands);
 QString moonImportScript(const QList<QPair<QString, QString>> &files);
 QString moonDeleteScript(const QString &path);
 QString sessionRefreshScript();
-void startServiceMonitor(QObject *owner);
+std::function<void(bool)> createServiceMonitor(QObject *owner);
 QString translate(const QString &value);
 QString jsonText(const QJsonValue &value);
 QString quotePowerShell(const QString &value);
@@ -63,6 +63,7 @@ private:
     QString m_lastFailure;
     int m_failures = 0;
     bool m_requestPending = false;
+    bool m_restartWhenFinished = false;
     QElapsedTimer m_failurePeriod;
     void failed(const QString &message);
 };

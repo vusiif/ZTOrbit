@@ -1,0 +1,35 @@
+********* Start testing of VoicePluginTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : VoicePluginTests::initTestCase()
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] Owned process started; pid 32584
+FAIL!  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() Compared values are not the same
+   Actual   (QFileInfo(path).canonicalFilePath())    : "C:/Users/27384/AppData/Local/Temp/ztgui-plugin-cache-9e89033224817834/load-bvfkke/runtime/bin/MSVCP140.dll"
+   Expected (QFileInfo(expected).canonicalFilePath()): "C:/Users/27384/AppData/Local/Temp/ztgui-plugin-cache-9e89033224817834/load-bvfkke/runtime/bin/msvcp140.dll"
+D:\User\Code\Github\Utils\zerotier-gui\src\tests\plugins\VoicePluginTests.cpp(75) : failure location
+QWARN  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] Worker exited (0, 0)
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 38776
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 38752
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 37248
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 32116
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 8284
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 36292
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 38660
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 30352
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 35280
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 572
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 6080
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 38172
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 33148
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 21912
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 31996
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 17876
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 7976
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 37560
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 16692
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 5560
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 35320
+QINFO  : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker() [worker] Owned process started; pid 30508
+PASS   : VoicePluginTests::repeatedLoadsLeaveNoMediaModulesOrWorker()
+PASS   : VoicePluginTests::cleanupTestCase()
+Totals: 3 passed, 1 failed, 0 skipped, 0 blacklisted, 147806ms
+********* Finished testing of VoicePluginTests *********

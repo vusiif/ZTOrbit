@@ -102,6 +102,23 @@ static QSet<QString> baseNames(const QJsonObject &contract) {
 }
 QString validateRuntime(const PackageResult &p) {
     if(!p.ok()) return p.error;
+    if(p.info["execution"].toObject()["kind"]=="worker-process") {
+#ifndef Q_OS_WIN
+        return "Worker runtime deployment is currently validated on Windows only";
+#else
+        if(!p.info["requiresHost"].toArray().isEmpty()) return "Workers must carry their own runtime";
+        if(QFileInfo(p.info["entry"].toString()).path()!="runtime/bin")
+            return "Worker executable must be beside its runtime DLLs in runtime/bin; rebuild with the updated SDK";
+        QSet<QString> names;
+        for(const auto &v:p.info["files"].toArray()) {
+            const auto o=v.toObject(); if(o["role"]!="runtime-library" && o["role"]!="qt-plugin") continue;
+            const auto name=QFileInfo(o["path"].toString()).fileName().toLower();
+            if(names.contains(name)) return "Duplicate worker runtime basename: "+name;
+            names.insert(name);
+        }
+        return {};
+#endif
+    }
     if(p.info["formatVersion"].toInt()==1) return {};
     const auto host=hostRuntimeContract(),runtime=p.info["runtime"].toObject(); const auto bases=baseNames(host);
     bool privateQt=false; QSet<QString> names;
@@ -111,6 +128,8 @@ QString validateRuntime(const PackageResult &p) {
         const auto name=QFileInfo(item["path"].toString()).fileName().toLower();
         if(names.contains(name)) return "Duplicate runtime DLL basename: "+name;
         names.insert(name);
+        if(role=="qt-plugin" || (name.startsWith("qt6") && !bases.contains(name)))
+            return "Additional Qt modules/backends require a worker-process package; migrate and rebuild the plugin";
         if(bases.contains(name) || systemLibrary(name) || name.startsWith("vcruntime") || name.startsWith("msvcp") || name=="ucrtbase.dll"
            || name=="libsodium.dll") return "Bundle attempts to override a host/system library: "+name;
         if(role=="qt-plugin" || name.startsWith("qt6")) privateQt=true;
@@ -153,6 +172,7 @@ QJsonObject runtimeStatistics() {
     return {{"directories",int(state().directories.size())},{"modules",int(state().modules.size())},{"handles",handles}};
 }
 QString activateRuntime(const PackageResult &p,const QString &businessDirectory) {
+    if(p.info["execution"].toObject()["kind"]=="worker-process") return "Worker runtime must never be activated in the host";
     auto error=validateRuntime(p); if(!error.isEmpty()) return error;
 #ifdef Q_OS_WIN
     auto &s=state();
@@ -179,6 +199,7 @@ QString activateRuntime(const PackageResult &p,const QString &businessDirectory)
         auto names=windowsImports(path,&error); if(!error.isEmpty()) return error;
         imports.insert(QFileInfo(path).fileName().toLower(),names);
         for(const auto &name:names) {
+            if(name.startsWith("qt6") && !bases.contains(name)) return "Additional Qt modules require a worker-process package; migrate and rebuild the plugin";
             if(files.contains(name) || systemLibrary(name)) continue;
             if(bases.contains(name)) {
                 if(!QFileInfo(QDir(QCoreApplication::applicationDirPath()).filePath(name)).isFile()

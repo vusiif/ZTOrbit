@@ -14,6 +14,9 @@ struct PackageResult {
     bool ok() const { return error.isEmpty(); }
 };
 PackageResult inspect(const QString &path);
+// v2/v3 inspect already authenticates every block. Legacy v1 must also be
+// authenticated before its declarations enter an executable dependency plan.
+QString authenticate(const PackageResult &package);
 QString validate(const QJsonObject &, const QString &host, const QString &api, const QString &iid);
 QString write(const QString &library, const QString &output, QJsonObject info);
 QString writeBundle(const QJsonObject &manifest, const QString &output, QJsonObject info);

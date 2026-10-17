@@ -1,0 +1,39 @@
+********* Start testing of VoicePluginTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : VoicePluginTests::initTestCase()
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] Owned process started; pid 14480
+QWARN  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] [media] Initializing media service?
+
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] IPC authenticated; waiting for service preparation; pid 14480
+QWARN  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] [media] Preparing audio devices?
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] Service preparation completed; pid 14480
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() Worker application-local Qt/CRT and backend modules verified: QSet("avutil-59.dll", "swscale-8.dll", "qt6multimedia.dll", "qt6core.dll", "msvcp140_2.dll", "avformat-61.dll", "msvcp140.dll", "qt6gui.dll", "swresample-5.dll", "avcodec-61.dll", "vcruntime140.dll", "vcruntime140_1.dll", "qt6network.dll", "msvcp140_1.dll", "ffmpegmediaplugin.dll")
+PASS   : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt()
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Owned process started; pid 25912
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] [media] Initializing media service?
+
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] IPC authenticated; waiting for service preparation; pid 25912
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] [media] Preparing audio devices?
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Service preparation completed; pid 25912
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Owned process started; pid 34556
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] [media] Initializing media service?
+
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] IPC authenticated; waiting for service preparation; pid 34556
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] [media] Preparing audio devices?
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Service preparation completed; pid 34556
+PASS   : VoicePluginTests::panelOnlyConnectsOnClick()
+PASS   : VoicePluginTests::cleanupTestCase()
+Totals: 4 passed, 0 failed, 0 skipped, 0 blacklisted, 12708ms
+********* Finished testing of VoicePluginTests *********

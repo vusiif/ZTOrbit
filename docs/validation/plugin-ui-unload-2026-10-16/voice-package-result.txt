@@ -1,0 +1,29 @@
+********* Start testing of VoicePluginTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : VoicePluginTests::initTestCase()
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Owned process started; pid 25624
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] [media] Initializing media service?
+
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] IPC authenticated; waiting for service preparation; pid 25624
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] [media] Preparing audio devices?
+
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Service preparation completed; pid 25624
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Owned process started; pid 18900
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] [media] Initializing media service?
+
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] IPC authenticated; waiting for service preparation; pid 18900
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] [media] Preparing audio devices?
+
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1 LGPL version 2.1 or later?
+
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] [media] Audio devices prepared; publishing readiness?
+
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Service preparation completed; pid 18900
+PASS   : VoicePluginTests::panelOnlyConnectsOnClick()
+PASS   : VoicePluginTests::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 16307ms
+********* Finished testing of VoicePluginTests *********

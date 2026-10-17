@@ -20,6 +20,19 @@ if(MSVC)
     target_compile_options(network_tests PRIVATE /utf-8)
 endif()
 add_test(NAME network_transport COMMAND network_tests)
+add_executable(fake_ping FakePing.cpp)
+target_link_libraries(fake_ping PRIVATE Qt6::Core)
+set_target_properties(fake_ping PROPERTIES OUTPUT_NAME "ping" RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}/ping-fixture")
+add_executable(member_ping_tests MemberPingTests.cpp "${ZTGUI_ROOT_DIR}/src/client/main/MemberPing.cpp")
+target_include_directories(member_ping_tests PRIVATE "${ZTGUI_ROOT_DIR}/src/client/main")
+target_link_libraries(member_ping_tests PRIVATE Qt6::Network Qt6::Test)
+target_compile_definitions(member_ping_tests PRIVATE FAKE_PING="$<TARGET_FILE:fake_ping>")
+add_dependencies(member_ping_tests fake_ping)
+if(MSVC)
+    target_compile_options(member_ping_tests PRIVATE /utf-8)
+endif()
+add_test(NAME member_icmp_ping COMMAND member_ping_tests)
+set_tests_properties(member_icmp_ping PROPERTIES TIMEOUT 30)
 if(WIN32)
     add_test(NAME windows_port_preflight COMMAND powershell -NoProfile -NonInteractive -File "${CMAKE_CURRENT_SOURCE_DIR}/WindowsPortTests.ps1")
 endif()
@@ -49,10 +62,12 @@ ztgui_add_qml_ui(zerotier_gui_tests)
 qt_add_resources(zerotier_gui_tests test_app_icon PREFIX "/" BASE "${ZTGUI_ROOT_DIR}/src/client"
     FILES "${ZTGUI_ROOT_DIR}/src/client/assets/app-icon.png")
 target_compile_definitions(zerotier_gui_tests PRIVATE ZEROTIER_TESTING
+    ZTGUI_FAKE_PING_DIRECTORY="$<TARGET_FILE_DIR:fake_ping>"
     ZTGUI_SOURCE_VERSION_FILE="${ZTGUI_ROOT_DIR}/VERSION")
 # Keep the launchable application current when building its UI regressions.
 add_dependencies(zerotier_gui_tests zerotier_gui fake_zerotier_cli app_log_probe)
 add_dependencies(zerotier_gui_tests instance_probe)
+add_dependencies(zerotier_gui_tests fake_ping)
 if(MSVC)
     target_compile_options(fake_zerotier_cli PRIVATE /utf-8)
     target_compile_options(app_log_probe PRIVATE /utf-8)
@@ -78,8 +93,6 @@ set_tests_properties(core_regressions PROPERTIES WORKING_DIRECTORY "${ZTGUI_BUIL
 
 foreach(kind good bad obsolete legacy lifecycle lifecycle_failed cancellable cancellable_second cancellable_queued cancellable_blocked)
     set(FIXTURE_API_VERSION "${ZTGUI_API_VERSION}")
-    # The API subdirectory's variables have directory scope; derive generation from VERSION.
-    string(REGEX REPLACE "\\.[0-9]+$" "" FIXTURE_API_VERSION "${ZEROTIER_VERSION}")
     if(kind STREQUAL "bad")
         set(FIXTURE_API_VERSION "0.999")
     endif()
@@ -129,6 +142,7 @@ target_link_libraries(plugin_loader_tests PRIVATE ZTGUI::Api Qt6::Test Qt6::Conc
 # Plugin tools are implemented by the host, never by the public SDK.
 function(ztgui_add_plugin_tools_test target)
     target_sources(${target} PRIVATE
+        "${ZTGUI_ROOT_DIR}/src/client/main/plugins/ServiceBroker.cpp"
         "${ZTGUI_ROOT_DIR}/src/client/main/plugins/HostServicesImpl.cpp"
         "${ZTGUI_ROOT_DIR}/src/client/main/ClientNetworkService.cpp"
         "${ZTGUI_ROOT_DIR}/src/client/main/ZeroTierClient.cpp"
@@ -165,17 +179,44 @@ target_compile_definitions(zerotier_gui_tests PRIVATE
 add_dependencies(zerotier_gui_tests plugin_fixture_cancellable plugin_fixture_cancellable_blocked)
 
 set(ZTGUI_VOICE_PLUGIN_PATH "" CACHE FILEPATH "Independently built voice plugin for smoke tests")
+set(ZTGUI_MEDIA_PLUGIN_PATH "" CACHE FILEPATH "Independently built media worker package")
+if(ZTGUI_MEDIA_PLUGIN_PATH)
+    find_package(ZTGUIMediaApi 2 CONFIG REQUIRED)
+    add_executable(media_integration_tests media/MediaIntegrationTests.cpp "${ZTGUI_ROOT_DIR}/src/client/main/plugins/ServiceBroker.cpp")
+    target_link_libraries(media_integration_tests PRIVATE ZTGUI::Api ZTGUI::MediaApi ztgui_package Qt6::Test Qt6::Widgets)
+    target_compile_definitions(media_integration_tests PRIVATE MEDIA_PLUGIN="${ZTGUI_MEDIA_PLUGIN_PATH}")
+    set_target_properties(media_integration_tests PROPERTIES AUTOMOC ON)
+    if(MSVC)
+        target_compile_options(media_integration_tests PRIVATE /utf-8)
+        if(ZTGUI_MEDIA_TEST_ASAN)
+            target_compile_options(media_integration_tests PRIVATE /fsanitize=address /Zi)
+            target_compile_definitions(media_integration_tests PRIVATE _DISABLE_STRING_ANNOTATION _DISABLE_VECTOR_ANNOTATION)
+            target_link_options(media_integration_tests PRIVATE /INCREMENTAL:NO /DEBUG)
+        endif()
+    endif()
+    add_test(NAME media_worker_integration COMMAND media_integration_tests -platform windows)
+    set_tests_properties(media_worker_integration PROPERTIES TIMEOUT 900)
+    get_target_property(media_test_qt_core Qt6::Core IMPORTED_LOCATION_RELEASE)
+    get_filename_component(media_test_qt_bin "${media_test_qt_core}" DIRECTORY)
+    get_filename_component(media_test_qt_root "${media_test_qt_bin}" DIRECTORY)
+    set_tests_properties(media_worker_integration PROPERTIES ENVIRONMENT
+        "QT_PLUGIN_PATH=${media_test_qt_root}/plugins;QT_QPA_PLATFORM_PLUGIN_PATH=${media_test_qt_root}/plugins/platforms;QT_QUICK_BACKEND=software;QTEST_FUNCTION_TIMEOUT=850000")
+endif()
 if(ZTGUI_VOICE_PLUGIN_PATH)
+    set(ZTGUI_MEDIA_PLUGIN_PATH "" CACHE FILEPATH "Independently built media worker package")
+    find_package(ZTGUIMediaApi 2 CONFIG REQUIRED)
     find_package(Qt6 REQUIRED COMPONENTS Network)
     qt_add_executable(voice_plugin_tests plugins/VoicePluginTests.cpp
         "${ZTGUI_ROOT_DIR}/src/client/main/plugins/PluginLoader.cpp" "${ZTGUI_ROOT_DIR}/src/client/main/plugins/PluginRegistry.cpp")
-    target_link_libraries(voice_plugin_tests PRIVATE ZTGUI::Api Qt6::Test Qt6::Network Qt6::Concurrent)
+    target_link_libraries(voice_plugin_tests PRIVATE ZTGUI::MediaApi Qt6::Test Qt6::Network Qt6::Concurrent)
     ztgui_add_plugin_tools_test(voice_plugin_tests)
-    target_compile_definitions(voice_plugin_tests PRIVATE VOICE_PLUGIN="${ZTGUI_VOICE_PLUGIN_PATH}")
+    target_compile_definitions(voice_plugin_tests PRIVATE VOICE_PLUGIN="${ZTGUI_VOICE_PLUGIN_PATH}" MEDIA_PLUGIN="${ZTGUI_MEDIA_PLUGIN_PATH}")
+    target_compile_definitions(zerotier_gui_tests PRIVATE ZTGUI_UI_VOICE_PACKAGE="${ZTGUI_VOICE_PLUGIN_PATH}" ZTGUI_UI_MEDIA_PACKAGE="${ZTGUI_MEDIA_PLUGIN_PATH}")
     if(MSVC)
         target_compile_options(voice_plugin_tests PRIVATE /utf-8)
     endif()
-    add_test(NAME voice_plugin_panel COMMAND voice_plugin_tests -platform offscreen)
+    add_test(NAME voice_plugin_panel COMMAND voice_plugin_tests -platform windows)
+    set_tests_properties(voice_plugin_panel PROPERTIES TIMEOUT 300)
     set_tests_properties(voice_plugin_panel PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software")
 endif()
 
@@ -183,3 +224,36 @@ add_executable(relay_tests RelayTests.cpp)
 target_link_libraries(relay_tests PRIVATE ztgui_network Qt6::Test)
 add_test(NAME relay_end_to_end COMMAND relay_tests)
 set_tests_properties(relay_end_to_end PROPERTIES TIMEOUT 60)
+
+# Service fixtures exercise the generic loader; neither the host nor these
+# consumers know media or voice implementation IDs.
+set(ZTGUI_HOST_CONTRACT_DIRECTORY "${ZTGUI_CLIENT_CONTRACT_DIRECTORY}")
+add_executable(service_fixture_worker plugins/ServiceWorkerFixture.cpp)
+target_link_libraries(service_fixture_worker PRIVATE ZTGUI::Protocol)
+foreach(letter a b)
+    set(service_name "fixture.audio")
+    if(letter STREQUAL "b")
+        set(service_name "fixture.video")
+    endif()
+    configure_file(plugins/service-fixture.json.in "${CMAKE_CURRENT_BINARY_DIR}/service-${letter}/service-fixture.json" @ONLY)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/service-${letter}/manifest.json"
+        "{\"execution\":{\"kind\":\"in-process\"},\"dependencies\":[{\"pluginId\":\"fixture-provider\",\"versionRange\":\">=1.0.0 <2.0.0\",\"services\":[{\"service\":\"${service_name}\",\"api\":\"1\"}]}],\"provides\":[]}")
+    qt_add_plugin(service_fixture_${letter} SHARED CLASS_NAME ServiceFixture plugins/ServiceFixture.cpp)
+    target_include_directories(service_fixture_${letter} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/service-${letter}")
+    target_link_libraries(service_fixture_${letter} PRIVATE ZTGUI::Api)
+    target_compile_definitions(service_fixture_${letter} PRIVATE FIXTURE_SERVICE_ID="fixture-${letter}" FIXTURE_SERVICE_NAME="${service_name}")
+    ztgui_package_plugin(service_fixture_${letter} HOST client ID "fixture-${letter}" NAME "fixture-${letter}" VERSION "1.0.0"
+        API "${FIXTURE_API_VERSION}" IID "vusiif.ztgui.api.PluginInterface/3.0" SERVICE_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/service-${letter}/manifest.json")
+endforeach()
+qt_add_executable(plugin_services_tests PluginServicesTests.cpp
+    "${ZTGUI_ROOT_DIR}/src/client/main/plugins/PluginLoader.cpp" "${ZTGUI_ROOT_DIR}/src/client/main/plugins/PluginRegistry.cpp")
+target_link_libraries(plugin_services_tests PRIVATE ZTGUI::Api Qt6::Test Qt6::Concurrent)
+ztgui_add_plugin_tools_test(plugin_services_tests)
+target_compile_definitions(plugin_services_tests PRIVATE
+    SERVICE_WORKER="$<TARGET_FILE:service_fixture_worker>"
+    SERVICE_CONSUMER_A="$<TARGET_FILE_DIR:service_fixture_a>/service_fixture_a.ztplugin"
+    SERVICE_CONSUMER_B="$<TARGET_FILE_DIR:service_fixture_b>/service_fixture_b.ztplugin"
+    QT_CORE_LIBRARY="$<TARGET_FILE:Qt6::Core>" QT_NETWORK_LIBRARY="$<TARGET_FILE:Qt6::Network>")
+add_dependencies(plugin_services_tests service_fixture_worker service_fixture_a service_fixture_b)
+add_test(NAME plugin_services COMMAND plugin_services_tests -platform windows)
+set_tests_properties(plugin_services PROPERTIES TIMEOUT 120)

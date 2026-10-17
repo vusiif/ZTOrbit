@@ -1,10 +1,10 @@
 set(ZTGUI_MAIN_SOURCES
     AppController.cpp RecordModel.cpp SystemOperations.cpp AppLog.cpp SingleInstance.cpp PluginImport.cpp
-    ClientNetworkService.cpp ZeroTierClient.cpp NetworkMembers.cpp NetworkBundle.cpp MacPlatform.cpp
-    plugins/PluginRegistry.cpp plugins/PluginLoader.cpp plugins/HostServicesImpl.cpp)
+    ClientNetworkService.cpp ZeroTierClient.cpp NetworkMembers.cpp MemberPing.cpp NetworkBundle.cpp MacPlatform.cpp
+    plugins/PluginRegistry.cpp plugins/PluginLoader.cpp plugins/HostServicesImpl.cpp plugins/ServiceBroker.cpp)
 set(ZTGUI_MAIN_HEADERS
     AppController.h RecordModel.h SystemOperations.h AppLog.h SingleInstance.h PluginImport.h ZeroTierClient.h
-    NetworkBundle.h MacPlatform.h plugins/PluginRegistry.h plugins/PluginLoader.h plugins/HostServicesImpl.h)
+    NetworkBundle.h MemberPing.h MacPlatform.h plugins/PluginRegistry.h plugins/PluginLoader.h plugins/HostServicesImpl.h plugins/ServiceBroker.h)
 list(TRANSFORM ZTGUI_MAIN_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 list(TRANSFORM ZTGUI_MAIN_HEADERS PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 set(ZTGUI_MAIN_SOURCES "${ZTGUI_MAIN_SOURCES}" PARENT_SCOPE)
@@ -18,7 +18,11 @@ function(ztgui_configure_host target)
     endforeach()
     target_link_libraries(${target} PRIVATE ztgui_network ztgui_package ZTGUI::Api Qt6::Concurrent Qt6::Network Qt6::QuickControls2)
     target_include_directories(${target} PRIVATE "${ZTGUI_ROOT_DIR}/src/client/main")
-    target_compile_definitions(${target} PRIVATE ZEROTIER_GUI_VERSION="${ZEROTIER_VERSION}")
+    target_compile_definitions(${target} PRIVATE
+        ZEROTIER_GUI_VERSION="${ZEROTIER_VERSION}"
+        ZTGUI_API_VERSION="${ZTGUI_API_VERSION}"
+        ZTGUI_SERVER_VERSION="${ZTGUI_SERVER_VERSION}"
+        ZTGUI_SERVER_API_VERSION="${ZTGUI_SERVER_API_VERSION}")
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}")
     if(WIN32)
         target_link_libraries(${target} PRIVATE shell32 advapi32 comctl32)
@@ -58,8 +62,8 @@ if(APPLE)
     set_target_properties(zerotier_gui PROPERTIES
         MACOSX_BUNDLE TRUE MACOSX_BUNDLE_BUNDLE_NAME "ZTGUI"
         MACOSX_BUNDLE_GUI_IDENTIFIER "local.ztgui"
-        MACOSX_BUNDLE_BUNDLE_VERSION "${ZEROTIER_VERSION}"
-        MACOSX_BUNDLE_SHORT_VERSION_STRING "${ZEROTIER_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${ZEROTIER_VERSION_NUMERIC}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${ZEROTIER_VERSION_NUMERIC}"
         MACOSX_BUNDLE_INFO_PLIST "${ZTGUI_ROOT_DIR}/src/client/assets/Info.plist.in")
 endif()
 qt_add_resources(zerotier_gui app_icon PREFIX "/" BASE "${ZTGUI_ROOT_DIR}/src/client"

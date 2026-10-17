@@ -1,0 +1,30 @@
+[
+  {
+    "artifact": "windows-x64",
+    "zipFiles": 191,
+    "mismatches": [],
+    "extraRuntimeFiles": [],
+    "archiveSha256": "47c0b2edf373819d1fc0f4c5d37582541d7dffa8e8b6091dfad0023f40ba7f15"
+  },
+  {
+    "artifact": "ZTGUI-api-v0.4",
+    "zipFiles": 48,
+    "mismatches": [],
+    "extraRuntimeFiles": [],
+    "archiveSha256": "b979a22e6bee7f44cf8150ee9a38296a58097264b5a80f7a2d5935fa732a82bc"
+  },
+  {
+    "artifact": "ZTGUI-media-api-v2",
+    "zipFiles": 16,
+    "mismatches": [],
+    "extraRuntimeFiles": [],
+    "archiveSha256": "477e7f758c35d31dbc44c3b4c5575c6088f5b3b844f618ac6c1c5644e6676a4a"
+  },
+  {
+    "artifact": "ZTGUI-media-engine-sdk-v1",
+    "zipFiles": 194,
+    "mismatches": [],
+    "extraRuntimeFiles": [],
+    "archiveSha256": "2db42f12ca902fa0c423ee796cc9b4644e1b8d688d68191e4ed90e1dc6d231e6"
+  }
+]

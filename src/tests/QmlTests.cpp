@@ -1,6 +1,7 @@
 #include "AppController.h"
 #include "RecordModel.h"
 #include "NetworkBundle.h"
+#include "PluginRuntime.h"
 #include <ztgui/PluginPage.h>
 #include <QApplication>
 #include <QQmlApplicationEngine>
@@ -21,6 +22,8 @@
 #include <memory>
 #ifdef Q_OS_WIN
 #include <windows.h>
+#include <psapi.h>
+#include <tlhelp32.h>
 #endif
 using namespace vusiif::ztgui::ui;
 using namespace vusiif::ztgui::api;
@@ -82,15 +85,188 @@ private slots:
         QCoreApplication::setApplicationVersion(ZEROTIER_GUI_VERSION);
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_directory.path());
         m_path = qgetenv("PATH"); m_programData = qgetenv("ProgramData");
-        qputenv("PATH", QCoreApplication::applicationDirPath().toLocal8Bit() + QDir::listSeparator().toLatin1() + m_path);
+        qputenv("PATH", QByteArray(ZTGUI_FAKE_PING_DIRECTORY) + QDir::listSeparator().toLatin1() + QCoreApplication::applicationDirPath().toLocal8Bit() + QDir::listSeparator().toLatin1() + m_path);
         qputenv("ProgramData", m_directory.path().toLocal8Bit());
         qputenv("ZT_TEST_DATA_DIRECTORY", (m_directory.path()+"/ZeroTier").toLocal8Bit());
         QDir().mkpath("screenshots");
     }
     void init() { qputenv("ZT_TEST_MODE", "compact-lists"); m_errors.clear(); }
+    void trayAndMinimizePauseUiPollingAndRefreshOnRestore() {
+        const auto path=m_directory.filePath("tray-queries.log"); QFile::remove(path);
+        qputenv("ZT_TEST_QUERY_LOG",path.toUtf8());
+        const auto queries=[&] { QFile file(path); return file.open(QIODevice::ReadOnly)?file.readAll():QByteArray(); };
+        openWindow(); QTRY_COMPARE(m_controller->networks()->count(),2);
+        const auto old=m_controller->networks()->get(0); m_controller->setExpanded(old["rowId"].toString(),true);
+        m_window->hide(); QTRY_VERIFY(!m_window->isVisible()); QTest::qWait(200);
+        for(auto *poller:m_controller->findChildren<vusiif::ztgui::zerotier::JsonPoller *>()) QVERIFY(!poller->isActive());
+        const auto hidden=queries(); QSignalSpy hiddenUpdates(m_controller.get(),&AppController::stateChanged);
+        QTest::qWait(2200); QCOMPARE(queries(),hidden); QCOMPARE(hiddenUpdates.size(),0);
+        qputenv("ZT_TEST_MODE","empty");
+        m_controller->restoreWindow(); QTRY_VERIFY(m_window->isVisible()); QTRY_COMPARE(m_controller->networks()->count(),0);
+        m_window->showMinimized(); QTRY_COMPARE(m_window->windowState(),Qt::WindowMinimized); QTest::qWait(200);
+        const auto minimized=queries(); QTest::qWait(1200); QCOMPARE(queries(),minimized);
+        qputenv("ZT_TEST_MODE","compact-lists");
+        m_controller->restoreWindow(); QTRY_COMPARE(m_controller->networks()->count(),2);
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
+    }
+    void hiddenWindowCancelsMemberRequestsAndPings() {
+        qputenv("ZT_TEST_MODE","members"); qputenv("ZT_TEST_PING_MODE","hang");
+        QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost,vusiif::ztgui::protocol::NetworkPort));
+        int requests=0; bool respond=false; QPointer<QTcpSocket> waiting;
+        connect(&server,&QTcpServer::newConnection,this,[&] {
+            auto *socket=server.nextPendingConnection(); auto input=std::make_shared<QByteArray>();
+            connect(socket,&QTcpSocket::readyRead,socket,[&,socket,input] {
+                *input+=socket->readAll(); vusiif::ztgui::protocol::Packet packet;
+                if(vusiif::ztgui::protocol::takeFrame(*input,packet)!=vusiif::ztgui::protocol::ReadResult::Packet) return;
+                const auto request=QJsonDocument::fromJson(packet.payload).object(); ++requests;
+                if(!respond) { waiting=socket; return; }
+                const QJsonArray members{QJsonObject{{"nodeId","0123456789"},{"ipAssignments",QJsonArray{"127.0.0.3"}}}};
+                socket->write(vusiif::ztgui::protocol::frame("builtin",QJsonDocument(QJsonObject{{"v",1},{"id",request["id"]},{"ok",true},{"data",members}}).toJson(QJsonDocument::Compact)));
+            });
+            connect(socket,&QTcpSocket::disconnected,socket,&QObject::deleteLater);
+        });
+        openWindow(); QTRY_COMPARE(m_controller->networks()->count(),1);
+        m_controller->setExpanded("0123456789abcdef",true); QTRY_COMPARE(requests,1); QVERIFY(waiting);
+        m_window->hide(); QTRY_VERIFY(!waiting || waiting->state()==QAbstractSocket::UnconnectedState);
+        QTest::qWait(1200); QCOMPARE(requests,1);
+        respond=true; m_controller->restoreWindow(); QTRY_VERIFY(requests>=2);
+        QTRY_VERIFY(!m_controller->networks()->record("0123456789abcdef")["members"].toList().isEmpty());
+        QTRY_VERIFY(!m_controller->findChildren<QProcess *>().isEmpty());
+        m_window->hide();
+        QTRY_VERIFY(m_controller->findChildren<QProcess *>().isEmpty());
+        QVERIFY(m_controller->networks()->record("0123456789abcdef")["expanded"].toBool());
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
+    }
+    void pluginSelectionAndDeleteConfirmation() {
+        QTemporaryDir packages; const auto path=packages.filePath("invalid.ztplugin");
+        QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("invalid package"); file.close();
+        openWindow(packages.path()); QTRY_COMPARE(m_controller->plugins().size(),1);
+        QTRY_VERIFY(!m_controller->plugins().first().toMap()["loading"].toBool());
+        QTRY_VERIFY(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool());
+        QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
+        click("settingsButton"); QTest::qWait(220); click("openPluginsButton"); QTest::qWait(220);
+        click("pluginRow-"); QVERIFY(object("pluginRow-")->property("highlighted").toBool()); QVERIFY(!object("pluginAboutDialog"));
+        const auto removeFromMenu=[this] {
+            auto *row=qobject_cast<QQuickItem *>(object("pluginRow-")); QVERIFY(row);
+            QTest::mouseClick(m_window,Qt::RightButton,{},row->mapToScene(QPointF(20,18)).toPoint()); QTest::qWait(180);
+            QVERIFY(object("pluginLoad-")->property("visible").toBool()); QVERIFY(!object("pluginUnload-")->property("visible").toBool());
+            QVERIFY(object("pluginDelete-")->property("visible").toBool()); click("pluginDelete-");
+        };
+        removeFromMenu(); QTRY_VERIFY(object("confirmationDialog") && object("confirmationDialog")->property("visible").toBool());
+        QVERIFY(QFileInfo::exists(path)); click("cancelActionButton"); QTRY_VERIFY(!object("confirmationDialog")->property("visible").toBool()); QVERIFY(QFileInfo::exists(path));
+        QTest::qWait(180); removeFromMenu(); QTRY_VERIFY(object("confirmationDialog")->property("visible").toBool()); click("confirmActionButton");
+        QTRY_VERIFY(m_controller->plugins().isEmpty()); QVERIFY(!QFileInfo::exists(path));
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
+    }
+    void missingDependencyShowsNoticeWithoutLoading() {
+#ifdef ZTGUI_UI_VOICE_PACKAGE
+        QTemporaryDir packages; QVERIFY(QFile::copy(ZTGUI_UI_VOICE_PACKAGE,packages.filePath("voice.ztplugin")));
+        openWindow(packages.path());
+        QTRY_VERIFY_WITH_TIMEOUT(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool(),10000);
+        QVERIFY(object("pluginNoticeDialog")->property("message").toString().contains("media"));
+        QVERIFY(m_controller->pluginRegistry()->plugins().isEmpty());
+        for(const auto &v:m_controller->plugins()) { QVERIFY(!v.toMap()["loaded"].toBool()); QVERIFY(!v.toMap()["loading"].toBool()); }
+        QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
+#else
+        QSKIP("Voice package required");
+#endif
+    }
+    void serviceDependenciesBlockUnload_data() {
+        QTest::addColumn<bool>("dark"); QTest::newRow("light")<<false; QTest::newRow("dark")<<true;
+    }
+    void serviceDependenciesBlockUnload() {
+#ifndef ZTGUI_UI_MEDIA_PACKAGE
+        QSKIP("Configure the independently built media and voice packages for this integration check");
+#else
+        QFETCH(bool,dark);
+        QTemporaryDir packages; QVERIFY(QFile::copy(ZTGUI_UI_VOICE_PACKAGE,packages.filePath("voice.ztplugin")));
+        QVERIFY(QFile::copy(ZTGUI_UI_MEDIA_PACKAGE,packages.filePath("media.ztplugin")));
+        int ticks=0; QTimer heartbeat; heartbeat.setInterval(5); connect(&heartbeat,&QTimer::timeout,this,[&] { ++ticks; }); heartbeat.start();
+        openWindow(packages.path());
+        QTRY_COMPARE_WITH_TIMEOUT(m_controller->pluginRegistry()->plugins().size(),2,80000);
+        QTRY_COMPARE(m_controller->pluginRegistry()->preparationState("voice-chat"),vusiif::ztgui::plugins::PreparationState::Ready);
+        click("settingsButton"); QTest::qWait(200);
+        if(dark) { click("themeSelector"); QTRY_VERIFY(m_controller->dark()); QTest::qWait(250); }
+        click("openPluginsButton"); QTRY_VERIFY(object("pluginDialog") && object("pluginDialog")->property("visible").toBool()); QTest::qWait(200);
+        click("pluginRow-media"); QVERIFY(!object("pluginAboutDialog")); QVERIFY(object("pluginRow-media")->property("highlighted").toBool());
+        auto *selected=qobject_cast<QQuickItem *>(object("pluginRow-media")); QVERIFY(selected);
+        QTest::mouseClick(m_window,Qt::RightButton,{},selected->mapToScene(QPointF(20,18)).toPoint()); QTest::qWait(180);
+        QVERIFY(!object("pluginLoad-media")->property("visible").toBool()); QVERIFY(!object("pluginDelete-media")->property("visible").toBool());
+        click("pluginAbout-media"); QTRY_VERIFY(object("pluginAboutDialog") && object("pluginAboutDialog")->property("visible").toBool()); QTest::qWait(200);
+        QVERIFY(object("pluginServicesLabel")->property("text").toString().contains("media.audio"));
+        QVERIFY(m_window->grabWindow().save(dark?"screenshots/plugin-services-dark.png":"screenshots/plugin-services-light.png"));
+        QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginAboutDialog")->property("visible").toBool());
+        m_controller->loadPlugin("MEDIA"); QTRY_VERIFY(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool());
+        QVERIFY(object("pluginNoticeDialog")->property("message").toString().contains(QStringLiteral("同 ID")));
+        QCOMPARE(m_controller->pluginRegistry()->plugins().size(),2);
+        QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
+        const auto unloadFromMenu=[this] {
+            auto *row=qobject_cast<QQuickItem *>(object("pluginRow-media")); QVERIFY(row);
+            QTest::mouseClick(m_window,Qt::RightButton,{},row->mapToScene(QPointF(row->width()/2,row->height()/2)).toPoint());
+            QTest::qWait(160); click("pluginUnload-media");
+        };
+        unloadFromMenu(); QTRY_VERIFY(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool());
+        QVERIFY(object("pluginNoticeDialog")->property("message").toString().contains("voice-chat"));
+        QTest::qWait(180); QVERIFY(m_window->grabWindow().save(dark?"screenshots/plugin-dependency-dark.png":"screenshots/plugin-dependency-light.png"));
+        QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
+        QCOMPARE(m_controller->pluginRegistry()->plugins().size(),2);
+        m_controller->unloadPlugin("voice-chat"); QTRY_VERIFY_WITH_TIMEOUT(m_controller->pluginRegistry()->plugins().isEmpty(),10000);
+        QVERIFY(ticks>5); QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
+        QSignalSpy exited(m_controller.get(),&AppController::exitFinished); m_controller->requestQuit(); QTRY_COMPARE(exited.size(),1);
+#endif
+    }
+    void mediaOnlyUnloadMemory() {
+#if defined(Q_OS_WIN) && defined(ZTGUI_UI_MEDIA_PACKAGE)
+        if(!qEnvironmentVariableIntValue("ZTGUI_TEST_MEDIA_MEMORY")) QSKIP("Set ZTGUI_TEST_MEDIA_MEMORY=1 for the repeated physical worker memory check");
+        QTemporaryDir packages; openWindow(packages.path()); QTest::qWait(500);
+        QFile file("screenshots/media-unload-memory.csv"); QVERIFY(file.open(QIODevice::WriteOnly));
+        QTextStream csv(&file); csv<<"round,privateBytes,workingSet,handles,threads\n";
+        const auto measure=[&](int round) {
+            PROCESS_MEMORY_COUNTERS_EX memory{}; memory.cb=sizeof(memory);
+            QVERIFY(K32GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&memory),sizeof(memory)));
+            DWORD handles=0; QVERIFY(GetProcessHandleCount(GetCurrentProcess(),&handles));
+            int threads=0; const auto snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD,0); QVERIFY(snapshot!=INVALID_HANDLE_VALUE);
+            THREADENTRY32 entry{}; entry.dwSize=sizeof(entry);
+            if(Thread32First(snapshot,&entry)) do { if(entry.th32OwnerProcessID==GetCurrentProcessId()) ++threads; } while(Thread32Next(snapshot,&entry));
+            CloseHandle(snapshot);
+            csv<<round<<','<<qulonglong(memory.PrivateUsage)<<','<<qulonglong(memory.WorkingSetSize)<<','<<handles<<','<<threads<<'\n'; csv.flush();
+            const auto modules=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE,GetCurrentProcessId()); QVERIFY(modules!=INVALID_HANDLE_VALUE);
+            MODULEENTRY32W module{}; module.dwSize=sizeof(module);
+            QStringList mediaModules;
+            if(Module32FirstW(modules,&module)) do {
+                const auto name=QString::fromWCharArray(module.szModule).toLower();
+                if(name.contains("multimedia") || name.startsWith("avcodec") || name.startsWith("avformat") || name.contains("ztgui_media")) mediaModules.append(name);
+            } while(Module32NextW(modules,&module));
+            CloseHandle(modules); QVERIFY2(mediaModules.isEmpty(),qPrintable(mediaModules.join(',')));
+        };
+        measure(0);
+        for(int round=1;round<=6;++round) {
+            if(round==1) m_controller->importPlugin(QUrl::fromLocalFile(ZTGUI_UI_MEDIA_PACKAGE)); else m_controller->loadPlugin("media");
+            QTRY_COMPARE_WITH_TIMEOUT(m_controller->pluginRegistry()->plugins().size(),1,80000);
+            QTRY_COMPARE_WITH_TIMEOUT(m_controller->pluginRegistry()->preparationState("media"),vusiif::ztgui::plugins::PreparationState::Ready,80000);
+            qint64 pid=0; for(const auto &v:m_controller->plugins()) if(v.toMap()["id"]=="media") pid=v.toMap()["pid"].toLongLong();
+            QVERIFY(pid>0); const auto process=OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,DWORD(pid)); QVERIFY(process);
+            wchar_t image[32768]; DWORD imageSize=32768; QVERIFY(QueryFullProcessImageNameW(process,0,image,&imageSize));
+            const auto cache=QFileInfo(QString::fromWCharArray(image,imageSize)).dir().absoluteFilePath("../..");
+            m_controller->unloadPlugin("media"); QTRY_VERIFY_WITH_TIMEOUT(m_controller->pluginRegistry()->plugins().isEmpty(),10000);
+            QCOMPARE(WaitForSingleObject(process,0),DWORD(WAIT_OBJECT_0)); CloseHandle(process);
+            QVERIFY(!QFileInfo::exists(cache));
+            const auto runtime=vusiif::ztgui::package::runtimeStatistics(); QCOMPARE(runtime["directories"].toInt(),0); QCOMPARE(runtime["handles"].toInt(),0);
+            QTest::qWait(300); measure(round);
+        }
+        // Let Qt's default thread-pool expiry distinguish an idle worker from a leak.
+        QTest::qWait(31000); measure(7);
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
+#else
+        QSKIP("Windows media package required");
+#endif
+    }
     void cleanup() {
         m_engine.reset(); m_window = nullptr; m_controller.reset();
         QSettings().clear(); qunsetenv("ZT_TEST_MODE"); qunsetenv("ZT_TEST_COMMAND_LOG");
+        qunsetenv("ZT_TEST_QUERY_LOG");
+        qunsetenv("ZT_TEST_PING_MODE"); qunsetenv("ZT_TEST_PING_DELAY"); qunsetenv("ZT_TEST_PING_LOG");
         qunsetenv("ZTGUI_PLUGIN_CREATE_STEPS");
     }
     void cleanupTestCase() { qputenv("PATH", m_path); qputenv("ProgramData", m_programData); qunsetenv("ZT_TEST_DATA_DIRECTORY"); }
@@ -130,6 +306,12 @@ private slots:
         QTRY_VERIFY(object("aboutDialog") && object("aboutDialog")->property("visible").toBool());
         auto *aboutVersion = object("aboutVersionLabel"); QVERIFY(aboutVersion);
         QCOMPARE(aboutVersion->property("text").toString(), "v" + expectedVersion);
+        QCOMPARE(m_controller->serverVersion(), QStringLiteral(ZTGUI_SERVER_VERSION));
+        QCOMPARE(m_controller->serverApiVersion(), QStringLiteral(ZTGUI_SERVER_API_VERSION));
+        auto *aboutServerVersion = object("aboutServerVersionLabel"); QVERIFY(aboutServerVersion);
+        QCOMPARE(aboutServerVersion->property("text").toString(),
+                 "服务端 " + QStringLiteral(ZTGUI_SERVER_VERSION)
+                     + "（API " + QStringLiteral(ZTGUI_SERVER_API_VERSION) + "）");
         QTest::qWait(180);
         QVERIFY(m_window->grabWindow().save("screenshots/qml-application-version.png"));
         m_controller->setTheme("dark"); QTest::qWait(200);
@@ -157,24 +339,28 @@ private slots:
     void gpuAccelerationPreferenceSurvivesWindowRecreation() {
         if (QCoreApplication::arguments().contains("--disable-gpu-acceleration")) QSKIP("Command-line override is tested separately");
         openWindow();
-        QVERIFY(!m_controller->disableGpuAcceleration());
+        QVERIFY(m_controller->disableGpuAcceleration());
         const auto backend = QQuickWindow::sceneGraphBackend();
         click("settingsButton"); QTest::qWait(220);
         auto *toggle = object("disableGpuAccelerationSwitch"); QVERIFY(toggle);
-        QVERIFY(!toggle->property("checked").toBool()); QVERIFY(toggle->property("enabled").toBool());
-        QVERIFY(object("gpuAccelerationHint")->property("text").toString().contains(QStringLiteral("重启程序后生效")));
-        click("disableGpuAccelerationSwitch"); QTRY_VERIFY(m_controller->disableGpuAcceleration());
+        QVERIFY(toggle->property("checked").toBool()); QVERIFY(toggle->property("enabled").toBool());
+        QVERIFY(!object("gpuAccelerationHint"));
+        click("disableGpuAccelerationSwitch"); QTRY_VERIFY(!m_controller->disableGpuAcceleration());
+        QTRY_VERIFY(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool());
+        QVERIFY(object("pluginNoticeDialog")->property("message").toString().contains(QStringLiteral("重新启动")));
+        QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
         QCOMPARE(QQuickWindow::sceneGraphBackend(), backend);
         m_engine.reset(); m_window = nullptr; m_controller.reset();
         openWindow();
-        QVERIFY(m_controller->disableGpuAcceleration());
+        QVERIFY(!m_controller->disableGpuAcceleration());
         click("settingsButton"); QTest::qWait(220);
-        QVERIFY(object("disableGpuAccelerationSwitch")->property("checked").toBool());
+        QVERIFY(!object("disableGpuAccelerationSwitch")->property("checked").toBool());
         m_controller->setTheme("dark"); m_window->resize(720,480); QTest::qWait(300);
         auto *popup = object("settingsPage"); QVERIFY(popup);
         QVERIFY(popup->property("y").toReal() + popup->property("height").toReal() <= m_window->height());
         QVERIFY(m_window->grabWindow().save("screenshots/qml-gpu-settings-dark-small.png"));
-        click("disableGpuAccelerationSwitch"); QTRY_VERIFY(!m_controller->disableGpuAcceleration());
+        click("disableGpuAccelerationSwitch"); QTRY_VERIFY(m_controller->disableGpuAcceleration());
+        QVERIFY(!object("pluginNoticeDialog") || !object("pluginNoticeDialog")->property("visible").toBool());
         m_controller->setTheme("light"); QTest::qWait(300);
         QVERIFY(m_window->grabWindow().save("screenshots/qml-gpu-settings-light-small.png"));
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
@@ -183,14 +369,14 @@ private slots:
         if (!QCoreApplication::arguments().contains("--disable-gpu-acceleration")) QSKIP("Run with --disable-gpu-acceleration to test override");
         openWindow();
         QVERIFY(m_controller->gpuAccelerationForcedOff());
-        QVERIFY(!m_controller->disableGpuAcceleration());
+        QVERIFY(m_controller->disableGpuAcceleration());
         click("settingsButton"); QTest::qWait(220);
         auto *toggle = object("disableGpuAccelerationSwitch"); QVERIFY(toggle);
         QVERIFY(toggle->property("checked").toBool()); QVERIFY(!toggle->property("enabled").toBool());
         click("disableGpuAccelerationSwitch");
-        QVERIFY(!m_controller->disableGpuAcceleration());
+        QVERIFY(m_controller->disableGpuAcceleration());
         QVERIFY(!QSettings().contains("rendering/disableGpuAcceleration"));
-        QVERIFY(object("gpuAccelerationHint")->property("text").toString().contains(QStringLiteral("启动参数")));
+        QVERIFY(!object("gpuAccelerationHint"));
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
     void infoPollingDebouncesFailuresAndRecovers() {
@@ -211,7 +397,9 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!availability.isEmpty(),9000);
         QCOMPARE(availability.first().first().toBool(),false);
         qputenv("ZT_TEST_MODE","compact-lists");
-        QTRY_VERIFY_WITH_TIMEOUT(availability.last().first().toBool(),3000);
+        // A slow request can already be in flight when the fixture switches.
+        // Allow its five-second deadline plus the next polling interval.
+        QTRY_VERIFY_WITH_TIMEOUT(availability.last().first().toBool(),7000);
     }
     void joinDialogUsesAsyncCommandAndReportsFailure() {
         openWindow(); click("joinNetworkButton");
@@ -231,7 +419,9 @@ private slots:
         m_controller->refresh(); QTest::qWait(100);
         QCOMPARE(m_controller->networks()->record(id)["name"].toString(),QStringLiteral("本机备注"));
         QVERIFY(m_controller->networks()->record(id)["expanded"].toBool());
-        qputenv("ZT_TEST_MODE","error"); m_controller->refresh(); QTRY_VERIFY(!m_controller->networkStatus().isEmpty());
+        // The offline debounce itself takes at least five seconds; allow one
+        // polling interval and native process scheduling before declaring failure.
+        qputenv("ZT_TEST_MODE","error"); m_controller->refresh(); QTRY_VERIFY_WITH_TIMEOUT(!m_controller->networkStatus().isEmpty(),8000);
         QCOMPARE(m_controller->networks()->count(),2);
         qputenv("ZT_TEST_MODE","compact-lists"); m_controller->refresh(); QTRY_VERIFY(m_controller->networkStatus().isEmpty());
         m_controller->rename("networks",id,""); QCOMPARE(m_controller->networks()->record(id)["name"].toString(),QStringLiteral("团队网络"));
@@ -332,6 +522,10 @@ private slots:
     }
     void memberPollingRetainsEditorAndCancelsOnCollapse() {
         qputenv("ZT_TEST_MODE","members"); QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost,18100));
+        qputenv("ZT_TEST_PING_DELAY", "700");
+        const auto latencyAt = [this](int index) {
+            return m_controller->networks()->record("0123456789abcdef")["members"].toList().value(index).toMap()["latency"].toString();
+        };
         int requests=0;
         connect(&server,&QTcpServer::newConnection,this,[&] {
             auto *socket=server.nextPendingConnection(); auto input=std::make_shared<QByteArray>();
@@ -355,6 +549,12 @@ private slots:
         QCOMPARE(sorted.size(),3); QCOMPARE(sorted[0].toMap()["id"].toString(),QString("0123456789"));
         QCOMPARE(sorted[1].toMap()["ip"].toString(),QString("12.34.56.10"));
         QCOMPARE(sorted[2].toMap()["ip"].toString(),QString("12.34.56.100"));
+        QTRY_COMPARE(latencyAt(0), QString("12 ms"));
+        auto previous = m_controller->networks()->record("0123456789abcdef")["members"].toList();
+        auto successful = previous[0].toMap(); successful["latency"] = "37 ms"; previous[0] = successful;
+        auto failed = previous[1].toMap(); failed["latency"] = QStringLiteral("不可达"); previous[1] = failed;
+        m_controller->networks()->update("0123456789abcdef", {{"members", previous}});
+        QTest::qWait(1500); QCOMPARE(requests, 1); // No old two-second polling cycle.
         QTest::qWait(250); m_controller->setTheme("dark"); QTest::qWait(350);
         auto *memberLine=qobject_cast<QQuickItem *>(object("networkMemberRow")); QVERIFY(memberLine);
         QTest::mouseClick(m_window,Qt::RightButton,{},memberLine->mapToScene(QPointF(100,20)).toPoint());
@@ -365,11 +565,28 @@ private slots:
         QTRY_VERIFY(object("networkMemberRow")); auto *member=object("networkMemberRow"); member->setProperty("editing",true);
         auto *editor=object("networkMemberRemarkEditor"); QVERIFY(editor); QTRY_VERIFY(editor->property("visible").toBool()); editor->setProperty("text",QStringLiteral("成员备注"));
         QPointer<QObject> identity=editor;
-        QTRY_VERIFY_WITH_TIMEOUT(requests>=2,3000);
+        QTRY_VERIFY_WITH_TIMEOUT(requests>=2,6000);
+        QTRY_COMPARE(m_controller->networks()->record("0123456789abcdef")["members"].toList().first().toMap()["ip"].toString(), QString("12.34.56.3"));
+        QCOMPARE(latencyAt(0), QString("37 ms"));
+        QCOMPARE(latencyAt(1), QStringLiteral("不可达"));
         QCOMPARE(object("networkMemberRemarkEditor"),identity.data()); QCOMPARE(editor->property("text").toString(),QStringLiteral("成员备注"));
+        QTRY_COMPARE(latencyAt(0), QString("12 ms"));
+        QTRY_COMPARE(latencyAt(1), QString("12 ms"));
         QTest::keyClick(m_window,Qt::Key_Return);
         QTRY_COMPARE(QSettings().value("names/peers/0123456789").toString(),QStringLiteral("成员备注"));
-        m_controller->setExpanded("0123456789abcdef",false); const int before=requests; QTest::qWait(2100); QCOMPARE(requests,before);
+        qputenv("ZT_TEST_PING_MODE", "hang");
+        const auto pingProcesses = [this] {
+            QList<QPointer<QProcess>> result;
+            for (auto *process : m_controller->findChildren<QProcess *>())
+                if (QFileInfo(process->program()).baseName() == "ping" && process->state() == QProcess::Running) result.append(process);
+            return result;
+        };
+        m_controller->refresh(); QTRY_COMPARE(pingProcesses().size(), 3);
+        const auto pending = pingProcesses(); const int previousRequests = requests;
+        m_controller->refresh(); QTRY_VERIFY(requests > previousRequests);
+        QCOMPARE(pingProcesses().size(), 3);
+        m_controller->setExpanded("0123456789abcdef",false); const int before=requests; QTest::qWait(5100); QCOMPARE(requests,before);
+        for (const auto &process : pending) QVERIFY(process.isNull());
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
     void closingDuringInitializationRemainsResponsive_data() {

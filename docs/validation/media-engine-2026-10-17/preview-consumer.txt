@@ -1,0 +1,12 @@
+********* Start testing of VoicePluginTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : VoicePluginTests::initTestCase()
+QINFO  : VoicePluginTests::previewSdkConsumerRendersVideo() [worker] Owned process started; pid 19592
+QINFO  : VoicePluginTests::previewSdkConsumerRendersVideo() [worker] IPC authenticated; waiting for service preparation; pid 19592
+QWARN  : VoicePluginTests::previewSdkConsumerRendersVideo() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::previewSdkConsumerRendersVideo() [worker] Service preparation completed; pid 19592
+PASS   : VoicePluginTests::previewSdkConsumerRendersVideo()
+PASS   : VoicePluginTests::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 7920ms
+********* Finished testing of VoicePluginTests *********

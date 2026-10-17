@@ -1,0 +1,25 @@
+Start testing: Oct 15 20:10 CST
+----------------------------------------------------------
+1/2 Testing: server_package_container
+1/2 Test: server_package_container
+Command: "/mnt/d/User/Code/Github/Utils/zerotier-gui/cmake-build-server/tests/server_package_tests"
+Directory: /mnt/d/User/Code/Github/Utils/zerotier-gui/cmake-build-server/tests
+"server_package_container" start time: Oct 15 20:10 CST
+Output:
+----------------------------------------------------------
+********* Start testing of ServerPackageTests *********
+Config: Using QtTest library 6.4.2, Qt 6.4.2 (x86_64-little_endian-lp64 shared (dynamic) release build; by GCC 13.2.0), ubuntu 24.04
+PASS   : ServerPackageTests::initTestCase()
+PASS   : ServerPackageTests::formatsAndMultipleFiles()
+PASS   : ServerPackageTests::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 405ms
+********* Finished testing of ServerPackageTests *********
+<end of output>
+Test time =   0.45 sec
+----------------------------------------------------------
+Test Passed.
+"server_package_container" end time: Oct 15 20:10 CST
+"server_package_container" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Oct 15 20:10 CST
