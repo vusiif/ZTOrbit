@@ -1,5 +1,10 @@
 function Invoke-Checked([string]$Program, [string[]]$Arguments) {
-    & $Program @Arguments
+    # Native tools may write non-fatal notices to stderr (for example windeployqt
+    # missing optional dxcompiler). Do not let the caller's Stop preference turn
+    # those notices into a failed build; the exit code remains authoritative.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Program @Arguments } finally { $ErrorActionPreference = $previous }
     if ($LASTEXITCODE -ne 0) { throw "$Program failed: $LASTEXITCODE" }
 }
 

@@ -3,6 +3,8 @@
 ## 0.5.1-alpha（客户端 API 0.5-alpha）／0.2.1-beta（服务端 API 0.2-beta）
 
 - 开发者指定客户端 `0.5.1-alpha`（API `0.5-alpha`）、服务端 `0.2.1-beta`（API `0.2-beta`）。客户端版本源为根 `VERSION`，服务端版本由客户端侧维护的根 `SERVER_VERSION` 指定；同端 API 使用程序版本前两段数字和相同预发布后缀，客户端与服务端版本独立。客户端关于界面显示目标服务端版本；客户端 API 0.4 与服务端 API 0.4 插件须用新 SDK 重编。归档 C++ 服务端保留 0.4.1／API 0.4。
+- 重新构建并发布客户端、服务端、两端 SDK、媒体与语音插件；Windows 主程序 191 个文件、Linux 服务端包 6 个顶层文件加 `licenses/`，测试和产物哈希见 [版本验证](docs/validation/release-0.5.1-alpha-0.2.1-beta.md)。
+- 构建工具修复：`Invoke-Checked` 不再把 windeployqt 的非致命 stderr 提示当作失败；Linux 打包改用原生临时目录，WSL/drvfs 下的 tar 保留 755/644 权限。
 
 - Linux 服务端迁移为 Java 25 + Netty 4.2（Maven、`maven.compiler.release=25`、`zt-server.jar`），宿主继续提供 `ZTS1`、`builtin`、`ZTD1`、`ZTV1` 兼容行为、只读 ZeroTier 查询和网络中转；旧 C++/Qt6 项目、测试和 C++ 语音插件归档到 `src/server-old/`，根 CMake 仅在显式 `ZTGUI_BUILD_SERVER_OLD=ON` 时构建。
 - 服务端插件改为 Java JAR SDK（`vusiif.ztgui.server.api`，API 0.2-beta）与 `plugins/*.jar`，不再加载 `.ztplugin`；提供独立 SDK 包 `build/dist/ZTServer-api-v0.2-beta.zip` 与样例项目。

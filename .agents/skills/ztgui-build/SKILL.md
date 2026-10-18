@@ -49,7 +49,7 @@ API 是头文件 SDK，另附本机封装命令工具，生成过程是独立 CM
 
 ## Linux 服务端（Java 25 + Netty）
 
-执行本技能的 `scripts/build-linux.sh`（或根 `scripts/build-linux.sh` 兼容入口）。脚本要求 Linux、JDK 25 与 Maven 3.9+，读取根 `SERVER_VERSION`，以 `-Drevision=<服务端版本> -DapiVersion=<前两段数字+后缀>` 执行 `mvn -f src/server/pom.xml clean verify`，生成 `build/dist/linux-x64/` 与 `build/dist/linux-x64.tar.gz`。包内为 `zt-server.jar`、`start-server.sh`、`zt-server.service`、`zt-installer.sh`、`DEPLOYMENT.md` 副本、`VERSION`（服务端版本）、`licenses/`；不内置 JRE，不携带插件、测试或运行数据。
+执行本技能的 `scripts/build-linux.sh`（或根 `scripts/build-linux.sh` 兼容入口）。脚本要求 Linux、JDK 25 与 Maven 3.9+，读取根 `SERVER_VERSION`，以 `-Drevision=<服务端版本> -DapiVersion=<前两段数字+后缀>` 执行 `mvn -f src/server/pom.xml clean verify`，生成 `build/dist/linux-x64/` 与 `build/dist/linux-x64.tar.gz`。包内为 `zt-server.jar`、`start-server.sh`、`zt-server.service`、`zt-installer.sh`、`DEPLOYMENT.md` 副本、`VERSION`（服务端版本）、`licenses/`；不内置 JRE，不携带插件、测试或运行数据。脚本在原生临时目录暂存后压缩，避免 WSL drvfs 忽略 chmod 导致 tar 权限错误。
 
 启动脚本只检查 Java 25 与 JAR 是否存在；`--check-deps` 仅检查，失败返回 78 并给出 Ubuntu 22.04/24.04 的 Temurin 25 安装指引；无参数默认 `--server --listen 0.0.0.0 --port 18100`，其他参数原样转发，`exec java -jar` 保留信号与退出码。宿主不再包含安装/卸载/Moon 参数，独立脚本 `zt-installer.sh` 随包发布并使用原 `--action` 映射。
 

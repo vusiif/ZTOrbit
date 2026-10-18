@@ -36,7 +36,9 @@ mvn -f src/server/pom.xml "-Drevision=$revision" "-DapiVersion=$api_version" cle
 
 dist="$project_root/build/dist"
 mkdir -p "$dist"
-stage="$(mktemp -d "$dist/.linux-x64.XXXXXX")"
+# Stage in the native temporary filesystem so tar records 755/644 modes even
+# when the repository lives on a drvfs mount (WSL) that ignores chmod.
+stage="$(mktemp -d "${TMPDIR:-/tmp}/ztgui-linux-x64.XXXXXX")"
 trap 'rm -rf -- "$stage"' EXIT
 cp src/server/main/target/zt-server.jar "$stage/zt-server.jar"
 cp src/server/scripts/start-server.sh src/server/scripts/zt-server.service "$stage/"
@@ -52,10 +54,10 @@ find "$stage/licenses" -type f -exec chmod 644 {} +
 "$java_command" -jar "$stage/zt-server.jar" --version | grep -Fxq "$revision" || {
     echo 'Built jar reports an unexpected version' >&2; exit 1; }
 
+tar -czf "$dist/linux-x64.tar.gz" -C "$stage" .
 rm -rf -- "$dist/linux-x64"
 mv "$stage" "$dist/linux-x64"
 trap - EXIT
-tar -czf "$dist/linux-x64.tar.gz" -C "$dist/linux-x64" .
 
 python3 .agents/skills/ztgui-build/scripts/package-server-sdk.py "$project_root"
 

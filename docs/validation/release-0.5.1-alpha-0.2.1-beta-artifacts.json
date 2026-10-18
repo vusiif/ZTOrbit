@@ -1,0 +1,38 @@
+{
+  "build/dist/windows-x64.zip": {
+    "bytes": 25675534,
+    "sha256": "5ed30d8725354477a0395545afad226eb08e9e72675d18d25cecff9266b47bb4"
+  },
+  "build/dist/ZTGUI-api-v0.5-alpha.zip": {
+    "bytes": 3367311,
+    "sha256": "b12163c7186abce87b63e81eecbc2475ba03ae53e147893f8784d05205deb422"
+  },
+  "build/dist/linux-x64.tar.gz": {
+    "bytes": 4924212,
+    "sha256": "1cfdd8a7ee2fd0c39d9b606780e3a46f723d6070fca7e05631fab8d11661c778"
+  },
+  "build/dist/ZTServer-api-v0.2-beta.zip": {
+    "bytes": 4248765,
+    "sha256": "55a81aebb05d1038f4e4f7d6633e36372027a13102675406fed99adbd034f49f"
+  },
+  "build/dist/ZTGUI-media-api-v2.zip": {
+    "bytes": 24967,
+    "sha256": "9b0db3041b6482620cf4bb5a881c0349cc8bf06f12c4fd82ec6df86d5bb55b52"
+  },
+  "build/dist/ZTGUI-media-engine-sdk-v1.zip": {
+    "bytes": 10808745,
+    "sha256": "3e2033c3a9851de5437da93babd778147a77c2250b50916f6d1e079ef94cc302"
+  },
+  "build/dist/plugins/ztgui_media_worker-v2.0.0.ztplugin": {
+    "bytes": 47640119,
+    "sha256": "2c94335df224b7940cc2f5f27e9e7fd9b6c1839166b0b6bbb3d5aa2a9f5a30fa"
+  },
+  "build/dist/plugins/ztgui_voice_chat-v0.3.0.ztplugin": {
+    "bytes": 298259,
+    "sha256": "5eab4e61c3d983a0054b1ff50ffbd291dc67448e0f70498d86dff6f7e70f5089"
+  },
+  "build/dist/server-plugins/ztserver_voice_chat-v0.1.0.jar": {
+    "bytes": 14884,
+    "sha256": "9696907c7551ca96f522258494c133a9dcbb4ed38f14b84624e71e7e1d9af978"
+  }
+}
