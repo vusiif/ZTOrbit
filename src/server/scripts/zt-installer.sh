@@ -1,35 +1,38 @@
 #!/usr/bin/env bash
 # ============================================================================
-# ZeroTier + ztncui 独立部署脚本（随 ZTServer 发行包发布）
+# ZeroTier + ztncui + pylon 独立部署脚本（随 ZTServer 发行包发布）
 #
 # 该脚本从服务端宿主 CLI 中独立出来，由部署人员直接执行；宿主不再内嵌安装、
-# 卸载或 Moon 导出逻辑。脚本保持原有菜单/--action 行为不变。旧宿主命令映射：
+# 卸载或 Moon 导出逻辑。旧宿主命令映射：
 #   --install zerotier -> --action 2    --install ztncui -> --action 3
-#   --install all      -> --action 1    --moon            -> --action 4
-#   --uninstall ztncui -> --action 5    --uninstall all    -> --action 6
-#   --uninstall zerotier -> --action 7
+#   --install all      -> --action 1    --moon            -> --action 5
+#   --uninstall ztncui -> --action 6    --uninstall all    -> --action 8
+#   --uninstall zerotier -> --action 9
 # 完整说明见 DEPLOYMENT.md。
 #
 # 执行后先列出数字选项，再按选择执行：
-#   1) 安装            全量安装：ZeroTier + moon + ztncui，并导出 moon 文件
+#   1) 安装            全量安装：ZeroTier + moon + ztncui + pylon，并导出 moon 文件
 #   2) 仅安装ZeroTier  安装 ZeroTier、构建 moon，并导出 moon 文件
 #   3) 仅安装ztncui    部署 ztncui（本机无 ZeroTier 则不做任何事）
-#   4) 导出moon文件    构建（若缺失）并导出 moon 文件到当前目录
-#   5) 仅卸载ztncui    删除 ztncui 容器、镜像与配置目录
-#   6) 卸载            删除 ztncui 全部内容，再卸载 ZeroTier 及数据目录
+#   4) 仅安装pylon     部署 pylon reflect 容器（无需本机安装 ZeroTier）
+#   5) 导出moon文件    构建（若缺失）并导出 moon 文件到当前目录
+#   6) 仅卸载ztncui    删除 ztncui 容器、镜像与配置目录
+#   7) 仅卸载pylon     删除 pylon 容器与镜像
+#   8) 卸载            删除 ztncui、pylon 全部内容，再卸载 ZeroTier 及数据目录
+#   --action 9        仅卸载 ZeroTier（仅命令行）
 #
 # 设计要点：
 #   - 前置条件先行：构建 moon 之前先确认 $MOON_PORT/UDP 可用；部署 ztncui
 #     之前先确认本机 ZeroTier 就绪（选项 3 不会代装 ZeroTier）；
 #   - moon 文件导出到「执行脚本时所在的目录」($RUN_DIR)，脚本内部不改 cwd；
 #   - 幂等：已存在 moon / 容器时跳过，--force 才重建；
-#   - 卸载（选项 6）会删除节点身份，节点 ID 将不可恢复。
+#   - 卸载（选项 8）会删除节点身份，节点 ID 将不可恢复。
 #
 # 适用环境：Ubuntu Server 24.04 / Debian 系（RPM 系仅卸载做了兼容），需 root
 # 使用示例：
 #   sudo bash zt-installer.sh                      # 菜单模式
 #   sudo bash zt-installer.sh --action 2 --ip 1.2.3.4
-#   sudo bash zt-installer.sh --action 6           # 全量卸载
+#   sudo bash zt-installer.sh --action 8           # 全量卸载
 # ============================================================================
 
 set -euo pipefail
@@ -40,8 +43,8 @@ PRESERVE_ZTNCUI=0
 # ============================== 参数定义 ==============================
 
 PUBLIC_IP=""                        # 服务器公网 IP：留空则自动检测，可用 --ip 指定
-FORCE=0                             # 1 = 强制重建 moon 节点与 ztncui 容器
-ACTION=""                           # 菜单编号："1"~"6"，"0" = 退出；为空则显示菜单
+FORCE=0                             # 1 = 强制重建 moon 节点与所选操作的容器
+ACTION=""                           # 操作编号："0"~"9"（9 仅命令行）；为空则显示菜单
 INTERACTIVE=0                       # 1 = 操作来自菜单（需要二次确认的破坏性操作）
 
 RUN_DIR="$(pwd)"                    # 执行脚本时所在的目录：moon 文件导出到这里
@@ -52,6 +55,10 @@ MOON_PORT="9993"                    # ZeroTier 默认 UDP 端口，moon stableEn
 ZTNCUI_CONTAINER="ztncui"           # ztncui 容器名
 ZTNCUI_IMAGE="keynetworks/ztncui"   # ztncui 官方镜像
 ZTNCUI_HTTP_PORT="3000"             # ztncui HTTP 访问端口
+
+PYLON_CONTAINER="ztpylon"           # pylon 容器名
+PYLON_IMAGE="zerotier/pylon:latest" # pylon 官方镜像
+PYLON_PORT="9443"                  # 宿主机 TCP 端口，避免与 ZeroTier 的 9993/TCP API 冲突
 
 EXPORTED_MOON=""                    # 本次导出到 $RUN_DIR 的 moon 文件绝对路径
 
@@ -71,18 +78,22 @@ usage() {
 用法: sudo bash $(basename "$0") [选项]
 
 不带选项运行时，先列出数字操作菜单，再按所选编号执行：
-  1 安装            全量安装（ZeroTier + moon + ztncui），并导出 moon 文件
+  1 安装            全量安装（ZeroTier + moon + ztncui + pylon），并导出 moon 文件
   2 仅安装ZeroTier  安装 ZeroTier、构建 moon，并导出 moon 文件
   3 仅安装ztncui    部署 ztncui（要求本机已安装 ZeroTier，否则不做任何事）
-  4 导出moon文件    构建（若缺失）并导出 moon 文件到当前目录
-  5 仅卸载ztncui    删除 ztncui 容器、镜像与配置目录
-  6 卸载            删除 ztncui 全部内容，再卸载 ZeroTier 及数据目录
+  4 仅安装pylon     部署 pylon reflect 容器（无需本机安装 ZeroTier）
+  5 导出moon文件    构建（若缺失）并导出 moon 文件到当前目录
+  6 仅卸载ztncui    删除 ztncui 容器、镜像与配置目录
+  7 仅卸载pylon     删除 pylon 容器与镜像
+  8 卸载            删除 ztncui、pylon 全部内容，再卸载 ZeroTier 及数据目录
+  9 仅卸载ZeroTier  卸载 ZeroTier 及数据目录，保留 ztncui 配置和 pylon（仅命令行）
 
 选项:
-  --action <0-6>  跳过菜单直接执行指定操作（0 = 退出）
-                  该模式下 5、6 不再二次确认，请自行确认意图
+  --action <0-9>  跳过菜单直接执行指定操作（0 = 退出）
+                  该模式下卸载操作不再二次确认，请自行确认意图
   --ip <IPv4>     手动指定服务器公网 IP（构建/导出 moon 时使用）
-  --force         重建 moon 文件、删除重建 ztncui 容器
+  --pylon-port <端口>  pylon 的宿主机 TCP 端口（默认 9443，映射容器 443/TCP）
+  --force         重建 moon 文件、删除重建所选操作的 ztncui/pylon 容器
   -h, --help      显示本帮助
 
 moon 文件导出位置：执行脚本时所在的目录（$RUN_DIR）
@@ -107,6 +118,10 @@ is_ipv4() {
     (( n <= 255 )) || return 1
   done
   return 0
+}
+
+is_port() {
+  [[ "$1" =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 ))
 }
 
 # 自动检测公网 IP：优先 cip.cc（文档所用），失败后依次尝试备用接口
@@ -146,6 +161,30 @@ udp_port_listening() {
     return 2
   fi
   grep -qE "[:.]${port}[[:space:]]" <<< "$out"
+}
+
+# 检测宿主机 TCP 监听；返回 2 表示缺少检测工具或查询失败
+tcp_port_listening() {
+  local port="$1" out=""
+  if command -v ss >/dev/null 2>&1; then
+    out="$(ss -ltn 2>/dev/null)" || return 2
+  elif command -v netstat >/dev/null 2>&1; then
+    out="$(netstat -ltn 2>/dev/null)" || return 2
+  else
+    return 2
+  fi
+  grep -qE "[:.]${port}[[:space:]]" <<< "$out"
+}
+
+precheck_pylon_port() {
+  local status=0
+  tcp_port_listening "$PYLON_PORT" || status=$?
+  case "$status" in
+    0) die "$PYLON_PORT/TCP 已被占用，未修改现有容器。ZeroTier 本地管理 API 也会使用 9993/TCP。
+请使用 --pylon-port <空闲端口> 指定 pylon 端口（例如 --pylon-port 8443）" ;;
+    1) info "$PYLON_PORT/TCP 当前空闲，可供 pylon 使用" ;;
+    2) warn "无法预检 $PYLON_PORT/TCP 端口，将由 Docker 校验端口绑定" ;;
+  esac
 }
 
 # 输出监听指定 UDP 端口的进程名（去重、空格分隔；无法获知时输出空字符串）
@@ -255,8 +294,20 @@ while [[ $# -gt 0 ]]; do
       is_ipv4 "$PUBLIC_IP" || die "--ip 参数不是合法 IPv4 地址：$PUBLIC_IP"
       shift
       ;;
+    --pylon-port)
+      [[ -n "${2:-}" ]] || die "--pylon-port 需要提供端口（1-65535）"
+      is_port "$2" || die "--pylon-port 只接受 1-65535：$2"
+      PYLON_PORT="$((10#$2))"
+      shift 2
+      ;;
+    --pylon-port=*)
+      value="${1#*=}"
+      is_port "$value" || die "--pylon-port 只接受 1-65535：$value"
+      PYLON_PORT="$((10#$value))"
+      shift
+      ;;
     --action)
-      [[ -n "${2:-}" ]] || die "--action 需要提供编号（0-6）"
+      [[ -n "${2:-}" ]] || die "--action 需要提供编号（0-9）"
       ACTION="$2"
       shift 2
       ;;
@@ -278,8 +329,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -n "$ACTION" && ! "$ACTION" =~ ^[0-7]$ ]]; then
-  die "--action 只接受 0-7：${ACTION}"
+if [[ -n "$ACTION" && ! "$ACTION" =~ ^[0-9]$ ]]; then
+  die "--action 只接受 0-9：${ACTION}"
 fi
 
 # ============================== 菜单 ==============================
@@ -287,15 +338,17 @@ fi
 show_menu() {
   cat <<EOF
 
-==================== ZeroTier + ztncui 部署脚本 ====================
+==================== ZeroTier + ztncui + pylon 部署脚本 ====================
 导出目录：$RUN_DIR
 
-  1) 安装            全量安装：ZeroTier + moon + ztncui，并导出 moon 文件
+  1) 安装            全量安装：ZeroTier + moon + ztncui + pylon，并导出 moon 文件
   2) 仅安装ZeroTier  安装 ZeroTier、构建 moon，并导出 moon 文件（不装 Docker/ztncui）
   3) 仅安装ztncui    部署 ztncui 控制台（要求本机已安装 ZeroTier，否则不做任何事）
-  4) 导出moon文件    构建（若缺失）并导出 moon 文件到导出目录（要求本机已安装 ZeroTier）
-  5) 仅卸载ztncui    删除 ztncui 容器、镜像与配置目录（ZeroTier 不受影响）
-  6) 卸载            删除 ztncui 全部内容，再卸载 ZeroTier 与数据目录
+  4) 仅安装pylon     部署 pylon reflect 容器（无需本机安装 ZeroTier）
+  5) 导出moon文件    构建（若缺失）并导出 moon 文件到导出目录（要求本机已安装 ZeroTier）
+  6) 仅卸载ztncui    删除 ztncui 容器、镜像与配置目录（ZeroTier 不受影响）
+  7) 仅卸载pylon     删除 pylon 容器与镜像（ZeroTier、ztncui 不受影响）
+  8) 卸载            删除 ztncui、pylon 全部内容，再卸载 ZeroTier 与数据目录
 
   0) 退出
 ==================================================================
@@ -307,13 +360,13 @@ choose_action() {
   local choice
   while true; do
     show_menu
-    printf '请输入选项编号 [0-6]: '
+    printf '请输入选项编号 [0-8]: '
     if ! read_tty choice; then
       printf '\n' >&2
       die "无法读取输入（当前环境非交互），请改用：bash $0 --action <编号>"
     fi
     case "$choice" in
-      0|1|2|3|4|5|6)
+      0|1|2|3|4|5|6|7|8)
         ACTION="$choice"
         return 0
         ;;
@@ -321,7 +374,7 @@ choose_action() {
         warn "输入为空，请重新选择"
         ;;
       *)
-        warn "无效选项：$choice（请输入 0-6 之间的数字）"
+        warn "无效选项：$choice（请输入 0-8 之间的数字）"
         ;;
     esac
   done
@@ -331,12 +384,17 @@ choose_action() {
 confirm_action() {
   local answer=""
   case "$1" in
-    5)
+    6)
       printf '\033[33m[确认]\033[0m 即将删除：ztncui 容器、镜像，以及配置目录 %s\n' "$ZT_HOME/ztncui"
       printf '         ZeroTier 本体不受影响。\n'
       ;;
-    6)
-      printf '\033[33m[确认]\033[0m 即将删除：ztncui 容器、镜像、配置目录，卸载 ZeroTier 软件包，\n'
+    7)
+      printf '\033[33m[确认]\033[0m 即将删除：pylon 容器 %s 与镜像 %s\n' "$PYLON_CONTAINER" "$PYLON_IMAGE"
+      printf '         ZeroTier、ztncui 不受影响。\n'
+      ;;
+    8)
+      printf '\033[33m[确认]\033[0m 即将删除：ztncui 容器、镜像、配置目录，pylon 容器与镜像，\n'
+      printf '         卸载 ZeroTier 软件包，\n'
       printf '         并删除数据目录 %s（节点身份、moon 文件都在其中）。\n' "$ZT_HOME"
       printf '         \033[33m节点 ID 将不可恢复，重装后是全新节点。\033[0m\n'
       ;;
@@ -432,7 +490,7 @@ ensure_zerotier() {
   fi
 }
 
-# 要求本机已安装 ZeroTier（选项 3/4 使用）：不会代装 ZeroTier
+# 要求本机已安装 ZeroTier（选项 3/5 使用）：不会代装 ZeroTier
 require_zerotier() {
   step "检查本机 ZeroTier"
   if ! command -v zerotier-cli >/dev/null 2>&1; then
@@ -559,9 +617,9 @@ export_moon_file() {
   info "moon 文件已导出：$dest"
 }
 
-# ============================== 操作：安装 / 卸载 ztncui ==============================
+# ============================== 操作：准备 Docker ==============================
 
-# 安装 Docker 并预拉取 ztncui 镜像（幂等）
+# 安装并启动 Docker（幂等，各容器在部署时按需拉取镜像）
 ensure_docker() {
   step "准备 Docker 环境"
 
@@ -588,17 +646,9 @@ ensure_docker() {
   done
   (( docker_ready )) || die "Docker 服务未正常运行，请检查：systemctl status docker"
   info "Docker 服务运行正常"
-
-  # 预拉取 ztncui 镜像：把「镜像仓库是否可达」这一风险提前暴露
-  if docker image inspect "$ZTNCUI_IMAGE" >/dev/null 2>&1; then
-    info "ztncui 镜像已存在：$ZTNCUI_IMAGE"
-  else
-    info "预拉取 ztncui 镜像（首次可能需要几分钟）..."
-    docker pull "$ZTNCUI_IMAGE" \
-      || die "镜像拉取失败：请检查服务器能否访问 Docker Hub，或配置镜像加速器后重试"
-    info "ztncui 镜像拉取完成"
-  fi
 }
+
+# ============================== 操作：安装 / 卸载 ztncui ==============================
 
 # 部署 ztncui 容器（幂等：已运行则跳过，--force 才重建）
 deploy_ztncui() {
@@ -616,11 +666,11 @@ deploy_ztncui() {
   fi
 
   # 2) 创建 / 重建容器
-  if docker ps -a --format '{{.Names}}' | grep -qx "$ZTNCUI_CONTAINER"; then
+  if docker ps -a --format '{{.Names}}' | grep -Fx "$ZTNCUI_CONTAINER" >/dev/null; then
     if (( FORCE )); then
       info "--force 模式：删除旧容器并重建 ..."
       docker rm -f "$ZTNCUI_CONTAINER" >/dev/null
-    elif docker ps --format '{{.Names}}' | grep -qx "$ZTNCUI_CONTAINER"; then
+    elif docker ps --format '{{.Names}}' | grep -Fx "$ZTNCUI_CONTAINER" >/dev/null; then
       info "容器 $ZTNCUI_CONTAINER 已在运行，跳过创建（需要重建请加 --force 参数）"
     else
       info "容器 $ZTNCUI_CONTAINER 已存在但未运行，正在启动 ..."
@@ -628,8 +678,8 @@ deploy_ztncui() {
     fi
   fi
 
-  if ! docker ps --format '{{.Names}}' | grep -qx "$ZTNCUI_CONTAINER"; then
-    # 镜像已预拉取，这里只做兜底（例如被外部清理过）
+  if ! docker ps --format '{{.Names}}' | grep -Fx "$ZTNCUI_CONTAINER" >/dev/null; then
+    # 仅在需要创建容器时拉取镜像
     if ! docker image inspect "$ZTNCUI_IMAGE" >/dev/null 2>&1; then
       info "镜像不存在，重新拉取 ztncui 镜像 ..."
       docker pull "$ZTNCUI_IMAGE" \
@@ -651,7 +701,7 @@ deploy_ztncui() {
       || die "ztncui 容器启动失败"
 
     sleep 3
-    if ! docker ps --format '{{.Names}}' | grep -qx "$ZTNCUI_CONTAINER"; then
+    if ! docker ps --format '{{.Names}}' | grep -Fx "$ZTNCUI_CONTAINER" >/dev/null; then
       warn "容器未保持运行状态，最近日志如下："
       docker logs --tail 50 "$ZTNCUI_CONTAINER" 2>&1 || true
       die "ztncui 容器启动异常，请根据上方日志排查"
@@ -679,9 +729,9 @@ deploy_ztncui() {
   fi
 }
 
-# 卸载 ztncui：容器 + 镜像 + 配置目录（ZeroTier 本体不动）
-uninstall_ztncui() {
-  step "卸载 ztncui"
+# 删除指定 Docker 容器与镜像；Docker 不可用或清理失败时返回错误
+remove_docker_container_and_image() {
+  local container="$1" image="$2"
 
   # 容器与镜像
   if ! command -v docker >/dev/null 2>&1; then
@@ -700,33 +750,40 @@ uninstall_ztncui() {
 
     if ! docker info >/dev/null 2>&1; then
       warn "Docker 服务不可用，无法删除容器与镜像。服务恢复后请手动执行：
-    docker rm -f $ZTNCUI_CONTAINER
-    docker rmi -f $ZTNCUI_IMAGE"
+    docker rm -f $container
+    docker rmi -f $image"
       return 1
     else
-      if docker ps -a --format '{{.Names}}' | grep -qx "$ZTNCUI_CONTAINER"; then
-        if docker rm -f "$ZTNCUI_CONTAINER" >/dev/null 2>&1; then
-          info "已删除容器：$ZTNCUI_CONTAINER"
+      # 不用 grep -q，避免 pipefail 将上游的 SIGPIPE 误判为未找到容器
+      if docker ps -a --format '{{.Names}}' | grep -Fx "$container" >/dev/null; then
+        if docker rm -f "$container" >/dev/null 2>&1; then
+          info "已删除容器：$container"
         else
-          warn "删除容器失败，请手动执行：docker rm -f $ZTNCUI_CONTAINER"
+          warn "删除容器失败，请手动执行：docker rm -f $container"
           return 1
         fi
       else
-        info "未发现容器 $ZTNCUI_CONTAINER（跳过）"
+        info "未发现容器 $container（跳过）"
       fi
 
-      if docker image inspect "$ZTNCUI_IMAGE" >/dev/null 2>&1; then
-        if docker rmi -f "$ZTNCUI_IMAGE" >/dev/null 2>&1; then
-          info "已删除镜像：$ZTNCUI_IMAGE"
+      if docker image inspect "$image" >/dev/null 2>&1; then
+        if docker rmi -f "$image" >/dev/null 2>&1; then
+          info "已删除镜像：$image"
         else
-          warn "删除镜像失败（可能仍被其他容器引用），请手动执行：docker rmi -f $ZTNCUI_IMAGE"
+          warn "删除镜像失败（可能仍被其他容器引用），请手动执行：docker rmi -f $image"
           return 1
         fi
       else
-        info "未发现镜像 $ZTNCUI_IMAGE（跳过）"
+        info "未发现镜像 $image（跳过）"
       fi
     fi
   fi
+}
+
+# 卸载 ztncui：容器 + 镜像 + 配置目录（ZeroTier、pylon 不动）
+uninstall_ztncui() {
+  step "卸载 ztncui"
+  remove_docker_container_and_image "$ZTNCUI_CONTAINER" "$ZTNCUI_IMAGE"
 
   # 配置目录（含密码文件）
   if [[ -d "$ZT_HOME/ztncui" ]]; then
@@ -823,6 +880,75 @@ uninstall_zerotier() {
   fi
 }
 
+# ============================== 操作：安装 / 卸载 pylon ==============================
+
+pylon_host_port() {
+  docker container inspect --format '{{range (index .HostConfig.PortBindings "443/tcp")}}{{println .HostPort}}{{end}}' "$PYLON_CONTAINER"
+}
+
+# 部署 pylon reflect 容器（幂等：已运行则跳过，--force 才重建）
+deploy_pylon() {
+  step "部署 pylon"
+
+  local exists=0 state="" mapped_port=""
+  if docker ps -a --format '{{.Names}}' | grep -Fx "$PYLON_CONTAINER" >/dev/null; then
+    exists=1
+    state="$(docker container inspect --format '{{.State.Status}}' "$PYLON_CONTAINER")" \
+      || die "无法读取 pylon 容器状态"
+    mapped_port="$(pylon_host_port)" || die "无法读取 pylon 容器端口映射"
+    if (( ! FORCE )) && [[ "$mapped_port" != "$PYLON_PORT" && "$state" != "created" ]]; then
+      die "现有 pylon 容器映射 ${mapped_port:-未知}/TCP，与请求的 $PYLON_PORT/TCP 不一致。
+请使用 --pylon-port ${mapped_port:-<现有端口>} 复用，或加 --force 按新端口重建"
+    fi
+  fi
+
+  # 已运行容器正在占用自己的端口，不应当被误报为冲突；其他情况先检测再删除旧容器
+  if [[ "$state" != "running" || "$mapped_port" != "$PYLON_PORT" ]]; then
+    precheck_pylon_port
+  fi
+
+  if (( exists )); then
+    if (( FORCE )) || [[ "$state" == "created" && "$mapped_port" != "$PYLON_PORT" ]]; then
+      info "重建 pylon 容器（原状态 $state，原端口 ${mapped_port:-未知}/TCP，新端口 $PYLON_PORT/TCP）..."
+      docker rm -f "$PYLON_CONTAINER" >/dev/null || die "删除旧 pylon 容器失败"
+    elif [[ "$state" == "running" ]]; then
+      info "容器 $PYLON_CONTAINER 已在运行，跳过创建（需要重建请加 --force 参数）"
+    else
+      info "容器 $PYLON_CONTAINER 已存在但未运行，正在启动 ..."
+      docker start "$PYLON_CONTAINER" >/dev/null \
+        || die "pylon 容器启动失败，请检查 $PYLON_PORT/TCP 端口占用"
+    fi
+  fi
+
+  if ! docker ps --format '{{.Names}}' | grep -Fx "$PYLON_CONTAINER" >/dev/null; then
+    info "启动 pylon reflect 容器 ..."
+    if ! docker run --name "$PYLON_CONTAINER" --init -d \
+      -p "$PYLON_PORT:443" "$PYLON_IMAGE" reflect; then
+      # Docker 端口绑定失败可能留下 created 容器；仅回收本次未启动的容器，便于重试
+      if [[ "$(docker container inspect --format '{{.State.Status}}' "$PYLON_CONTAINER" 2>/dev/null || true)" == "created" ]]; then
+        docker rm "$PYLON_CONTAINER" >/dev/null 2>&1 || true
+      fi
+      die "pylon 容器启动失败，请检查 Docker 日志及 $PYLON_PORT/TCP 端口占用；可用 --pylon-port 指定其他端口"
+    fi
+  fi
+
+  sleep 3
+  if ! docker ps --format '{{.Names}}' | grep -Fx "$PYLON_CONTAINER" >/dev/null; then
+    warn "pylon 容器未保持运行状态，最近日志如下："
+    docker logs --tail 50 "$PYLON_CONTAINER" 2>&1 || true
+    die "pylon 容器启动异常，请根据上方日志排查"
+  fi
+
+  ufw_allow "$PYLON_PORT/tcp" "pylon reflect"
+  info "pylon 已运行（容器 $PYLON_CONTAINER，$PYLON_PORT/TCP -> 443/TCP，reflect 模式）"
+}
+
+# pylon 未挂载宿主机数据目录，仅删除对应容器与镜像
+uninstall_pylon() {
+  step "卸载 pylon"
+  remove_docker_container_and_image "$PYLON_CONTAINER" "$PYLON_IMAGE"
+}
+
 # ============================== 各菜单操作 ==============================
 
 action_full_install() {
@@ -833,6 +959,7 @@ action_full_install() {
   ensure_docker
   require_zerotier
   deploy_ztncui
+  deploy_pylon
   show_summary install
 }
 
@@ -853,8 +980,15 @@ action_ztncui_only() {
   show_summary ztncui
 }
 
+action_pylon_only() {
+  step "操作 4：仅安装 pylon"
+  ensure_docker
+  deploy_pylon
+  show_summary pylon
+}
+
 action_export_moon() {
-  step "操作 4：导出 moon 文件"
+  step "操作 5：导出 moon 文件"
   require_zerotier
   build_moon          # moon 缺失时会自动构建（需要公网 IP）
   export_moon_file
@@ -862,14 +996,21 @@ action_export_moon() {
 }
 
 action_uninstall_ztncui() {
-  step "操作 5：仅卸载 ztncui"
+  step "操作 6：仅卸载 ztncui"
   uninstall_ztncui
   show_summary uninstall-ztncui
 }
 
+action_uninstall_pylon() {
+  step "操作 7：仅卸载 pylon"
+  uninstall_pylon
+  show_summary uninstall-pylon
+}
+
 action_uninstall_all() {
-  step "操作 6：卸载（ztncui + ZeroTier）"
+  step "操作 8：卸载（ztncui + pylon + ZeroTier）"
   uninstall_ztncui
+  uninstall_pylon
   uninstall_zerotier
   show_summary uninstall
 }
@@ -890,6 +1031,11 @@ EOF
 }
 
 print_security_notes() {
+  local mode="$1"
+  if [[ "$mode" == "pylon" ]]; then
+    info "云服务器请在控制台安全组放行：$PYLON_PORT/TCP（pylon reflect）"
+    return 0
+  fi
   cat <<EOF
 
 注意事项：
@@ -898,6 +1044,9 @@ print_security_notes() {
      $ZTNCUI_HTTP_PORT/TCP（ztncui 控制台，建议仅对可信 IP 开放）
      本脚本只能确认「本机监听 + 本机防火墙放行」，公网可达性取决于云安全组
 EOF
+  if [[ "$mode" == "install" ]]; then
+    info "云服务器请在控制台安全组同时放行：$PYLON_PORT/TCP（pylon reflect）"
+  fi
 }
 
 print_uninstall_notes() {
@@ -911,7 +1060,7 @@ EOF
 
 show_summary() {
   local mode="$1"
-  local zt_state zt_port moon_state ztncui_state ztncui_access="" moons=""
+  local zt_state zt_port moon_state ztncui_state pylon_state pylon_port ztncui_access="" moons=""
 
   step "当前状态"
 
@@ -939,12 +1088,12 @@ show_summary() {
   elif [[ -n "$moons" ]]; then
     moon_state="$(printf '%s\n' "$moons" | sed 's/^/  /')"
   else
-    moon_state="  （无，可执行选项 2 或 4 构建）"
+    moon_state="  （无，可执行选项 2 或 5 构建）"
   fi
 
   # ztncui
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    if docker ps --format '{{.Names}}' | grep -qx "$ZTNCUI_CONTAINER"; then
+    if docker ps --format '{{.Names}}' | grep -Fx "$ZTNCUI_CONTAINER" >/dev/null; then
       ztncui_state="运行中（容器 $ZTNCUI_CONTAINER）"
       if [[ -z "$PUBLIC_IP" ]]; then
         PUBLIC_IP="$(detect_public_ip 2>/dev/null || true)"
@@ -952,13 +1101,27 @@ show_summary() {
       ztncui_access="
   访问地址：http://${PUBLIC_IP:-<服务器公网IP>}:$ZTNCUI_HTTP_PORT/
   登录账号：admin    登录密码：adminpassword"
-    elif docker ps -a --format '{{.Names}}' | grep -qx "$ZTNCUI_CONTAINER"; then
+    elif docker ps -a --format '{{.Names}}' | grep -Fx "$ZTNCUI_CONTAINER" >/dev/null; then
       ztncui_state="已停止（容器 $ZTNCUI_CONTAINER，可执行 docker start $ZTNCUI_CONTAINER）"
     else
       ztncui_state="未部署"
     fi
   else
     ztncui_state="未部署（Docker 未安装或未运行）"
+  fi
+
+  # pylon
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    if docker ps --format '{{.Names}}' | grep -Fx "$PYLON_CONTAINER" >/dev/null; then
+      pylon_port="$(pylon_host_port 2>/dev/null || true)"
+      pylon_state="运行中（容器 $PYLON_CONTAINER，${pylon_port:-未知}/TCP -> 443/TCP，reflect 模式）"
+    elif docker ps -a --format '{{.Names}}' | grep -Fx "$PYLON_CONTAINER" >/dev/null; then
+      pylon_state="已停止（容器 $PYLON_CONTAINER，可执行 docker start $PYLON_CONTAINER）"
+    else
+      pylon_state="未部署"
+    fi
+  else
+    pylon_state="未部署（Docker 未安装或未运行）"
   fi
 
   cat <<EOF
@@ -973,6 +1136,9 @@ $moon_state
 
 ztncui：
   状态：$ztncui_state$ztncui_access
+
+pylon：
+  状态：$pylon_state
 ==================================================
 EOF
 
@@ -980,8 +1146,8 @@ EOF
     install|zerotier|export) print_moon_usage ;;
   esac
   case "$mode" in
-    install|zerotier|ztncui) print_security_notes ;;
-    uninstall-ztncui|uninstall) print_uninstall_notes ;;
+    install|zerotier|ztncui|pylon) print_security_notes "$mode" ;;
+    uninstall) print_uninstall_notes ;;
   esac
 }
 
@@ -1006,11 +1172,13 @@ run_action() {
     1) action_full_install ;;
     2) action_zerotier_only ;;
     3) action_ztncui_only ;;
-    4) action_export_moon ;;
-    5) action_uninstall_ztncui ;;
-    6) action_uninstall_all ;;
-    7) PRESERVE_ZTNCUI=1; uninstall_zerotier; show_summary uninstall ;;
-    *) die "未知操作编号：$ACTION（应为 0-7）" ;;
+    4) action_pylon_only ;;
+    5) action_export_moon ;;
+    6) action_uninstall_ztncui ;;
+    7) action_uninstall_pylon ;;
+    8) action_uninstall_all ;;
+    9) PRESERVE_ZTNCUI=1; uninstall_zerotier; show_summary uninstall ;;
+    *) die "未知操作编号：$ACTION（应为 0-9）" ;;
   esac
 }
 
@@ -1020,7 +1188,7 @@ if [[ -z "$ACTION" ]]; then
 fi
 
 # 破坏性操作在交互选择时二次确认（--action 模式视为已确认）
-if (( INTERACTIVE )) && { [[ "$ACTION" == "5" ]] || [[ "$ACTION" == "6" ]]; }; then
+if (( INTERACTIVE )) && { [[ "$ACTION" == "6" ]] || [[ "$ACTION" == "7" ]] || [[ "$ACTION" == "8" ]]; }; then
   if ! confirm_action "$ACTION"; then
     info "已取消，未做任何修改"
     exit 0

@@ -2,7 +2,7 @@
 
 > 2026-10-17：Linux 服务端已迁移为 Java 25 + Netty，不再加载 C++ `.ztplugin`，也不需要宿主侧 Qt 运行库；本文中“服务端入口 `/2.0`”和“服务端 Core/Network 契约”仅适用于 `src/server-old/` 的归档实现。Java 插件格式、SDK 与线程约定见[服务端 API](server-api.md)。
 
-当前客户端 `0.5.1-alpha`、客户端 API `0.5-alpha`，服务端 `0.2.1-beta`、服务端 API `0.2-beta`；客户端入口／生命周期 IID `/3.0`，旧 C++ 服务端入口 `/2.0`。媒体现使用独立 v3 worker 包；语音 v3 只依赖媒体公开 API。通用契约见[插件服务](plugin-services.md)，业务边界见[媒体](../src/plugins/media/client/docs/media.md)和[语音文档](../src/plugins/voice-chat/client/docs/voice-chat.md)。工作进程目前只验证 Windows x64；旧 C++ 服务端归档在 `src/server-old/`。
+当前客户端 `0.5.1`、客户端 API `0.5`，服务端 `0.2.1`、服务端 API `0.2`；客户端入口／生命周期 IID `/3.0`，旧 C++ 服务端入口 `/2.0`。媒体现使用独立 v3 worker 包；语音 v3 只依赖媒体公开 API。通用契约见[插件服务](plugin-services.md)，业务边界见[媒体](../src/plugins/media/client/docs/media.md)和[语音文档](../src/plugins/voice-chat/client/docs/voice-chat.md)。工作进程目前只验证 Windows x64；旧 C++ 服务端归档在 `src/server-old/`。
 
 ## 收集与安装 SDK
 
@@ -26,4 +26,4 @@ v2/v3 继续逐块认证、逐文件散列，文件数最多 512，单文件最�
 
 ## 验证记录
 
-2026-10-14 的 v2 验收证明了独立收集与分块包可用，但媒体库当时仍常驻主进程。2026-10-15 的迁移改用相反的模块验收；本轮实测、未验证条件和产物见[插件服务迁移验证](plugin-services-validation.md)。
+2026-10-14 的 v2 验收证明了独立收集与分块包可用，但媒体库当时仍常驻主进程。2026-10-15 的迁移改用相反的模块验收；本轮实测、未验证条件和产物见[插件服务迁移验证](validation/plugin-services-2026-10-15/README.md)。

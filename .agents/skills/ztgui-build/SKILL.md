@@ -68,7 +68,7 @@ API 是头文件 SDK，另附本机封装命令工具，生成过程是独立 CM
 ```powershell
 & ./.agents/skills/ztgui-build/scripts/build-plugin-windows.ps1 `
     -PluginDirectory src/plugins/voice-chat/client -Target ztgui_voice_chat `
-    -QtRoot $qtSdk -ApiSdk build/dist/ZTGUI-api-v0.5-alpha -AdditionalSdk build/dist/ZTGUI-media-api-v2
+    -QtRoot $qtSdk -ApiSdk build/dist/ZTGUI-api-v0.5 -AdditionalSdk build/dist/ZTGUI-media-api-v2
 ```
 
 其他插件按其独立项目和公开 SDK 构建，不把所有插件一起编译。正式发布文件名从包声明读取版本号，中间构建包保留固定名称。插件文件平铺到 `build/dist/plugins/`，如 `ztgui_voice_chat-v0.3.0.ztplugin`，可读许可证导出到对应 `<target>-licenses/` 目录，包内也保留许可证。
@@ -89,6 +89,16 @@ API 是头文件 SDK，另附本机封装命令工具，生成过程是独立 CM
 
 清理前核对文件归属和绝对路径范围，保留正式交付产物、仍使用的依赖、可复用构建缓存和已归档的验证证据；不要把仍被构建引用的第三方依赖误当临时文件删除。完成时核对本轮备份已清理，受工具策略阻止而未删除的必须如实说明。
 
+一键清理入口为仓库根 `scripts/clean-build-temp.ps1`，实现位于本技能 `scripts/clean-build-temp.ps1`：
+
+```powershell
+./scripts/clean-build-temp.ps1                 # 删除 *.previous-* 备份并清空 .tmp 内容
+./scripts/clean-build-temp.ps1 -Exclude relay-deps,screenshots/keep-*.png
+./scripts/clean-build-temp.ps1 -WhatIf          # 只预览，不删除
+```
+
+脚本保留 `.tmp` 目录本身；`-Exclude` 接受相对 `.tmp` 的路径（也可写成 `.tmp/<路径>`），文件夹排除会保留整棵子树，`*`／`?` 通配符可跨层级。备份扫描跳过 `.tmp` 子树、`.git` 和 `node_modules`，不跟随也不删除链接。仍被构建复用的构建缓存、正式发行产物以及 `.tmp` 之外的其他目录不在清理范围内。
+
 核对输出目录与压缩包的文件数量/内容校验及版本信息。API 变化时按需要验证安装后 SDK 的独立引用；指定插件时验证实际加载。交付说明主程序 ZIP、API 更新或复用的原因、是否构建了指定插件。
 
 macOS 仅在用户指定时按仓库 `docs/macos.md` 调整工具链，仍遵守上面三项范围。现有 `scripts/build-macos.sh` 只构建 macOS 主程序与应用包，不包含应用插件；语音/媒体 worker 的 macOS 交付尚未实现，未实机运行不能声称已验证。
@@ -101,11 +111,11 @@ Windows 离线或自动下载失败时，可传 `-SodiumRoot <官方 MSVC 包解
 
 首次实施 v2 时更新客户端 SDK，即使 API 数字不变。SDK 指纹包括共享包实现、全部 helper/收集脚本和契约输入；安装的 `sdk-tools.json` 记录格式支持和内容哈希。主程序输出必须不含 Multimedia、FFmpeg、multimedia 后端及业务包，脚本在发布前检查。
 
-已安装 SDK 可用时，执行 `./.agents/skills/ztgui-build/scripts/build-plugin-windows.ps1 -PluginDirectory src/plugins/voice-chat/client -Target ztgui_voice_chat -QtRoot $qtSdk -ApiSdk build/dist/ZTGUI-api-v0.5-alpha -AdditionalSdk build/dist/ZTGUI-media-api-v2`（语音必须带 `-AdditionalSdk`，通用示例见上文“插件构建触发条件”）。脚本不构建主程序，拒绝过期 SDK，每次调用业务目标与 package 目标，原子发布 `.ztplugin` 并导出许可证。`-BuildVoicePlugin` 仅作为组合入口调用它。Kit 必须包含实际分发许可证与 FFmpeg 二进制哈希出处；缺失立即失败。详情见[运行依赖分离](../../../docs/plugin-runtime-separation.md)。
+已安装 SDK 可用时，执行 `./.agents/skills/ztgui-build/scripts/build-plugin-windows.ps1 -PluginDirectory src/plugins/voice-chat/client -Target ztgui_voice_chat -QtRoot $qtSdk -ApiSdk build/dist/ZTGUI-api-v0.5 -AdditionalSdk build/dist/ZTGUI-media-api-v2`（语音必须带 `-AdditionalSdk`，通用示例见上文“插件构建触发条件”）。脚本不构建主程序，拒绝过期 SDK，每次调用业务目标与 package 目标，原子发布 `.ztplugin` 并导出许可证。`-BuildVoicePlugin` 仅作为组合入口调用它。Kit 必须包含实际分发许可证与 FFmpeg 二进制哈希出处；缺失立即失败。详情见[运行依赖分离](../../../docs/plugin-runtime-separation.md)。
 
 ## 独立媒体与语音服务迁移
 
-普通主程序构建中，未指定且自身版本未变的插件不编译，Release 配置明确关闭回归目标以免读取旧缓存中的插件测试路径。媒体插件被指定或自身版本变化时加 `-BuildMediaPlugin`；单独使用 `scripts/build-media-windows.ps1 -QtRoot $qtSdk -ApiSdk build/dist/ZTGUI-api-v0.5-alpha`（脚本位于本技能 scripts/），生成 `build/dist/ZTGUI-media-api-v2/` 及 ZIP，并构建发布 `build/dist/plugins/ztgui_media_worker-v2.0.0.ztplugin`。离线 Opus 可通过 `-OpusSource` 指定已验证的 1.6.1 源码。
+普通主程序构建中，未指定且自身版本未变的插件不编译，Release 配置明确关闭回归目标以免读取旧缓存中的插件测试路径。媒体插件被指定或自身版本变化时加 `-BuildMediaPlugin`；单独使用 `scripts/build-media-windows.ps1 -QtRoot $qtSdk -ApiSdk build/dist/ZTGUI-api-v0.5`（脚本位于本技能 scripts/），生成 `build/dist/ZTGUI-media-api-v2/` 及 ZIP，并构建发布 `build/dist/plugins/ztgui_media_worker-v2.0.0.ztplugin`。离线 Opus 可通过 `-OpusSource` 指定已验证的 1.6.1 源码。
 
 语音需要安装后的媒体 API。独立入口增加 `-AdditionalSdk build/dist/ZTGUI-media-api-v2`；通用额外配置用 `-CMakeArguments` 参数数组传入。`-BuildVoicePlugin` 复用该 SDK；媒体服务也被指定或自身版本变化时使用两个开关。客户端语音版本变化不自动触发服务端语音或其他插件的构建。
 
@@ -114,4 +124,4 @@ Windows 离线或自动下载失败时，可传 `-SodiumRoot <官方 MSVC 包解
 
 ## 通用媒体引擎与扩展 SDK
 
-媒体包 2.0.0 提供 media.session / 1；Media API SDK 2.0.0 与 Engine SDK 1.0.0 分开交付。业务界面插件显式链接 ZTGUI::Api 与 ZTGUI::MediaApi；无界面消费者只需 Core/Network 和宿主 Services 组件。完整 FFmpeg 仅开放给 worker 侧 Engine SDK，扩展随媒体包认证清单交付。构建媒体使用 build-media-windows.ps1，可传 FfmpegRoot 复用受控依赖 SDK。API 目录及 ZIP 为 build/dist/ZTGUI-media-api-v2，Engine SDK 为 build/dist/ZTGUI-media-engine-sdk-v1。测试使用 run-media-tests.ps1，必须指定实际 QtRoot，避免 Qt 平台插件路径错误导致阻塞弹窗。详细契约由媒体项目 client/docs/media.md 维护。
+媒体包 2.0.0 提供 media.session / 1 与通用 media.clip / 1；Media API SDK 2.0.0 与 Engine SDK 1.0.0 分开交付。业务界面插件显式链接 ZTGUI::Api 与 ZTGUI::MediaApi；无界面消费者只需 Core/Network 和宿主 Services 组件。完整 FFmpeg 仅开放给 worker 侧 Engine SDK，扩展随媒体包认证清单交付。构建媒体使用 build-media-windows.ps1，可传 FfmpegRoot 复用受控依赖 SDK。API 目录及 ZIP 为 build/dist/ZTGUI-media-api-v2，Engine SDK 为 build/dist/ZTGUI-media-engine-sdk-v1。测试使用 run-media-tests.ps1，必须指定实际 QtRoot，避免 Qt 平台插件路径错误导致阻塞弹窗。媒体 API 或内嵌资源变化后须同时重编语音消费者，语音同时声明 session 与 clip 两个服务；详细契约由媒体项目 client/docs/media.md 维护。

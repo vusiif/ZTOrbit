@@ -2,6 +2,7 @@
 #include "MediaClock.h"
 #include <QCameraDevice>
 #include <QCapturableWindow>
+#include <QFile>
 #include <QUuid>
 #include <algorithm>
 #include <cmath>
@@ -203,7 +204,9 @@ void DeviceManager::detach(const QString &track) {
     }
     for (auto it = outputs.begin(); it != outputs.end();) {
         it->second->tracks.remove(track);
-        if (it->second->tracks.isEmpty())
+        // Keep a detached output alive for a bounded drain so the sink can play
+        // its last buffered block instead of being destroyed with pending data.
+        if (it->second->tracks.isEmpty() && !it->second->playback)
             it = outputs.erase(it);
         else
             ++it;
@@ -211,10 +214,38 @@ void DeviceManager::detach(const QString &track) {
     if (outputs.empty())
         timer.stop();
 }
-void DeviceManager::play(const QString &track, const QString &id, QVector<float> samples) {
+bool DeviceManager::injectedPlaybackFailure()
+{
+    const auto path = qEnvironmentVariable("ZTGUI_MEDIA_TEST_CLIP_FAILURE");
+    if (path.isEmpty()) {
+        m_testFailureNonce.clear();
+        m_testAcceptedPlays = 0;
+        return false;
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        m_testFailureNonce.clear();
+        m_testAcceptedPlays = 0;
+        return false;
+    }
+    const auto parts = QString::fromUtf8(file.readAll()).trimmed().split(
+        QLatin1Char(' '), Qt::SkipEmptyParts);
+    const int after = parts.value(0).toInt();
+    const auto nonce = parts.value(1);
+    if (nonce != m_testFailureNonce) {
+        m_testFailureNonce = nonce;
+        m_testAcceptedPlays = 0;
+    }
+    if (m_testAcceptedPlays >= after) return true;
+    ++m_testAcceptedPlays;
+    return false;
+}
+bool DeviceManager::play(const QString &track, const QString &id, QVector<float> samples) {
+    if (injectedPlaybackFailure())
+        return false;
     auto device = audioDevice(false, id);
     if (device.isNull())
-        return;
+        return false;
     auto key = QString::fromLatin1(device.id().toHex());
     auto &output = outputs[key];
     if (!output) {
@@ -226,6 +257,15 @@ void DeviceManager::play(const QString &track, const QString &id, QVector<float>
         output->sink = std::make_unique<QAudioSink>(device, f);
         output->sink->setBufferSize(f.bytesForDuration(100000));
         output->playback = output->sink->start();
+        if (!output->playback) {
+            outputs.erase(key);
+            return false;
+        }
+    }
+    if (!output->playback || (output->sink->state() == QtAudio::StoppedState
+                              && output->sink->error() != QtAudio::NoError)) {
+        outputs.erase(key);
+        return false;
     }
     auto &queue = output->tracks[track];
     if (queue.size() >= 5)
@@ -233,10 +273,54 @@ void DeviceManager::play(const QString &track, const QString &id, QVector<float>
     queue.enqueue(std::move(samples));
     if (!timer.isActive())
         timer.start();
+    return true;
+}
+DeviceManager::PlaybackState DeviceManager::playbackState(const QString &id, const QString &track) const
+{
+    PlaybackState state;
+    const auto device = audioDevice(false, id);
+    if (device.isNull()) return state;
+    const auto key = QString::fromLatin1(device.id().toHex());
+    const auto found = outputs.find(key);
+    if (found == outputs.end() || !found->second->playback) return state;
+    const auto &output = *found->second;
+    state.output = true;
+    state.sinkActive = output.sink
+        && !(output.sink->state() == QtAudio::StoppedState
+             && output.sink->error() != QtAudio::NoError);
+    const auto queue = output.tracks.constFind(track);
+    if (queue != output.tracks.cend()) state.queuedFrames = queue->size();
+    state.pendingBytes = output.pending.size();
+    return state;
+}
+bool DeviceManager::outputAvailable(const QString &id) const
+{
+    return !audioDevice(false, id).isNull();
 }
 void DeviceManager::mix() {
-    for (auto &entry : outputs) {
-        auto &o = *entry.second;
+    for (auto it = outputs.begin(); it != outputs.end();) {
+        auto &o = *it->second;
+        if (o.tracks.isEmpty()) {
+            // The clip source was detached: flush converted data that is still
+            // waiting for sink space, then keep the sink alive until its
+            // buffer was consumed (bounded for drivers that stay Active).
+            if (o.playback && !o.pending.isEmpty()) {
+                const auto written = o.playback->write(
+                    o.pending.constData(), std::min(qint64(o.pending.size()), o.sink->bytesFree()));
+                if (written > 0) {
+                    o.pending.remove(0, written);
+                    o.bytes += quint64(written);
+                }
+            }
+            const bool idle = o.sink && o.sink->state() == QtAudio::IdleState;
+            if (o.pending.isEmpty() && (idle || ++o.drainTicks > 25)) {
+                it = outputs.erase(it);
+                continue;
+            }
+            ++it;
+            continue;
+        }
+        o.drainTicks = 0;
         QVector<float> mixed(FrameSamples, 0);
         for (auto &q : o.tracks)
             if (!q.isEmpty()) {
@@ -260,7 +344,9 @@ void DeviceManager::mix() {
                 o.bytes += n;
             }
         }
+        ++it;
     }
+    if (outputs.empty()) timer.stop();
 }
 QJsonObject DeviceManager::statistics() const {
     quint64 bytes = 0;

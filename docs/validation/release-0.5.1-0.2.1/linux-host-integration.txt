@@ -1,0 +1,28 @@
+/mnt/d/User/Code/Github/Utils/zerotier-gui/build/release-0.5.1-0.2.1/server-fixtures/test-echo.jar
+/mnt/d/User/Code/Github/Utils/zerotier-gui/build/release-0.5.1-0.2.1/server-fixtures/test-other.jar
+/mnt/d/User/Code/Github/Utils/zerotier-gui/build/release-0.5.1-0.2.1/server-fixtures/test-failed.jar
+/mnt/d/User/Code/Github/Utils/zerotier-gui/build/release-0.5.1-0.2.1/server-fixtures/test-cancellable.jar
+/mnt/d/User/Code/Github/Utils/zerotier-gui/build/release-0.5.1-0.2.1/server-fixtures/wrong-info.jar
+/mnt/d/User/Code/Github/Utils/zerotier-gui/build/release-0.5.1-0.2.1/server-fixtures/bad-api.jar
+/mnt/d/User/Code/Github/Utils/zerotier-gui/build/release-0.5.1-0.2.1/server-fixtures/missing-main.jar
+/mnt/d/User/Code/Github/Utils/zerotier-gui/build/release-0.5.1-0.2.1/server-fixtures/zz_duplicate.jar
+test_bad_framing_and_query_errors (__main__.IntegrationTests.test_bad_framing_and_query_errors) ... /usr/lib/python3.12/socket.py:778: ResourceWarning: unclosed <socket.socket fd=4, family=2, type=1, proto=6, laddr=('127.0.0.1', 41482), raddr=('127.0.0.1', 52029)>
+  self._sock = None
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.12/socket.py:778: ResourceWarning: unclosed <socket.socket fd=5, family=2, type=1, proto=6, laddr=('127.0.0.1', 41506), raddr=('127.0.0.1', 52029)>
+  self._sock = None
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.12/socket.py:778: ResourceWarning: unclosed <socket.socket fd=4, family=2, type=1, proto=6, laddr=('127.0.0.1', 41520), raddr=('127.0.0.1', 52029)>
+  self._sock = None
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_cli_validation_and_installer_mapping (__main__.IntegrationTests.test_cli_validation_and_installer_mapping) ... ok
+test_rate_limit_closes_connection (__main__.IntegrationTests.test_rate_limit_closes_connection) ... ok
+test_rejections_cleanup_and_dual_logs (__main__.IntegrationTests.test_rejections_cleanup_and_dual_logs) ... ok
+test_tcp_routes_split_and_coalesced (__main__.IntegrationTests.test_tcp_routes_split_and_coalesced) ... ok
+test_udp_limits_and_isolation (__main__.IntegrationTests.test_udp_limits_and_isolation) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 15.207s
+
+OK

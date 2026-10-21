@@ -14,7 +14,7 @@
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <apiVersion>0.2-beta</apiVersion>
+        <apiVersion>0.2</apiVersion>
         <pluginVersion>0.1.0</pluginVersion>
         <jackson.version>2.22.3</jackson.version>
         <compiler.plugin.version>3.15.0</compiler.plugin.version>

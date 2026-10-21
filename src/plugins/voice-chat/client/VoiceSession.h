@@ -27,6 +27,13 @@ public:
     void inputVolume(int value) { audio->setInputVolume(value/100.0f); }
     void memberVolume(quint32 id,int value) { if(members.count(id)) audio->setMemberVolume(id,value/100.0f); }
     void volume(int value) { audio->setVolume(value / 100.0f); }
+#ifdef VOICE_TESTING
+    // Test-only entry points for exercising member-set diffs without a server.
+    void testBeginRoom(quint32 roomId, quint32 selfId) {
+        clearRoom(); room = roomId; session = selfId; baselineValid = false;
+    }
+    void testRoomSnapshot(const QJsonObject &value) { updateRoom(value); }
+#endif
 signals:
     void notice(const QString &message);
     void connectionChanged(bool connected);
@@ -35,6 +42,10 @@ signals:
     void busyChanged(bool busy);
     void devicesRefreshed();
     void microphoneTestingChanged(bool enabled);
+    void selfJoined();
+    void memberJoined(quint32 session);
+    void memberLeft(quint32 session);
+    void roomReset();
 private:
     QTcpSocket *tcp;
     QUdpSocket *udp;
@@ -46,6 +57,8 @@ private:
     QMap<int, QString> pending;
     std::set<quint32> members;
     quint32 session = 0, room = 0, sequence = 0;
+    quint32 baselineRoom = 0;
+    bool baselineValid = false;
     quint16 udpPort = 0;
     int nextRequest = 1, registrationAttempts = 0;
     bool ready = false, udpReady = false, recordAllowed = true, muted = false, roomPending = false;

@@ -1,0 +1,16 @@
+********* Start testing of QmlTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : QmlTests::initTestCase()
+QWARN  : QmlTests::failedHostSettingsMigrationBlocksQmlPersistence() QSystemTrayIcon::setVisible: No Icon set
+QWARN  : QmlTests::failedHostSettingsMigrationBlocksQmlPersistence() QSystemTrayIcon::setVisible: No Icon set
+QWARN  : QmlTests::failedHostSettingsMigrationBlocksQmlPersistence() QTemporaryDir: Unable to remove "C:\\Users\\27384\\AppData\\Local\\Temp\\QmlTests-srMvDJ" most likely due to the presence of read-only files.
+PASS   : QmlTests::failedHostSettingsMigrationBlocksQmlPersistence()
+QWARN  : QmlTests::manualColumnsPersistAndDetailsRemainNonModal() QSystemTrayIcon::setVisible: No Icon set
+QWARN  : QmlTests::manualColumnsPersistAndDetailsRemainNonModal() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::manualColumnsPersistAndDetailsRemainNonModal()
+QWARN  : QmlTests::gpuAccelerationPreferenceSurvivesWindowRecreation() QSystemTrayIcon::setVisible: No Icon set
+QWARN  : QmlTests::gpuAccelerationPreferenceSurvivesWindowRecreation() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::gpuAccelerationPreferenceSurvivesWindowRecreation()
+PASS   : QmlTests::cleanupTestCase()
+Totals: 5 passed, 0 failed, 0 skipped, 0 blacklisted, 3583ms
+********* Finished testing of QmlTests *********

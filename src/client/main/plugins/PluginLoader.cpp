@@ -1,11 +1,20 @@
 #include "PluginLoader.h"
 #include "PluginRegistry.h"
 #include "HostServicesImpl.h"
+#include "PackageChangeLock.h"
 #include "PluginPackage.h"
 #include "PluginRuntime.h"
 #include "PluginDependencies.h"
+#include "../storage/CoordinationLock.h"
+#include "../storage/SettingsStore.h"
+#include "../storage/PluginDataStore.h"
+#include <QDateTime>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QCryptographicHash>
+#include <QSaveFile>
 #include <QSettings>
+#include <QUuid>
 #include <ztgui/PluginInterface.h>
 #include <QDir>
 #include <QJsonObject>
@@ -27,6 +36,110 @@
 
 namespace vusiif::ztgui::plugins {
 using namespace vusiif::ztgui::api;
+namespace {
+constexpr auto PendingDeletionDirectory = ".ztgui-pending-deletions";
+
+QString pendingDeletionsDirectory(const QString &pluginDirectory)
+{
+    return QDir(pluginDirectory).filePath(QString::fromLatin1(PendingDeletionDirectory));
+}
+
+QString pendingRecordFile(const QString &metadataRoot, const QString &id)
+{
+    return QDir(QDir(metadataRoot).filePath(QStringLiteral("pending-deletions")))
+        .filePath(id.toLower() + QStringLiteral(".json"));
+}
+
+bool writePendingRecord(const QString &path, const QJsonObject &record, QString &error)
+{
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
+        error = QStringLiteral("无法创建待删记录目录：%1").arg(QFileInfo(path).absolutePath());
+        return false;
+    }
+    QSaveFile file(path);
+    const auto data = QJsonDocument(record).toJson(QJsonDocument::Indented);
+    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit()) {
+        error = file.errorString().isEmpty() ? QStringLiteral("无法写入待删记录：%1").arg(path)
+                                             : file.errorString();
+        return false;
+    }
+    return true;
+}
+
+bool readPendingRecord(const QString &path, QJsonObject &record, QString &error)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) { error = file.errorString(); return false; }
+    QJsonParseError parse;
+    const auto document = QJsonDocument::fromJson(file.readAll(), &parse);
+    if (parse.error != QJsonParseError::NoError || !document.isObject()) {
+        error = QStringLiteral("待删记录不是有效的 JSON 对象");
+        return false;
+    }
+    record = document.object();
+    return true;
+}
+
+bool linkedPath(const QFileInfo &info)
+{
+    return info.isSymLink() || info.isJunction();
+}
+
+QString activeRootFor(const storage::StorageContext &storage, const QString &dataRoot)
+{
+    if (storage.isValid()) return storage.activeRoot();
+    const QFileInfo info(dataRoot);
+    return QFileInfo(info.absolutePath()).exists() ? QDir::cleanPath(info.absolutePath()) : QString();
+}
+
+QString metadataRootFor(const storage::StorageContext &storage, const QString &dataRoot)
+{
+    if (storage.isValid()) return storage.metadataDirectory();
+    return QDir(QFileInfo(QDir::cleanPath(QFileInfo(dataRoot).absoluteFilePath())).absolutePath())
+        .filePath(QStringLiteral(".ztgui"));
+}
+
+bool sameVolume(const QString &first, const QString &second)
+{
+#ifdef Q_OS_WIN
+    return QDir::toNativeSeparators(QFileInfo(first).absolutePath()).left(2).compare(
+               QDir::toNativeSeparators(QFileInfo(second).absolutePath()).left(2), Qt::CaseInsensitive)
+        == 0;
+#else
+    return true;
+#endif
+}
+
+bool samePath(const QString &first, const QString &second)
+{
+    const auto a = QDir::cleanPath(first);
+    const auto b = QDir::cleanPath(second);
+#ifdef Q_OS_WIN
+    return a.compare(b, Qt::CaseInsensitive) == 0;
+#else
+    return a == b;
+#endif
+}
+
+QString fileHash(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    return QString::fromLatin1(QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256).toHex());
+}
+} // namespace
+QVariant PluginLoader::setting(const QString &key, const QVariant &fallback) const
+{
+    return m_settings ? m_settings->value(key, fallback) : QSettings().value(key, fallback);
+}
+void PluginLoader::setSetting(const QString &key, const QVariant &value)
+{
+    if (m_settings) m_settings->setValue(key, value); else QSettings().setValue(key, value);
+}
+void PluginLoader::removeSetting(const QString &key)
+{
+    if (m_settings) m_settings->remove(key); else QSettings().remove(key);
+}
 struct PluginLoader::StagedPlugin {
     package::PackageResult package;
     LoadedPlugin plugin;
@@ -43,7 +156,6 @@ PluginLoader::PluginLoader()
     connect(&m_shutdownCheck, &QTimer::timeout, this, [this] { drainUnloads(); checkShutdown(); });
     connect(this,&PluginLoader::loadFinished,this,&PluginLoader::nodeFinished);
     connect(this,&PluginLoader::unloadFinished,this,[this] { scheduleAdvance(); });
-    package::cleanStaleCache();
 }
 PluginLoader::~PluginLoader()
 {
@@ -99,6 +211,16 @@ QVariantList PluginLoader::catalog() const {
         entry["usedBy"]=users; list.append(entry);
     } return list;
 }
+bool PluginLoader::hasUncertainPackages() const {
+    for(auto it=m_catalog.cbegin();it!=m_catalog.cend();++it) {
+        const auto row=it.value();
+        // Catalog rows can outlive a removed file; only installed packages
+        // participate in ownership decisions.
+        if(!QFileInfo(row["path"].toString()).isFile()) continue;
+        if(!row["authenticated"].toBool() || row["id"].toString().isEmpty()) return true;
+    }
+    return false;
+}
 Result PluginLoader::loadFile(const QString &path,PluginRegistry &registry,bool enable) {
     QStringList paths;
     const auto absolute=QFileInfo(path).absoluteFilePath();
@@ -127,26 +249,69 @@ Result PluginLoader::discover(const QStringList &paths,const QStringList &roots,
         else for(auto &row:m_catalog) if(row["path"]==path && !row["loaded"].toBool()) { row["loading"]=true; row["message"]="Verifying"; }
     }
     for(const auto &root:roots) m_cancelledPaths.remove(root);
-    Discovery d; d.roots=roots; d.registry=&registry; d.enable=enable; d.watcher=std::make_unique<QFutureWatcher<QList<package::PackageResult>>>();
+    Discovery d; d.roots=roots; d.registry=&registry; d.enable=enable; d.watcher=std::make_unique<QFutureWatcher<ScannedInstall>>();
     auto *observer=d.watcher.get();
-    connect(observer,&QFutureWatcher<QList<package::PackageResult>>::finished,this,[this,observer] { finishDiscovery(observer); });
-    observer->setFuture(QtConcurrent::run(&m_loadingPool,[paths=allPaths] {
-        QList<package::PackageResult> packages;
+    connect(observer,&QFutureWatcher<ScannedInstall>::finished,this,[this,observer] { finishDiscovery(observer); });
+    // Name ownership is registered inside the background discovery task: it
+    // needs the coordination lock and must never stall the GUI thread.
+    const auto nameDataRoot=m_storage.isValid()?m_storage.pluginDataDirectory():QString();
+    const auto nameMetadataRoot=m_storage.isValid()?m_storage.metadataDirectory():QString();
+    const auto nameRunId=m_storage.runId(); const auto nameUserKey=m_storage.userKeyValue();
+    observer->setFuture(QtConcurrent::run(&m_loadingPool,[paths=allPaths,nameDataRoot,nameMetadataRoot,nameRunId,nameUserKey] {
+        ScannedInstall scanned;
+        auto &packages=scanned.packages;
         for(const auto &path:paths) {
             auto p=package::inspect(path);
-            if(p.ok()) p.error=package::authenticate(p);
+            if(p.ok()) {
+                p.error=package::authenticate(p);
+                p.authenticated=p.error.isEmpty();
+            }
             if(p.ok()) p.error=package::validate(p.info,"client",ApiVersion,ZTGUI_PLUGIN_IID);
             if(p.ok()) p.error=package::validateRuntime(p);
             packages.append(std::move(p));
-        } return packages;
+        }
+        // Every authenticated installed package (including disabled,
+        // incompatible and not-yet-loaded ones) declares which display name it
+        // owns before any instance can migrate a legacy display-name directory.
+        // Two packages that share a name therefore block the automatic
+        // migration for both instead of the first one silently claiming it.
+        if(!nameDataRoot.isEmpty() && !nameMetadataRoot.isEmpty()) {
+            QList<QPair<QString,QString>> installedNames;
+            QStringList authenticationIssues;
+            for(const auto &p:packages) {
+                if(!p.authenticated) {
+                    // A package whose ID cannot be authenticated may be the
+                    // owner of a legacy display-name directory, so its claim is
+                    // unknown: automatic migration must wait, not guess.
+                    authenticationIssues.append(QStringLiteral(
+                        "已安装包无法认证，显示名归属无法完整确认：%1").arg(QFileInfo(p.path).fileName()));
+                    continue;
+                }
+                const auto declaredId=p.info.value("id").toString();
+                const auto declaredName=p.info.value("name").toString();
+                if(!storage::StorageContext::validPluginId(declaredId) || declaredName.trimmed().isEmpty()) continue;
+                installedNames.append({declaredId,declaredName});
+            }
+            storage::PluginDataStore nameStore(nameDataRoot,nameMetadataRoot,nameRunId,nameUserKey);
+            scanned.claims=nameStore.registerInstalledNames(installedNames);
+            scanned.claims.issues.append(authenticationIssues);
+            for(const auto &issue:scanned.claims.issues)
+                qWarning().noquote() << "[插件]" << issue;
+        }
+        return scanned;
     }));
     m_discoveries.push_back(std::move(d)); emit stateChanged(); return {};
 }
-void PluginLoader::finishDiscovery(QFutureWatcher<QList<package::PackageResult>> *watcher) {
+void PluginLoader::finishDiscovery(QFutureWatcher<ScannedInstall> *watcher) {
     const auto it=std::find_if(m_discoveries.begin(),m_discoveries.end(),[&](const Discovery &d) { return d.watcher.get()==watcher; });
     if(it==m_discoveries.end()) return;
     if(m_busy) { QTimer::singleShot(10,this,[this,watcher] { finishDiscovery(watcher); }); return; }
-    const auto roots=it->roots; const auto registry=it->registry; const auto enable=it->enable; auto packages=watcher->result(); m_discoveries.erase(it);
+    const auto roots=it->roots; const auto registry=it->registry; const bool enable=it->enable;
+    auto scanned=watcher->result(); auto packages=scanned.packages;
+    // The claims of the latest authenticated scan are the in-memory ownership
+    // list every consumer initialization in this process is checked against.
+    m_installedNameClaims=scanned.claims;
+    m_discoveries.erase(it);
     QMap<QString,QStringList> identities;
     for(const auto &p:packages) if(p.ok()) identities[p.info.value("id").toString().toCaseFolded()].append(p.path);
     QMap<QString,QJsonObject> graph; QSet<QString> disabled;
@@ -159,9 +324,12 @@ void PluginLoader::finishDiscovery(QFutureWatcher<QList<package::PackageResult>>
         for(const auto &t:m_transactions) if(t.order.contains(key)) reserved=true;
         auto row=m_catalog.take(rowKey);
         if(!id.isEmpty()) { row["id"]=id; row["name"]=p.info.value("name").toString(); row["version"]=p.info.value("version").toString(); row["api"]=p.info.value("apiVersion").toString(); }
+        // Authentication alone (not API compatibility or loadability) decides
+        // whether the declared ID may own plugin data during deletion.
+        row["authenticated"]=p.authenticated && storage::StorageContext::validPluginId(id);
         row["dependencies"]=p.info.value("dependencies").toArray().toVariantList(); row["provides"]=p.info.value("provides").toArray().toVariantList(); row["execution"]=p.info.value("execution").toObject()["kind"].toString("in-process");
         if(!running && !reserved) { row["loading"]=false; row["loadable"]=p.ok(); row["message"]=p.ok()?"Not loaded":p.error; }
-        const bool off=QSettings().value("plugins/disabled/"+key,false).toBool(); row["disabled"]=off;
+        const bool off=setting("plugins/disabled/"+key,false).toBool(); row["disabled"]=off;
         if(off && p.ok() && !running) row["message"]="Disabled";
         m_catalog.insert((identities[key].size()>1 && !(rowKey==key && (running || reserved))) || key.isEmpty()?p.path:key,row);
         if(p.ok()) { graph[key]=p.info; m_verified[key]=p; if(off) disabled.insert(key); }
@@ -175,11 +343,11 @@ void PluginLoader::finishDiscovery(QFutureWatcher<QList<package::PackageResult>>
         const auto id=p->info["id"].toString(),key=id.toCaseFolded();
         QString error=p->error;
         const bool cancelled=m_cancelledPaths.remove(root);
-        if(cancelled && !key.isEmpty()) QSettings().setValue("plugins/disabled/"+key,true);
+        if(cancelled && !key.isEmpty()) setSetting("plugins/disabled/"+key,true);
         if(m_stopping || !registry || cancelled) error="Plugin loading cancelled";
         if(!enable && disabled.contains(key) && error.isEmpty()) continue;
         const bool worker=p->info["execution"].toObject()["kind"]=="worker-process";
-        const bool keep=enable || !worker || QSettings().value("plugins/retain/"+key,false).toBool();
+        const bool keep=enable || !worker || setting("plugins/retain/"+key,false).toBool();
         // A service starts through consumers or a saved explicit user intent.
         if(!enable && worker && !keep && error.isEmpty()) continue;
         auto plan=package::dependencyPlan(graph,key,disabled); if(error.isEmpty()) error=plan.error;
@@ -206,7 +374,8 @@ void PluginLoader::finishDiscovery(QFutureWatcher<QList<package::PackageResult>>
     emit stateChanged(); scheduleAdvance(); checkShutdown();
 }
 void PluginLoader::scheduleAdvance() { QTimer::singleShot(0,this,&PluginLoader::advance); }
-Result PluginLoader::removeFile(const QString &path, const QString &pluginDirectory, const QString &dataRoot) {
+Result PluginLoader::removeFile(const QString &path, const QString &pluginDirectory, const QString &dataRoot,
+                                Removal removal) {
     if(QThread::currentThread()!=thread()) return {Error::WrongThread,"Remove must run on GUI thread"};
     if(m_busy || m_stopping || !m_discoveries.empty() || !m_loads.empty() || !m_transactions.empty())
         return {Error::Busy,QStringLiteral("插件正在处理操作，请稍后重试。")};
@@ -216,8 +385,8 @@ Result PluginLoader::removeFile(const QString &path, const QString &pluginDirect
     if(selected==m_catalog.end()) return {Error::NotFound,QStringLiteral("插件已不存在。")};
     const auto row=selected.value(); const auto id=row["id"].toString().toCaseFolded();
     const auto name=row["name"].toString();
-    for(const auto &p:m_libraries) if(p.path==absolute || p.id.toCaseFolded()==id || p.manifest["name"].toString().compare(name,Qt::CaseInsensitive)==0)
-        return {Error::Busy,QStringLiteral("请先卸载使用此 ID 或数据目录的插件。")};
+    for(const auto &p:m_libraries) if(p.path==absolute || p.id.toCaseFolded()==id)
+        return {Error::Busy,QStringLiteral("请先卸载使用此 ID 的插件。")};
     if(row["loaded"].toBool() || row["loading"].toBool() || row["stopping"].toBool())
         return {Error::Busy,QStringLiteral("请先等待插件完全卸载。")};
     const QFileInfo directory(pluginDirectory), file(absolute);
@@ -225,28 +394,346 @@ Result PluginLoader::removeFile(const QString &path, const QString &pluginDirect
     if(linked(directory) || !directory.isDir() || linked(file) || (file.exists() && !file.isFile()) ||
        file.absolutePath()!=directory.absoluteFilePath() || file.suffix().compare("ztplugin",Qt::CaseInsensitive)!=0)
         return {Error::InvalidPlugin,QStringLiteral("只能删除插件目录中的普通 .ztplugin 文件。")};
-    // Only authenticated metadata may select a plugin data directory.
+    // Import and delete of one install directory are serialized across profiles.
+    PackageChangeLock packageLock(directory.absoluteFilePath());
+    QString lockError;
+    if(!packageLock.acquire(lockError)) return {Error::Busy,lockError};
+    // Revalidate the path and package after taking the shared lock: another
+    // process may have replaced or removed it while we waited.
+    if(linked(QFileInfo(absolute)) || !QFileInfo(absolute).isFile()
+       || QFileInfo(absolute).absolutePath()!=directory.absoluteFilePath())
+        return {Error::InvalidPlugin,QStringLiteral("只能删除插件目录中的普通 .ztplugin 文件。")};
+    // Only authenticated metadata may select a plugin data directory. The
+    // explicit package-only path deliberately ignores the declared identity.
     auto verified=package::inspect(absolute);
-    const bool trusted=verified.ok() && package::authenticate(verified).isEmpty() &&
+    const bool authenticated=verified.ok() && package::authenticate(verified).isEmpty();
+    const bool trusted=authenticated &&
         verified.info["id"].toString().toCaseFolded()==id && verified.info["name"].toString()==name;
-    const auto root=QFileInfo(dataRoot.isEmpty()?QDir(QCoreApplication::applicationDirPath()).filePath("plugins-data"):dataRoot);
-    const auto data=QFileInfo(QDir(root.absoluteFilePath()).filePath(name));
-    if(trusted) {
-        if(name.isEmpty() || name=="." || name==".." || name.contains('/') || name.contains('\\') || name.contains(':') ||
-           name.endsWith('.') || name.endsWith(' ') || name.contains(QChar('\0')) || linked(root) ||
-           (root.exists() && !root.isDir()) || linked(data) || (data.exists() && !data.isDir()) || data.absolutePath()!=root.absoluteFilePath())
-            return {Error::InvalidPlugin,QStringLiteral("插件数据目录无效，已取消删除。")};
-        QDirIterator entries(data.absoluteFilePath(),QDir::AllEntries|QDir::NoDotAndDotDot|QDir::Hidden|QDir::System,QDirIterator::Subdirectories);
-        while(entries.hasNext()) { entries.next(); if(linked(entries.fileInfo())) return {Error::InvalidPlugin,QStringLiteral("插件数据包含链接，已取消删除。")}; }
-        if(data.exists() && !QDir(data.absoluteFilePath()).removeRecursively())
-            return {Error::InvalidPlugin,QStringLiteral("无法完整删除插件数据，请检查文件占用后重试。")};
+    if(removal==Removal::PackageOnly) {
+        if(!QFile::remove(absolute))
+            return {Error::InvalidPlugin,QStringLiteral("无法删除插件文件，请检查文件占用后重试。")};
+        m_catalog.erase(selected);
+        if(m_verified.value(id).path==absolute) m_verified.remove(id);
+        bool referenced=false; for(const auto &other:m_catalog) if(other["id"].toString().toCaseFolded()==id) referenced=true;
+        if(!referenced && !id.isEmpty()) { removeSetting("plugins/disabled/"+id); removeSetting("plugins/retain/"+id); m_failedNodes.remove(id); }
+        emit stateChanged();
+        return {Error::None,QStringLiteral("已仅删除插件包文件；插件数据、所有权记录和启用状态均保留。")};
     }
-    if(file.exists() && !QFile::remove(absolute)) return {Error::InvalidPlugin,QStringLiteral("无法删除插件文件，请检查文件占用后重试。")};
+    if(!trusted)
+        return {Error::InvalidPlugin,QStringLiteral(
+            "插件包未通过认证，无法确认 ID 与数据归属，已取消删除。如需清理损坏包，请使用“仅删除包文件、保留数据”。")};
+    const auto pluginDataRoot=m_storage.isValid()?m_storage.pluginDataDirectory():
+        (dataRoot.isEmpty()?QDir(QCoreApplication::applicationDirPath()).filePath("plugins-data"):QDir::cleanPath(QFileInfo(dataRoot).absoluteFilePath()));
+    const auto metadataRoot=metadataRootFor(m_storage,pluginDataRoot);
+    const auto activeRoot=activeRootFor(m_storage,pluginDataRoot);
+    storage::PluginDataStore store(pluginDataRoot,metadataRoot,m_storage.runId(),m_storage.userKey());
+    const QFileInfo dataRootInfo(pluginDataRoot);
+    bool packageRemoved=false;
+    bool sharedDataRetained=false;
+    if(trusted) {
+        if(!storage::StorageContext::validPluginId(id))
+            return {Error::InvalidPlugin,QStringLiteral("插件 ID 无效，已取消删除。")};
+        bool referenced=false;
+        for(auto it=m_catalog.cbegin();it!=m_catalog.cend();++it)
+            if(it.key()!=selected.key() && it.value()["id"].toString().compare(id,Qt::CaseInsensitive)==0) referenced=true;
+        if(linked(dataRootInfo) || (dataRootInfo.exists() && !dataRootInfo.isDir()))
+            return {Error::InvalidPlugin,QStringLiteral("插件数据目录无效，已取消删除。")};
+        sharedDataRetained=referenced;
+        // Ownership metadata must be readable before any destructive step,
+        // including deleting only one of several installs of the same ID. A
+        // missing record is allowed; the last-reference path creates it below.
+        QString ownershipError;
+        const auto ownership=store.ownershipRecord(id,ownershipError);
+        if(!ownershipError.isEmpty())
+            return {Error::InvalidPlugin,QStringLiteral("插件数据所有权记录不可读，已取消删除：%1").arg(ownershipError)};
+        Q_UNUSED(ownership);
+        if(!referenced) {
+            const auto recordPath=pendingRecordFile(metadataRoot,id);
+            if(QFileInfo::exists(recordPath))
+                return {Error::Busy,QStringLiteral("存在未完成的删除记录，请重新启动程序完成恢复。")};
+            // Lock order: install-directory package lock, then data-root
+            // coordination lock. No other code may acquire these in reverse.
+            storage::CoordinationLock coordination(metadataRoot);
+            if(!coordination.acquire(lockError,2000))
+                return {Error::Busy,QStringLiteral("插件数据正在被其他操作使用，请稍后重试：%1").arg(lockError)};
+            const auto pendingDirectory=pendingDeletionsDirectory(pluginDirectory);
+            const auto pendingPath=QDir(pendingDirectory).filePath(
+                QStringLiteral("%1-%2").arg(QUuid::createUuid().toString(QUuid::Id128).left(12),file.fileName()));
+            const auto now=QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+            QJsonObject record{{"format",1},{"id",id},{"root",activeRoot},
+                {"userKey",m_storage.userKeyValue()},
+                {"dataRoot",QDir::cleanPath(QFileInfo(pluginDataRoot).absoluteFilePath())},
+                {"pluginDirectory",directory.absoluteFilePath()},
+                {"packagePath",absolute},{"pendingPath",pendingPath},
+                {"packageHash",fileHash(absolute)},
+                {"stage",QStringLiteral("recorded")},{"referenced",false},
+                {"createdAt",now},{"updatedAt",now}};
+            const auto saveRecord=[&](const QString &stage,const QString &message=QString()) {
+                record["stage"]=stage;
+                record["updatedAt"]=QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+                if(message.isEmpty()) record.remove("message"); else record["message"]=message;
+                QString error;
+                return writePendingRecord(recordPath,record,error) ? QString() : error;
+            };
+            // Persist the authorized operation before any destructive step.
+            QString recordError;
+            if(!writePendingRecord(recordPath,record,recordError))
+                return {Error::InvalidPlugin,QStringLiteral("无法记录删除操作，已取消删除：%1").arg(recordError)};
+            // Close the one-way legacy import before the package disappears so
+            // a crash or reinstall cannot bring deleted settings back.
+            const auto tombstone=store.completeLegacyImport(id,&coordination);
+            if(!tombstone.ok()) {
+                QFile::remove(recordPath);
+                return {Error::InvalidPlugin,QStringLiteral("无法关闭旧配置导入资格：%1").arg(tombstone.error)};
+            }
+            const QFileInfo pendingInfo(pendingDirectory);
+            if(linked(pendingInfo) || (pendingInfo.exists() && !pendingInfo.isDir())
+               || !QDir().mkpath(pendingDirectory)) {
+                QFile::remove(recordPath);
+                return {Error::InvalidPlugin,QStringLiteral("无法创建受控待删区，已取消删除。")};
+            }
+            if(!QFile::rename(absolute,pendingPath)) {
+                QFile::remove(recordPath);
+                return {Error::InvalidPlugin,QStringLiteral("无法移出插件包，已取消删除。")};
+            }
+            recordError=saveRecord(QStringLiteral("moved"));
+            if(!recordError.isEmpty()) {
+                QFile::rename(pendingPath,absolute);
+                QFile::remove(recordPath);
+                return {Error::InvalidPlugin,QStringLiteral("无法更新删除记录，已取消删除：%1").arg(recordError)};
+            }
+            QString dataError;
+            if(!store.deleteDataDirectory(id,dataError,&coordination)) {
+                // The package has not been fully removed from the install view;
+                // restore it and drop the transaction.
+                if(QFile::rename(pendingPath,absolute)) {
+                    QFile::remove(recordPath);
+                    return {Error::InvalidPlugin,QStringLiteral("无法完整删除插件数据：%1").arg(dataError)};
+                }
+                saveRecord(QStringLiteral("moved"),dataError);
+                m_pendingDeletions.append(QVariantMap{{"id",id},{"stage",QStringLiteral("moved")},
+                    {"path",absolute},{"pending",pendingPath},{"reason",dataError}});
+                m_pendingDeletionIssues.append(QStringLiteral("插件 %1 的待删事务未完成：%2").arg(id,dataError));
+                return {Error::InvalidPlugin,QStringLiteral("插件数据未能删除，且插件包无法移回，启动时会继续处理：%1").arg(dataError)};
+            }
+            recordError=saveRecord(QStringLiteral("dataDeleted"));
+            if(!recordError.isEmpty()) qWarning().noquote() << "[插件]" << id << "无法更新待删记录：" << recordError;
+            if(!QFile::remove(pendingPath)) {
+                saveRecord(QStringLiteral("dataDeleted"),QStringLiteral("待删包文件无法删除"));
+                m_pendingDeletions.append(QVariantMap{{"id",id},{"stage",QStringLiteral("dataDeleted")},
+                    {"path",absolute},{"pending",pendingPath},
+                    {"reason",QStringLiteral("待删包文件无法删除")}});
+                m_pendingDeletionIssues.append(QStringLiteral("插件 %1 的待删包无法删除，启动时会继续清理。").arg(id));
+                packageRemoved=true;
+                m_catalog.erase(selected);
+                if(m_verified.value(id).path==absolute) m_verified.remove(id);
+                bool remaining=false; for(const auto &other:m_catalog) if(other["id"].toString().toCaseFolded()==id) remaining=true;
+                if(!remaining && !id.isEmpty()) { removeSetting("plugins/disabled/"+id); removeSetting("plugins/retain/"+id); m_failedNodes.remove(id); }
+                emit stateChanged();
+                return {Error::InvalidPlugin,QStringLiteral("插件数据已删除，但待删包文件无法删除，启动时会继续清理。")};
+            }
+            saveRecord(QStringLiteral("packageDeleted"));
+            QFile::remove(recordPath);
+            packageRemoved=true;
+        }
+    }
+    if(!packageRemoved && QFileInfo::exists(absolute) && !QFile::remove(absolute))
+        return {Error::InvalidPlugin,QStringLiteral("无法删除插件文件，请检查文件占用后重试。")};
     m_catalog.erase(selected);
     if(m_verified.value(id).path==absolute) m_verified.remove(id);
     bool referenced=false; for(const auto &other:m_catalog) if(other["id"].toString().toCaseFolded()==id) referenced=true;
-    if(!referenced && !id.isEmpty()) { QSettings().remove("plugins/disabled/"+id); QSettings().remove("plugins/retain/"+id); m_failedNodes.remove(id); }
-    emit stateChanged(); return {};
+    if(!referenced && !id.isEmpty()) { removeSetting("plugins/disabled/"+id); removeSetting("plugins/retain/"+id); m_failedNodes.remove(id); }
+    emit stateChanged();
+    if(sharedDataRetained)
+        return {Error::None,QStringLiteral("已删除此安装包；相同 ID 还有其他安装包，共享数据与启用状态已保留。")};
+    return {};
+}
+QVariantMap PluginLoader::deletionPlan(const QString &path) const {
+    const auto absolute=QFileInfo(path).absoluteFilePath();
+    for(const auto &row:m_catalog) {
+        if(row["path"].toString()!=absolute) continue;
+        const auto id=row["id"].toString();
+        const bool dataRemovable=row["authenticated"].toBool()
+            && storage::StorageContext::validPluginId(id);
+        return {{"dataRemovable",dataRemovable},
+                {"reason",dataRemovable?QString():QStringLiteral(
+                    "插件包未通过认证，无法确认 ID 与数据归属；只能删除包文件并保留数据。")}};
+    }
+    return {{"dataRemovable",false},{"reason",QStringLiteral("插件已不存在。")}};
+}
+int PluginLoader::recoverPendingDeletions(const QString &pluginDirectory, const QString &dataRoot) {
+    if(QThread::currentThread()!=thread()) return 0;
+    m_pendingDeletions.clear();
+    m_pendingDeletionIssues.clear();
+    const auto pluginDataRoot=m_storage.isValid()?m_storage.pluginDataDirectory():
+        (dataRoot.isEmpty()?QDir(QCoreApplication::applicationDirPath()).filePath("plugins-data"):QDir::cleanPath(QFileInfo(dataRoot).absoluteFilePath()));
+    const auto metadataRoot=metadataRootFor(m_storage,pluginDataRoot);
+    const auto activeRoot=activeRootFor(m_storage,pluginDataRoot);
+    const QDir recordsDirectory(QDir(metadataRoot).filePath(QStringLiteral("pending-deletions")));
+    const auto records=recordsDirectory.exists()
+        ? recordsDirectory.entryInfoList({"*.json"},QDir::Files|QDir::NoSymLinks,QDir::Name) : QFileInfoList();
+    if(records.isEmpty()) return 0;
+    storage::PluginDataStore store(pluginDataRoot,metadataRoot,m_storage.runId(),m_storage.userKey());
+    const auto pluginPath=QDir(pluginDirectory).absolutePath();
+    const auto pendingPath=QDir(pendingDeletionsDirectory(pluginDirectory)).absolutePath();
+    int recovered=0;
+    const auto keep=[&](const QString &id,const QJsonObject &record,const QString &reason) {
+        m_pendingDeletions.append(QVariantMap{{"id",id},
+            {"stage",record.value("stage").toString()},{"pending",record.value("pendingPath").toString()},
+            {"path",record.value("packagePath").toString()},{"reason",reason}});
+        m_pendingDeletionIssues.append(QStringLiteral("插件 %1 的待删事务未完成：%2").arg(id,reason));
+        qWarning().noquote() << "[插件]" << id << "待删事务保留：" << reason;
+    };
+    // Recovery mutates the installation directory, so it obeys the same
+    // install-directory package lock as import and delete. Holding it for the
+    // whole pass also serializes another profile importing into the same
+    // directory: their reinstall may reference the data we are about to drop.
+    PackageChangeLock packageLock(pluginPath);
+    QString lockError;
+    if(!packageLock.acquire(lockError)) {
+        m_pendingDeletionIssues.append(QStringLiteral("待删恢复未执行：%1").arg(lockError));
+        qWarning().noquote() << "[插件]" << "待删恢复未执行：" << lockError;
+        return 0;
+    }
+    // Re-authenticate the current installation list instead of trusting the
+    // record's old reference count: a package installed after the record was
+    // written owns the same ID's data and must keep it alive.
+    struct InstalledPackage { QString path; QString id; };
+    QList<InstalledPackage> installed;
+    for(const auto &file:QDir(pluginPath).entryInfoList({"*.ztplugin"},QDir::Files|QDir::NoSymLinks,QDir::Name)) {
+        const auto verified=package::inspect(file.absoluteFilePath());
+        if(!verified.ok() || !package::authenticate(verified).isEmpty()) continue;
+        installed.append({file.absoluteFilePath(),verified.info.value("id").toString().toCaseFolded()});
+    }
+    for(const auto &entry:records) {
+        QJsonObject record;
+        QString readError;
+        if(!readPendingRecord(entry.absoluteFilePath(),record,readError)) {
+            m_pendingDeletionIssues.append(QStringLiteral("待删记录损坏，已保留：%1（%2）")
+                .arg(entry.absoluteFilePath(),readError));
+            continue;
+        }
+        const auto id=record.value("id").toString().toLower();
+        if(record.value("format").toInt()!=1 || !storage::StorageContext::validPluginId(id)) {
+            keep(id.isEmpty()?entry.completeBaseName():id,record,QStringLiteral("记录格式或插件 ID 无效"));
+            continue;
+        }
+        // Records are bound to the root that authorized them. A personal
+        // profile must never replay the shared root's transaction.
+        if(!activeRoot.isEmpty() && !samePath(record.value("root").toString(),activeRoot)) continue;
+        const auto recordedDataRoot=record.value("dataRoot").toString();
+        if(!recordedDataRoot.isEmpty() && !samePath(recordedDataRoot,pluginDataRoot)) {
+            keep(id,record,QStringLiteral("记录属于另一个插件数据根"));
+            continue;
+        }
+        const auto package=record.value("packagePath").toString();
+        const auto pending=record.value("pendingPath").toString();
+        const QFileInfo packageInfo(package), pendingInfo(pending);
+        if(!QFileInfo(package).isAbsolute() || !QFileInfo(pending).isAbsolute()
+           || !samePath(packageInfo.absolutePath(),pluginPath)
+           || !samePath(pendingInfo.absolutePath(),pendingPath)
+           || linkedPath(packageInfo) || linkedPath(pendingInfo)
+           || (packageInfo.exists() && !packageInfo.isFile())
+           || (pendingInfo.exists() && !pendingInfo.isFile())
+           || !sameVolume(package,pending)) {
+            keep(id,record,QStringLiteral("路径越界、是链接或不是普通文件"));
+            continue;
+        }
+        const bool original=packageInfo.exists();
+        const bool waiting=pendingInfo.exists();
+        if(original && waiting) {
+            keep(id,record,QStringLiteral("原包与待删包同时存在"));
+            continue;
+        }
+        // The hash recorded at authorization time distinguishes the package the
+        // user deleted from a later reinstall at the same path.
+        const auto recordedHash=record.value("packageHash").toString();
+        if(!recordedHash.isEmpty()) {
+            const auto &existing=original?packageInfo:pendingInfo;
+            if(existing.exists() && fileHash(existing.absoluteFilePath())!=recordedHash) {
+                keep(id,record,QStringLiteral("插件包内容与授权删除时不一致，已保留重装的包"));
+                continue;
+            }
+        }
+        // Ownership must be re-established before the first destructive step;
+        // a missing record is allowed, an unreadable or foreign one is not.
+        QString ownershipError;
+        const auto ownership=store.ownershipRecord(id,ownershipError);
+        if(!ownershipError.isEmpty()) {
+            keep(id,record,QStringLiteral("插件数据所有权记录不可读：%1").arg(ownershipError));
+            continue;
+        }
+        Q_UNUSED(ownership);
+        bool referenced=record.value("referenced").toBool();
+        for(const auto &other:installed)
+            if(other.id==id && !samePath(other.path,package)) referenced=true;
+        // Lock order: the install-directory package lock is already held for the
+        // whole pass, so the data-root coordination lock comes second. A loader
+        // registers its lease inside this same lock, therefore the lease check,
+        // the import tombstone, the package move and the data deletion must all
+        // happen inside one held interval. Checking leases before acquiring it
+        // would let a lease registered while we wait move a live package away.
+        storage::CoordinationLock coordination(metadataRoot);
+        QString coordinationError;
+        if(!coordination.acquire(coordinationError,2000)) {
+            keep(id,record,QStringLiteral("无法获取存储协调锁：%1").arg(coordinationError));
+            continue;
+        }
+        if(original) {
+            // Never move the authorized package while another instance still
+            // holds a lease on the data.
+            QString leaseError;
+            if(store.hasOtherLeases(id,leaseError)) {
+                keep(id,record,leaseError.isEmpty()?QStringLiteral("存在其他插件租约"):leaseError);
+                continue;
+            }
+            // The operation was authorized earlier, but never move a package
+            // whose identity cannot be re-established now.
+            const auto verified=package::inspect(package);
+            const bool trusted=verified.ok() && package::authenticate(verified).isEmpty()
+                && verified.info.value("id").toString().toCaseFolded()==id;
+            if(!trusted) {
+                keep(id,record,QStringLiteral("原包未通过重新认证"));
+                continue;
+            }
+            const auto tombstone=store.completeLegacyImport(id,&coordination);
+            if(!tombstone.ok()) {
+                keep(id,record,QStringLiteral("无法关闭旧配置导入资格：%1").arg(tombstone.error));
+                continue;
+            }
+            if(!QDir().mkpath(pendingPath) || !QFile::rename(package,pending)) {
+                keep(id,record,QStringLiteral("无法移出插件包"));
+                continue;
+            }
+            record["stage"]=QStringLiteral("moved");
+            record["updatedAt"]=QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+            QString writeError;
+            if(!writePendingRecord(entry.absoluteFilePath(),record,writeError))
+                qWarning().noquote() << "[插件]" << id << "无法更新待删记录：" << writeError;
+        }
+        if(!referenced) {
+            const auto dataDirectory=store.dataDirectory(id);
+            if(QFileInfo::exists(dataDirectory)) {
+                QString dataError;
+                if(!store.deleteDataDirectory(id,dataError,&coordination)) {
+                    keep(id,record,QStringLiteral("无法删除插件数据：%1").arg(dataError));
+                    continue;
+                }
+            }
+        }
+        if(QFileInfo::exists(pending) && !QFile::remove(pending)) {
+            keep(id,record,QStringLiteral("待删包文件无法删除"));
+            continue;
+        }
+        if(!QFile::remove(entry.absoluteFilePath())) {
+            keep(id,record,QStringLiteral("无法移除已完成的待删记录"));
+            continue;
+        }
+        ++recovered;
+        qInfo().noquote() << "[插件]" << id << "已完成启动恢复的删除事务";
+    }
+    if(recovered>0) emit stateChanged();
+    return recovered;
 }
 bool PluginLoader::hasDependent(const QString &id) const {
     for(const auto &p:m_libraries) if(p.dependencies.contains(id.toCaseFolded())) return true;
@@ -270,7 +757,7 @@ void PluginLoader::advance() {
         }
         if(target!=m_libraries.end() && target->ready) {
             target->keep|=it->keep;
-            if(it->enable) { QSettings().remove("plugins/disabled/"+it->target); QSettings().setValue("plugins/retain/"+it->target,true); m_catalog[it->target]["disabled"]=false; }
+            if(it->enable) { removeSetting("plugins/disabled/"+it->target); setSetting("plugins/retain/"+it->target,true); m_catalog[it->target]["disabled"]=false; }
             it=m_transactions.erase(it); continue;
         }
         for(const auto &id:it->order) {
@@ -305,7 +792,7 @@ void PluginLoader::nodeFinished(const QString &id,bool success,const QString &) 
         p.ready=true;
         for(const auto &t:m_transactions) if(t.target==id.toCaseFolded()) {
             p.keep|=t.keep;
-            if(t.enable) { QSettings().remove("plugins/disabled/"+t.target); QSettings().setValue("plugins/retain/"+t.target,true); m_catalog[t.target]["disabled"]=false; }
+            if(t.enable) { removeSetting("plugins/disabled/"+t.target); setSetting("plugins/retain/"+t.target,true); m_catalog[t.target]["disabled"]=false; }
         }
     }
     scheduleAdvance();
@@ -336,9 +823,13 @@ Result PluginLoader::startFile(const package::PackageResult &selected,PluginRegi
     auto *observer=request.watcher.get();
     const auto cancellation=request.cancellation.token();
     const auto expected=selected.info;
+    const auto cacheContext=m_cacheContext;
+    // Read the host setting on the GUI thread; QSettings objects are not shared
+    // with the background staging task.
+    const bool disabled=setting("plugins/disabled/"+selected.info.value("id").toString().toLower(),false).toBool();
     auto *guiThread=thread();
     connect(observer,&QFutureWatcher<std::shared_ptr<StagedPlugin>>::finished,this,[this,observer] { finishLoad(observer); });
-    observer->setFuture(QtConcurrent::run(&m_loadingPool,[absolutePath,enable,cancellation,guiThread,expected] {
+    observer->setFuture(QtConcurrent::run(&m_loadingPool,[absolutePath,enable,disabled,cacheContext,cancellation,guiThread,expected] {
         auto staged=std::make_shared<StagedPlugin>();
         auto &pkg=staged->package; auto &loaded=staged->plugin; auto &error=staged->error;
         loaded.path=absolutePath;
@@ -354,10 +845,10 @@ Result PluginLoader::startFile(const package::PackageResult &selected,PluginRegi
             if(error.isEmpty()) error=package::validateRuntime(pkg);
             if(!error.isEmpty() || cancelled()) return staged;
             staged->loadable=true;
-            staged->disabled=!enable && QSettings().value("plugins/disabled/"+pkg.info.value("id").toString().toLower(),false).toBool();
+            staged->disabled=!enable && disabled;
             if(staged->disabled) return staged;
             QString library;
-            error=package::extract(pkg,loaded.cache,library,loaded.cacheLock);
+            error=package::extract(pkg,cacheContext,loaded.cache,library,loaded.cacheLock);
             if(!error.isEmpty() || cancelled()) return staged;
             loaded.manifest=pkg.info;
             for(const auto &d:pkg.info.value("dependencies").toArray()) loaded.dependencies.append(d.toObject()["pluginId"].toString().toCaseFolded());
@@ -403,10 +894,8 @@ void PluginLoader::finishLoad(QFutureWatcher<std::shared_ptr<StagedPlugin>> *wat
     const bool worker=pkg.info.value("execution").toObject()["kind"]=="worker-process";
     if(error.isEmpty() && !worker) {
         for(const auto &other:m_libraries) if(other.id.compare(id,Qt::CaseInsensitive)==0) error="Plugin is loaded or still stopping";
-        for(const auto &registered:registryTarget->plugins()) {
+        for(const auto &registered:registryTarget->plugins())
             if(registered.id.compare(id,Qt::CaseInsensitive)==0) error="Plugin ID already registered";
-            if(registered.name.compare(pkg.info.value("name").toString(),Qt::CaseInsensitive)==0) error="Plugin data directory/name already used";
-        }
     }
     if(!key.isEmpty() && catalogKey!=key && !m_catalog.contains(key)) {
         m_catalog.insert(key,m_catalog.take(catalogKey)); catalogKey=key;
@@ -419,6 +908,26 @@ void PluginLoader::finishLoad(QFutureWatcher<std::shared_ptr<StagedPlugin>> *wat
     m_loads.erase(request);
     if(error.isEmpty() && staged->disabled) {
         row["loading"]=false; row["message"]="Disabled"; emit stateChanged(); return;
+    }
+    if(error.isEmpty()) {
+        // The stable ID owns the data directory and this process's lease.
+        loaded.id=id; loaded.registry=registryTarget;
+        const auto dataRoot=m_storage.isValid()?m_storage.pluginDataDirectory():QString();
+        const auto metadataRoot=m_storage.isValid()?m_storage.metadataDirectory():QString();
+        loaded.services=std::make_unique<util::HostServicesImpl>(pkg.info.value("name").toString(),dataRoot,id,
+            metadataRoot,m_storage.runId(),m_storage.userKey(),m_cacheWriteNotifier,m_installedNameClaims);
+        if(!loaded.services->storageReady()) error="Plugin data storage is unavailable: "+loaded.services->storageError();
+        else {
+            if(!loaded.services->migrationBlock().isEmpty())
+                qWarning().noquote() << "[插件]" << id << loaded.services->migrationBlock();
+            for(const auto &warning:loaded.services->storageWarnings())
+                qWarning().noquote() << "[插件]" << id << warning;
+            for(const auto &value:pkg.info.value("dependencies").toArray()) {
+                const auto dependency=value.toObject(); const auto provider=dependency["pluginId"].toString().toCaseFolded();
+                for(const auto &p:m_libraries) if(p.id.toCaseFolded()==provider && p.ready && !p.unloading && p.worker)
+                    loaded.services->serviceClient.providers.insert(provider,{p.worker.get(),dependency["services"].toArray()});
+            }
+        }
     }
     if(error.isEmpty() && !worker) {
         // Registry, plugin QObjects and lifecycle hooks remain on the GUI thread.
@@ -446,13 +955,7 @@ void PluginLoader::finishLoad(QFutureWatcher<std::shared_ptr<StagedPlugin>> *wat
         emit stateChanged(); emit loadFinished(id,false,error); return;
     }
     auto &registry=*registryTarget;
-    loaded.id=id; loaded.registry=&registry; loaded.instance=++m_instanceSerial;
-    loaded.services=std::make_unique<util::HostServicesImpl>(pkg.info.value("name").toString(),QString(),id);
-    for(const auto &value:pkg.info.value("dependencies").toArray()) {
-        const auto dependency=value.toObject(); const auto provider=dependency["pluginId"].toString().toCaseFolded();
-        for(const auto &p:m_libraries) if(p.id.toCaseFolded()==provider && p.ready && !p.unloading && p.worker)
-            loaded.services->serviceClient.providers.insert(provider,{p.worker.get(),dependency["services"].toArray()});
-    }
+    loaded.instance=++m_instanceSerial;
     if(worker) {
         api::PluginDefinition definition; definition.info={id,pkg.info.value("name").toString(),pkg.info.value("version").toString()};
         const auto result=registry.registerPlugin(std::move(definition),nullptr,true);
@@ -619,7 +1122,7 @@ Result PluginLoader::unload(const QString &pluginId,PluginRegistry &registry) {
             plugin.services->serviceClient.beginStop();
             if(plugin.registry) { if(plugin.registry->m_active.plugin.id==plugin.id) plugin.registry->activateMenu(ZeroTierMenuId); plugin.registry->setPreparationState(plugin.id,PreparationState::Stopping,"Stopping"); }
             auto &row=m_catalog[plugin.id.toCaseFolded()]; row["stopping"]=true; row["message"]="Stopping";
-            QSettings().remove("plugins/retain/"+plugin.id.toCaseFolded());
+            removeSetting("plugins/retain/"+plugin.id.toCaseFolded());
         }
         for(auto it=m_transactions.begin();it!=m_transactions.end();) {
             if(it->order.contains(pluginId.toCaseFolded())) {
@@ -627,7 +1130,7 @@ Result PluginLoader::unload(const QString &pluginId,PluginRegistry &registry) {
                 m_catalog[it->target]["loading"]=false; it=m_transactions.erase(it);
             } else ++it;
         }
-        QSettings().setValue("plugins/disabled/"+pluginId.toLower(),true);
+        setSetting("plugins/disabled/"+pluginId.toLower(),true);
         m_shutdownCheck.start(); emit stateChanged(); return {};
     }
     bool cancelled=false;
@@ -650,7 +1153,7 @@ Result PluginLoader::unload(const QString &pluginId,PluginRegistry &registry) {
         bool completionPending=false;
         for(const auto &load:m_loads) if(load.key==catalogKey || m_catalog.value(load.key).value("path")==pluginId) completionPending=true;
         for(const auto &d:m_discoveries) if(d.roots.contains(row["path"].toString())) completionPending=true;
-        if(!row["id"].toString().isEmpty()) QSettings().setValue("plugins/disabled/"+row["id"].toString().toCaseFolded(),true);
+        if(!row["id"].toString().isEmpty()) setSetting("plugins/disabled/"+row["id"].toString().toCaseFolded(),true);
         scheduleAdvance(); emit stateChanged();
         if(!completionPending) emit loadFinished(row["id"].toString(),false,"Plugin loading cancelled");
         return {};
@@ -736,7 +1239,7 @@ void PluginLoader::drainUnloads() {
         const auto id=i->id; const bool ok=release(*i);
         auto &row=m_catalog[id.toLower()]; row["loaded"]=!ok; row["loading"]=false; row["stopping"]=false;
         if(ok) {
-            row["disabled"]=QSettings().value("plugins/disabled/"+id.toCaseFolded(),false).toBool();
+            row["disabled"]=setting("plugins/disabled/"+id.toCaseFolded(),false).toBool();
             if(!row["forcedTermination"].toBool() && (row["message"].toString()=="Stopping" || m_stopping)) row["message"]=row["disabled"].toBool()?"Disabled":"Not loaded";
             i=m_libraries.erase(i);
         }

@@ -2,6 +2,8 @@
 #include "RecordModel.h"
 #include "NetworkBundle.h"
 #include "PluginRuntime.h"
+#include "storage/SettingsStore.h"
+#include "storage/StorageContext.h"
 #include <ztgui/PluginPage.h>
 #include <QApplication>
 #include <QQmlApplicationEngine>
@@ -39,11 +41,20 @@ public:
 class QmlTests : public QObject {
     Q_OBJECT
     QTemporaryDir m_directory;
+    vusiif::ztgui::storage::StorageContext m_storage;
     QByteArray m_path, m_programData;
     QStringList m_errors;
     std::unique_ptr<AppController> m_controller;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QQuickWindow *m_window = nullptr;
+    QVariant setting(const QString &key, const QVariant &fallback = {}) const {
+        vusiif::ztgui::storage::SettingsStore store(m_storage.settingsFile());
+        return store.value(key, fallback);
+    }
+    bool hasSetting(const QString &key) const {
+        vusiif::ztgui::storage::SettingsStore store(m_storage.settingsFile());
+        return store.contains(key);
+    }
     QObject *object(const char *name) const {
         if (!m_window) return nullptr;
         const auto target=QString::fromLatin1(name);
@@ -63,7 +74,7 @@ class QmlTests : public QObject {
         return find(m_window->contentItem());
     }
     void openWindow(const QString &pluginDirectory = {}) {
-        m_controller = std::make_unique<AppController>(nullptr,pluginDirectory);
+        m_controller = std::make_unique<AppController>(nullptr,pluginDirectory,nullptr,m_storage);
         m_engine = std::make_unique<QQmlApplicationEngine>();
         connect(m_engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) { for (const auto &error : errors) m_errors.append(error.toString()); });
         m_engine->setInitialProperties({{"backend", QVariant::fromValue(m_controller.get())}});
@@ -84,11 +95,12 @@ private slots:
         QCoreApplication::setOrganizationName("ZTGUI-QML-Tests"); QCoreApplication::setApplicationName("QmlTests");
         QCoreApplication::setApplicationVersion(ZEROTIER_GUI_VERSION);
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_directory.path());
+        m_storage = vusiif::ztgui::storage::StorageContext::forTesting(m_directory.filePath("storage"));
         m_path = qgetenv("PATH"); m_programData = qgetenv("ProgramData");
         qputenv("PATH", QByteArray(ZTGUI_FAKE_PING_DIRECTORY) + QDir::listSeparator().toLatin1() + QCoreApplication::applicationDirPath().toLocal8Bit() + QDir::listSeparator().toLatin1() + m_path);
         qputenv("ProgramData", m_directory.path().toLocal8Bit());
         qputenv("ZT_TEST_DATA_DIRECTORY", (m_directory.path()+"/ZeroTier").toLocal8Bit());
-        QDir().mkpath("screenshots");
+        QDir().mkpath(".tmp/screenshots");
     }
     void init() { qputenv("ZT_TEST_MODE", "compact-lists"); m_errors.clear(); }
     void trayAndMinimizePauseUiPollingAndRefreshOnRestore() {
@@ -194,8 +206,8 @@ private slots:
         QTest::mouseClick(m_window,Qt::RightButton,{},selected->mapToScene(QPointF(20,18)).toPoint()); QTest::qWait(180);
         QVERIFY(!object("pluginLoad-media")->property("visible").toBool()); QVERIFY(!object("pluginDelete-media")->property("visible").toBool());
         click("pluginAbout-media"); QTRY_VERIFY(object("pluginAboutDialog") && object("pluginAboutDialog")->property("visible").toBool()); QTest::qWait(200);
-        QVERIFY(object("pluginServicesLabel")->property("text").toString().contains("media.audio"));
-        QVERIFY(m_window->grabWindow().save(dark?"screenshots/plugin-services-dark.png":"screenshots/plugin-services-light.png"));
+        QVERIFY(object("pluginServicesLabel")->property("text").toString().contains("media.session"));
+        QVERIFY(m_window->grabWindow().save(dark?".tmp/screenshots/plugin-services-dark.png":".tmp/screenshots/plugin-services-light.png"));
         QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginAboutDialog")->property("visible").toBool());
         m_controller->loadPlugin("MEDIA"); QTRY_VERIFY(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool());
         QVERIFY(object("pluginNoticeDialog")->property("message").toString().contains(QStringLiteral("同 ID")));
@@ -208,7 +220,7 @@ private slots:
         };
         unloadFromMenu(); QTRY_VERIFY(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool());
         QVERIFY(object("pluginNoticeDialog")->property("message").toString().contains("voice-chat"));
-        QTest::qWait(180); QVERIFY(m_window->grabWindow().save(dark?"screenshots/plugin-dependency-dark.png":"screenshots/plugin-dependency-light.png"));
+        QTest::qWait(180); QVERIFY(m_window->grabWindow().save(dark?".tmp/screenshots/plugin-dependency-dark.png":".tmp/screenshots/plugin-dependency-light.png"));
         QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
         QCOMPARE(m_controller->pluginRegistry()->plugins().size(),2);
         m_controller->unloadPlugin("voice-chat"); QTRY_VERIFY_WITH_TIMEOUT(m_controller->pluginRegistry()->plugins().isEmpty(),10000);
@@ -220,7 +232,7 @@ private slots:
 #if defined(Q_OS_WIN) && defined(ZTGUI_UI_MEDIA_PACKAGE)
         if(!qEnvironmentVariableIntValue("ZTGUI_TEST_MEDIA_MEMORY")) QSKIP("Set ZTGUI_TEST_MEDIA_MEMORY=1 for the repeated physical worker memory check");
         QTemporaryDir packages; openWindow(packages.path()); QTest::qWait(500);
-        QFile file("screenshots/media-unload-memory.csv"); QVERIFY(file.open(QIODevice::WriteOnly));
+        QFile file(".tmp/screenshots/media-unload-memory.csv"); QVERIFY(file.open(QIODevice::WriteOnly));
         QTextStream csv(&file); csv<<"round,privateBytes,workingSet,handles,threads\n";
         const auto measure=[&](int round) {
             PROCESS_MEMORY_COUNTERS_EX memory{}; memory.cb=sizeof(memory);
@@ -264,7 +276,7 @@ private slots:
     }
     void cleanup() {
         m_engine.reset(); m_window = nullptr; m_controller.reset();
-        QSettings().clear(); qunsetenv("ZT_TEST_MODE"); qunsetenv("ZT_TEST_COMMAND_LOG");
+        QFile::remove(m_storage.settingsFile()); qunsetenv("ZT_TEST_MODE"); qunsetenv("ZT_TEST_COMMAND_LOG");
         qunsetenv("ZT_TEST_QUERY_LOG");
         qunsetenv("ZT_TEST_PING_MODE"); qunsetenv("ZT_TEST_PING_DELAY"); qunsetenv("ZT_TEST_PING_LOG");
         qunsetenv("ZTGUI_PLUGIN_CREATE_STEPS");
@@ -285,11 +297,11 @@ private slots:
         openWindow();
         QTRY_COMPARE(m_controller->networks()->count(),2); QTRY_COMPARE(m_controller->peers()->count(),4);
         QTRY_COMPARE(m_controller->info()["address"].toString(),QString("0123456789"));
-        QVERIFY(m_window->grabWindow().save("screenshots/qml-light.png"));
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-light.png"));
         m_controller->setTheme("dark"); QTest::qWait(300);
-        QVERIFY(m_controller->dark()); QVERIFY(m_window->grabWindow().save("screenshots/qml-dark.png"));
+        QVERIFY(m_controller->dark()); QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-dark.png"));
         m_window->resize(760,520); QTest::qWait(100);
-        QVERIFY(m_window->grabWindow().save("screenshots/qml-small.png"));
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-small.png"));
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
     void applicationVersionLabelsMatchRootVersion() {
@@ -313,7 +325,7 @@ private slots:
                  "服务端 " + QStringLiteral(ZTGUI_SERVER_VERSION)
                      + "（API " + QStringLiteral(ZTGUI_SERVER_API_VERSION) + "）");
         QTest::qWait(180);
-        QVERIFY(m_window->grabWindow().save("screenshots/qml-application-version.png"));
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-application-version.png"));
         m_controller->setTheme("dark"); QTest::qWait(200);
         QCOMPARE(sidebarVersion->property("text").toString(), "v" + expectedVersion);
         QCOMPARE(aboutVersion->property("text").toString(), "v" + expectedVersion);
@@ -325,14 +337,14 @@ private slots:
         QVERIFY(object("serviceStatusDot"));
         click("settingsButton"); QTRY_VERIFY(object("settingsPage"));
         QTest::qWait(220); click("themeSelector"); QTRY_VERIFY(m_controller->dark());
-        QTest::qWait(250); QVERIFY(m_window->grabWindow().save("screenshots/qml-settings-dark.png"));
+        QTest::qWait(250); QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-settings-dark.png"));
         m_controller->navigate(ZeroTierMenuId,qobject_cast<QQuickItem *>(object("pluginContainer"))); QTest::qWait(180);
         const auto dir=QDir(vusiif::ztgui::zerotier::moonDirectory()); QVERIFY(QDir().mkpath(dir.path()));
         QFile file(dir.filePath("0000000123456789.moon")); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("moon"); file.close();
         click("moonsButton"); QTRY_VERIFY(m_controller->moonsActive());
         QTRY_VERIFY(m_controller->moons()->count()>0); QTest::qWait(250);
         auto *records=qobject_cast<QQuickItem *>(object("moonRecords")); QVERIFY(records); QVERIFY(records->width()>100);
-        QVERIFY(m_window->grabWindow().save("screenshots/qml-moons-dark.png"));
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-moons-dark.png"));
         QVERIFY(QFile::remove(file.fileName()));
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
@@ -358,11 +370,11 @@ private slots:
         m_controller->setTheme("dark"); m_window->resize(720,480); QTest::qWait(300);
         auto *popup = object("settingsPage"); QVERIFY(popup);
         QVERIFY(popup->property("y").toReal() + popup->property("height").toReal() <= m_window->height());
-        QVERIFY(m_window->grabWindow().save("screenshots/qml-gpu-settings-dark-small.png"));
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-gpu-settings-dark-small.png"));
         click("disableGpuAccelerationSwitch"); QTRY_VERIFY(m_controller->disableGpuAcceleration());
         QVERIFY(!object("pluginNoticeDialog") || !object("pluginNoticeDialog")->property("visible").toBool());
         m_controller->setTheme("light"); QTest::qWait(300);
-        QVERIFY(m_window->grabWindow().save("screenshots/qml-gpu-settings-light-small.png"));
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-gpu-settings-light-small.png"));
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
     void gpuAccelerationCommandLineOverrideIsTemporary() {
@@ -375,7 +387,7 @@ private slots:
         QVERIFY(toggle->property("checked").toBool()); QVERIFY(!toggle->property("enabled").toBool());
         click("disableGpuAccelerationSwitch");
         QVERIFY(m_controller->disableGpuAcceleration());
-        QVERIFY(!QSettings().contains("rendering/disableGpuAcceleration"));
+        QVERIFY(!hasSetting("rendering/disableGpuAcceleration"));
         QVERIFY(!object("gpuAccelerationHint"));
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
@@ -403,13 +415,14 @@ private slots:
     }
     void joinDialogUsesAsyncCommandAndReportsFailure() {
         openWindow(); click("joinNetworkButton");
-        QTRY_VERIFY(object("joinNetworkDialog")->property("visible").toBool());
+        auto *dialog=object("joinNetworkDialog"); QVERIFY2(dialog,qPrintable(m_errors.join('\n')));
+        QTRY_VERIFY(dialog->property("visible").toBool());
         auto *input=object("networkIdInput"); QVERIFY(input); input->setProperty("text","invalid");
         click("confirmJoinButton"); QVERIFY(m_controller->feedback().contains(QStringLiteral("16 位")));
         qputenv("ZT_TEST_MODE","join-error"); input->setProperty("text","0123456789abcdef");
         click("confirmJoinButton"); QTRY_VERIFY(!m_controller->busy()); QVERIFY(m_controller->feedback().contains("join failed"));
-        QVERIFY(object("joinNetworkDialog")->property("visible").toBool());
-        qputenv("ZT_TEST_MODE","compact-lists"); click("confirmJoinButton"); QTRY_VERIFY(!object("joinNetworkDialog")->property("visible").toBool());
+        QVERIFY(dialog->property("visible").toBool());
+        qputenv("ZT_TEST_MODE","compact-lists"); click("confirmJoinButton"); QTRY_VERIFY(!dialog->property("visible").toBool());
     }
     void pollingSurvivesFailuresAndRetainsRemarks() {
         openWindow(); QTRY_COMPARE(m_controller->networks()->count(),2);
@@ -441,15 +454,128 @@ private slots:
         QVERIFY(registry.registerPlugin({{"test-borrowed","Borrowed","1"},{menu}}).ok());
         QCOMPARE(registry.page("test-borrowed/overview",&engine,&parent).result.error,Error::PageCreationFailed); QVERIFY(borrowed->parent()==&parent);
     }
+    void storageSectionShowsPathsAndCleansOrphanData() {
+        openWindow();
+        const auto orphan = m_storage.pluginDataDirectory("orphan-plugin");
+        QVERIFY(QDir().mkpath(orphan));
+        QFile payload(QDir(orphan).filePath("config.json"));
+        QVERIFY(payload.open(QIODevice::WriteOnly));
+        payload.write("{\"value\":1}");
+        payload.close();
+        m_controller->refreshStorageUsage();
+        // Directory walks and orphan classification run on a worker thread.
+        QTRY_VERIFY_WITH_TIMEOUT(!m_controller->storageScanBusy(), 10000);
+        QCOMPARE(m_controller->storageUsage().value("mode").toString(), QStringLiteral("shared"));
+        QVERIFY(m_controller->storageUsage().value("pluginDataBytes").toDouble() > 0);
+        QVERIFY(m_controller->storageUsage().contains("previewText"));
+        QVERIFY(m_controller->storageUsage().contains("orphansText"));
+        click("settingsButton");
+        QTRY_VERIFY(object("storageSection"));
+        QVERIFY(object("storagePathLabel")->property("text").toString().contains(m_storage.activeRoot()));
+        QVERIFY(object("cleanupLogsButton"));
+        QVERIFY(object("cleanupCacheButton"));
+        QVERIFY(object("cleanupOrphansButton"));
+        QVERIFY(object("storagePreviewLabel"));
+        QVERIFY(object("storageOrphansLabel"));
+        const auto orphans = m_controller->storageOrphans();
+        QVERIFY(std::any_of(orphans.cbegin(), orphans.cend(), [](const QVariant &value) {
+            return value.toMap().value("id").toString() == "orphan-plugin"
+                && value.toMap().value("deletable").toBool();
+        }));
+        QSignalSpy confirmation(&*m_controller, &AppController::confirmationRequested);
+        m_controller->cleanupStorage("orphans");
+        QTRY_COMPARE(confirmation.size(), 1);
+        m_controller->confirm(true);
+        QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(orphan), 10000);
+        QVERIFY(QFileInfo::exists(m_storage.metadataDirectory() + "/plugins/orphan-plugin.json"));
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void storageScanIsAsynchronousAndPreviewsPendingCleanup() {
+        openWindow();
+        QTRY_VERIFY_WITH_TIMEOUT(!m_controller->storageScanBusy(), 10000);
+        const auto logs = m_storage.logsDirectory();
+        QVERIFY(QDir().mkpath(logs));
+        const auto oldLog = QDir(logs).filePath("250101-1.log");
+        {
+            QFile file(oldLog);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("old log");
+            file.close();
+            QVERIFY(file.open(QIODevice::ReadWrite));
+            QVERIFY(file.setFileTime(QDateTime::currentDateTime().addDays(-31),
+                                     QFileDevice::FileModificationTime));
+        }
+        const auto cache = QDir(m_storage.pluginDataDirectory("example")).filePath("cache");
+        QVERIFY(QDir().mkpath(cache));
+        const auto oldCache = QDir(cache).filePath("old.bin");
+        {
+            QFile file(oldCache);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("old cache");
+            file.close();
+            QVERIFY(file.open(QIODevice::ReadWrite));
+            QVERIFY(file.setFileTime(QDateTime::currentDateTime().addDays(-8),
+                                     QFileDevice::FileModificationTime));
+        }
+        const auto bulk = QDir(m_storage.pluginDataDirectory("bulk")).filePath("nested");
+        QVERIFY(QDir().mkpath(bulk));
+        for (int i = 0; i < 400; ++i) {
+            QFile file(QDir(bulk).filePath(QStringLiteral("item-%1.bin").arg(i)));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(QByteArray(128, 'x'));
+        }
+        int ticks = 0;
+        QTimer heartbeat;
+        heartbeat.setInterval(1);
+        connect(&heartbeat, &QTimer::timeout, this, [&ticks] { ++ticks; });
+        heartbeat.start();
+        QSignalSpy scanned(&*m_controller, &AppController::storageScanFinished);
+        QElapsedTimer elapsed;
+        elapsed.start();
+        m_controller->refreshStorageUsage();
+        // The call only starts worker work; it must not walk the tree.
+        QVERIFY2(elapsed.elapsed() < 100, qPrintable(QString::number(elapsed.elapsed())));
+        QVERIFY(m_controller->storageScanBusy());
+        QTRY_VERIFY_WITH_TIMEOUT(!m_controller->storageScanBusy(), 10000);
+        QVERIFY(scanned.size() >= 1);
+        QVERIFY(ticks > 0);
+        const auto usage = m_controller->storageUsage();
+        QCOMPARE(usage.value("previewLogFiles").toInt(), 1);
+        QVERIFY(usage.value("previewLogBytes").toDouble() > 0);
+        QCOMPARE(usage.value("previewCacheFiles").toInt(), 1);
+        QVERIFY(usage.value("previewCacheBytes").toDouble() > 0);
+        QVERIFY(usage.value("previewText").toString().contains(QStringLiteral("待清理")));
+        QVERIFY(usage.value("orphansText").toString().contains(QStringLiteral("bulk")));
+
+        QSignalSpy confirmation(&*m_controller, &AppController::confirmationRequested);
+        m_controller->cleanupStorage("logs");
+        QTRY_COMPARE(confirmation.size(), 1);
+        QVERIFY(confirmation.last().at(1).toString().contains(QStringLiteral("历史日志")));
+        m_controller->confirm(true);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_controller->storageBusy(), 10000);
+        QVERIFY(!QFileInfo::exists(oldLog));
+        // A scan is scheduled after cleanup; the next cleanup request waits for
+        // it and then shows its own confirmation.
+        m_controller->cleanupStorage("cache");
+        QTRY_COMPARE(confirmation.size(), 2);
+        m_controller->confirm(true);
+        QTRY_VERIFY_WITH_TIMEOUT(!m_controller->storageBusy(), 10000);
+        QVERIFY(!QFileInfo::exists(oldCache));
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+
     void settingsIsMenuAndTooltipWaitsBeforeShowing() {
         openWindow(); auto *container=qobject_cast<QQuickItem *>(object("pluginContainer")); QVERIFY(container);
         QVERIFY(m_controller->navigate(SettingsMenuId,container)); QCOMPARE(m_controller->activeMenu(),QString(SettingsMenuId));
         QVERIFY(object("settingsPage")->property("visible").toBool()); QVERIFY(!object("zeroTierScroll")->property("visible").toBool());
         for(const auto &value:m_controller->menus()) QVERIFY(value.toMap()["id"].toString()!=QString(SettingsMenuId));
         auto *gear=qobject_cast<QQuickItem *>(object("settingsButton")); QVERIFY(gear);
+        // A previous test may leave the pointer on the same hit item; move away
+        // first so the hover-enter event actually starts the tooltip delay.
+        QTest::mouseMove(m_window,QPoint(2,2)); QTest::qWait(120);
         QTest::mouseMove(m_window,gear->mapToScene(QPointF(gear->width()/2,gear->height()/2)).toPoint());
         auto *tip=object("settingsTooltip"); QVERIFY(tip); QTest::qWait(1000); QVERIFY(!tip->property("visible").toBool());
-        QTRY_VERIFY_WITH_TIMEOUT(tip->property("visible").toBool(),1500);
+        QTRY_VERIFY_WITH_TIMEOUT(tip->property("visible").toBool(),4000);
         QTest::mouseMove(m_window,QPoint(m_window->width()-20,20)); QTRY_VERIFY(!tip->property("visible").toBool());
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
@@ -496,7 +622,7 @@ private slots:
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
     void confirmationCancelsWithoutMutation() {
-        DeferredOperations operations; AppController controller(nullptr,{},&operations);
+        DeferredOperations operations; AppController controller(nullptr,{},&operations,m_storage);
         const auto dir=QDir(vusiif::ztgui::zerotier::moonDirectory()); QVERIFY(QDir().mkpath(dir.path()));
         QFile file(dir.filePath("0000000123456789.moon")); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("moon"); file.close();
         controller.refresh(); QTRY_VERIFY(controller.moons()->count()>0); QSignalSpy confirmation(&controller,&AppController::confirmationRequested);
@@ -505,7 +631,7 @@ private slots:
         operations.complete(false); QVERIFY(!controller.busy()); QVERIFY(QFileInfo::exists(file.fileName())); QVERIFY(QFile::remove(file.fileName()));
     }
     void closingWaitsForOperationsAndKeepsEventLoopAlive() {
-        DeferredOperations operations; AppController controller(nullptr,{},&operations);
+        DeferredOperations operations; AppController controller(nullptr,{},&operations,m_storage);
         QFile source(m_directory.filePath("test.moon")); QVERIFY(source.open(QIODevice::WriteOnly)); source.write("moon"); source.close();
         controller.importMoons({QUrl::fromLocalFile(source.fileName())}); QVERIFY(controller.busy());
         QSignalSpy exited(&controller,&AppController::exitFinished);
@@ -516,7 +642,7 @@ private slots:
         qputenv("ZT_TEST_MODE","empty"); openWindow(); QTRY_COMPARE(m_controller->networks()->count(),0);
         click("beginnerGuideButton"); QTRY_VERIFY(object("guideOverlay")->property("visible").toBool());
         m_window->resize(760,520); m_controller->setTheme("dark"); QTest::qWait(80);
-        QVERIFY(m_window->grabWindow().save("screenshots/qml-guide.png"));
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-guide.png"));
         QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("guideOverlay")->property("visible").toBool());
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
@@ -552,7 +678,7 @@ private slots:
         QTRY_COMPARE(latencyAt(0), QString("12 ms"));
         auto previous = m_controller->networks()->record("0123456789abcdef")["members"].toList();
         auto successful = previous[0].toMap(); successful["latency"] = "37 ms"; previous[0] = successful;
-        auto failed = previous[1].toMap(); failed["latency"] = QStringLiteral("不可达"); previous[1] = failed;
+        auto failed = previous[1].toMap(); failed["latency"] = QStringLiteral("-"); previous[1] = failed;
         m_controller->networks()->update("0123456789abcdef", {{"members", previous}});
         QTest::qWait(1500); QCOMPARE(requests, 1); // No old two-second polling cycle.
         QTest::qWait(250); m_controller->setTheme("dark"); QTest::qWait(350);
@@ -560,7 +686,7 @@ private slots:
         QTest::mouseClick(m_window,Qt::RightButton,{},memberLine->mapToScene(QPointF(100,20)).toPoint());
         QTRY_VERIFY(object("networkMemberMenu")); QTest::qWait(200);
         QVERIFY(object("networkMemberMenu")->property("width").toReal()<200);
-        QVERIFY(m_window->grabWindow().save("screenshots/qml-member-menu-dark.png"));
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-member-menu-dark.png"));
         QTest::keyClick(m_window,Qt::Key_Escape); QTest::qWait(150);
         QTRY_VERIFY(object("networkMemberRow")); auto *member=object("networkMemberRow"); member->setProperty("editing",true);
         auto *editor=object("networkMemberRemarkEditor"); QVERIFY(editor); QTRY_VERIFY(editor->property("visible").toBool()); editor->setProperty("text",QStringLiteral("成员备注"));
@@ -568,12 +694,12 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(requests>=2,6000);
         QTRY_COMPARE(m_controller->networks()->record("0123456789abcdef")["members"].toList().first().toMap()["ip"].toString(), QString("12.34.56.3"));
         QCOMPARE(latencyAt(0), QString("37 ms"));
-        QCOMPARE(latencyAt(1), QStringLiteral("不可达"));
+        QCOMPARE(latencyAt(1), QStringLiteral("-"));
         QCOMPARE(object("networkMemberRemarkEditor"),identity.data()); QCOMPARE(editor->property("text").toString(),QStringLiteral("成员备注"));
         QTRY_COMPARE(latencyAt(0), QString("12 ms"));
         QTRY_COMPARE(latencyAt(1), QString("12 ms"));
         QTest::keyClick(m_window,Qt::Key_Return);
-        QTRY_COMPARE(QSettings().value("names/peers/0123456789").toString(),QStringLiteral("成员备注"));
+        QTRY_COMPARE(setting("names/peers/0123456789").toString(),QStringLiteral("成员备注"));
         qputenv("ZT_TEST_PING_MODE", "hang");
         const auto pingProcesses = [this] {
             QList<QPointer<QProcess>> result;
@@ -617,6 +743,119 @@ private slots:
         m_engine.reset(); m_window=nullptr; m_controller.reset(); openWindow();
         const auto restored=object("networks")->property("columnWidths").value<QJSValue>().toVariant().toList(); QCOMPARE(restored.first().toInt(),260);
     }
+    void failedHostSettingsMigrationBlocksQmlPersistence()
+    {
+#ifdef Q_OS_WIN
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const auto shared = directory.filePath("application");
+        const auto personalBase = directory.filePath("user-data");
+        QVERIFY(QDir().mkpath(shared));
+        const auto source = QDir(shared).filePath("settings.ini");
+        {
+            QSettings original(source, QSettings::IniFormat);
+            original.setValue("appearance/theme", QStringLiteral("dark"));
+            original.setValue("names/networks/test", QStringLiteral("Original Name"));
+            original.sync();
+        }
+        const auto routeDirectory = QDir(personalBase).filePath(
+            QStringLiteral("installations/") + vusiif::ztgui::storage::StorageContext::installKey(shared));
+        QVERIFY(QDir().mkpath(routeDirectory));
+        {
+            QFile route(QDir(routeDirectory).filePath("route.json"));
+            QVERIFY(route.open(QIODevice::WriteOnly));
+            route.write(QJsonDocument(QJsonObject{{"format", 1}, {"mode", "personal"}}).toJson());
+        }
+        // Blocking the source read makes only the host INI item fail, just like
+        // an unreadable shared settings file at startup.
+        const HANDLE sourceHandle = CreateFileW(reinterpret_cast<LPCWSTR>(source.utf16()),
+            GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        QVERIFY(sourceHandle != INVALID_HANDLE_VALUE);
+        auto storage = vusiif::ztgui::storage::StorageContext::resolveForTesting(shared, personalBase);
+        QCOMPARE(storage.mode(), vusiif::ztgui::storage::StorageContext::Mode::Personal);
+        QString storageError;
+        QVERIFY2(storage.prepare(storageError), qPrintable(storageError));
+        QVERIFY(storage.settingsMigrationPending());
+        const auto target = storage.settingsFile();
+        QVERIFY(!QFileInfo::exists(target));
+        {
+            const auto pluginDirectory = directory.filePath("plugins");
+            auto controller = std::make_unique<AppController>(nullptr, pluginDirectory, nullptr, storage);
+            QVERIFY(!controller->settingsWritable());
+            auto engine = std::make_unique<QQmlApplicationEngine>();
+            QStringList errors;
+            connect(engine.get(), &QQmlEngine::warnings, this, [&errors](const QList<QQmlError> &list) {
+                for (const auto &error : list) errors.append(error.toString());
+            });
+            engine->setInitialProperties({{"backend", QVariant::fromValue(controller.get())}});
+            engine->load(QUrl("qrc:/qt/qml/ZTGUI/qml/Main.qml"));
+            QVERIFY2(!engine->rootObjects().isEmpty(), qPrintable(errors.join('\n')));
+            auto *window = qobject_cast<QQuickWindow *>(engine->rootObjects().first());
+            QVERIFY(window);
+            controller->setWindow(window);
+            QTest::qWait(100);
+            window->resize(1200, 820);
+            // The record tables persist their column widths through the same
+            // host store, so that write path is exercised under the gate too.
+            m_window = window;
+            auto *records = object("networks");
+            m_window = nullptr;
+            QVERIFY(records);
+            QVERIFY(QMetaObject::invokeMethod(records, "resizeColumn", Q_ARG(QVariant, 0), Q_ARG(QVariant, 80)));
+            QTest::qWait(100);
+            // Destroying the window saves its size through the backend; a QML
+            // Settings element would have created the INI with defaults on load.
+            engine.reset();
+            QTest::qWait(100);
+            controller.reset();
+            QVERIFY2(errors.isEmpty(), qPrintable(errors.join('\n')));
+        }
+        // Neither window creation nor column or geometry persistence created
+        // the target of the still pending host settings copy.
+        QVERIFY(!QFileInfo::exists(target));
+        CloseHandle(sourceHandle);
+        // The restart restores the shared settings and QML persistence resumes.
+        auto retry = vusiif::ztgui::storage::StorageContext::resolveForTesting(shared, personalBase);
+        QVERIFY2(retry.prepare(storageError), qPrintable(storageError));
+        QVERIFY(retry.migrationComplete());
+        QVERIFY(!retry.settingsMigrationPending());
+        {
+            vusiif::ztgui::storage::SettingsStore recovered(retry.settingsFile());
+            QCOMPARE(recovered.value("appearance/theme").toString(), QStringLiteral("dark"));
+            QCOMPARE(recovered.value("names/networks/test").toString(), QStringLiteral("Original Name"));
+        }
+        {
+            const auto pluginDirectory = directory.filePath("plugins");
+            auto controller = std::make_unique<AppController>(nullptr, pluginDirectory, nullptr, retry);
+            QVERIFY(controller->settingsWritable());
+            auto engine = std::make_unique<QQmlApplicationEngine>();
+            QStringList errors;
+            connect(engine.get(), &QQmlEngine::warnings, this, [&errors](const QList<QQmlError> &list) {
+                for (const auto &error : list) errors.append(error.toString());
+            });
+            engine->setInitialProperties({{"backend", QVariant::fromValue(controller.get())}});
+            engine->load(QUrl("qrc:/qt/qml/ZTGUI/qml/Main.qml"));
+            QVERIFY2(!engine->rootObjects().isEmpty(), qPrintable(errors.join('\n')));
+            auto *window = qobject_cast<QQuickWindow *>(engine->rootObjects().first());
+            QVERIFY(window);
+            controller->setWindow(window);
+            QTest::qWait(100);
+            window->resize(1180, 800);
+            QTest::qWait(100);
+            engine.reset();
+            QTest::qWait(100);
+            controller.reset();
+            QVERIFY2(errors.isEmpty(), qPrintable(errors.join('\n')));
+        }
+        vusiif::ztgui::storage::SettingsStore saved(retry.settingsFile());
+        // The recovered values survive the new QML persistence writes.
+        QCOMPARE(saved.value("appearance/theme").toString(), QStringLiteral("dark"));
+        QVERIFY(saved.value("window/qml/savedWidth").toInt() >= 720);
+#else
+        QSKIP("exclusive read handles keep the migration source unreadable on Windows only");
+#endif
+    }
+
     void windowsCaptionTrayAndRestore() {
 #ifdef Q_OS_WIN
         if (QGuiApplication::platformName()=="offscreen") QSKIP("Native Windows tray requires the windows platform");
@@ -634,7 +873,7 @@ private slots:
 #endif
     }
     void configurationImportOnlyJoinsAfterSuccessfulCopy() {
-        DeferredOperations operations; AppController controller(nullptr,{},&operations);
+        DeferredOperations operations; AppController controller(nullptr,{},&operations,m_storage);
         const auto bytes=vusiif::ztgui::zerotier::bundle::encode({"0123456789abcdef","0000000123456789.moon",QByteArray("signed-moon-bytes")});
         QVERIFY(!bytes.isEmpty()); QFile source(m_directory.filePath("network.ztbundle")); QVERIFY(source.open(QIODevice::WriteOnly)); source.write(bytes); source.close();
         const auto trace=m_directory.filePath("joins.txt"); qputenv("ZT_TEST_COMMAND_LOG",trace.toUtf8());
@@ -657,10 +896,10 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(records,"edit",Q_ARG(QVariant,id),Q_ARG(QVariant,"Pending")));
         QTRY_VERIFY(object("remarkEditor")); object("remarkEditor")->setProperty("text","Canceled");
         QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("remarkEditor"));
-        QVERIFY(!QSettings().contains("names/networks/"+id));
+        QVERIFY(!hasSetting("names/networks/"+id));
         QVERIFY(QMetaObject::invokeMethod(records,"edit",Q_ARG(QVariant,id),Q_ARG(QVariant,"Saved")));
         QTRY_VERIFY(object("remarkEditor")); QTest::keyClick(m_window,Qt::Key_Return);
-        QTRY_COMPARE(QSettings().value("names/networks/"+id).toString(),QString("Saved"));
+        QTRY_COMPARE(setting("names/networks/"+id).toString(),QString("Saved"));
         click("joinNetworkButton"); QTRY_VERIFY(object("joinNetworkDialog")); QTest::keyClick(m_window,Qt::Key_Escape);
         click("joinNetworkButton"); QTRY_VERIFY(object("joinNetworkDialog")->property("visible").toBool());
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));

@@ -22,17 +22,46 @@ public:
         Q_UNUSED(cancellation);
         auto *access=dynamic_cast<util::ServiceAccess *>(&host);
         if(!access) throw std::runtime_error("Host does not provide plugin services");
+        auto *storage=dynamic_cast<util::PluginStorage *>(&host.files());
+        if(!storage) throw std::runtime_error("Host does not provide the plugin storage transaction extension; update ZTGUI and rebuild this plugin");
         QString error; auto lease=access->pluginServices().acquire("media",media::SessionService,media::SessionApi,&error);
         if(!lease) throw std::runtime_error(error.toStdString());
+        QString clipError;
+        auto clipLease=access->pluginServices().acquire("media",media::ClipService,media::ClipApi,&clipError);
+        if(!clipLease) throw std::runtime_error(clipError.toStdString());
         devices->audio=std::make_shared<media::MediaSession>(std::move(lease));
+        devices->clips=std::make_shared<media::AudioClipClient>(std::move(clipLease));
         devices->zeroTier=&host.zeroTier();
         devices->files=&host.files();
+        devices->storage=storage;
+        const auto loaded=loadVoiceConfig(*storage);
+        devices->config=loaded.config;
+        if(!loaded.error.isEmpty()) devices->config.error=loaded.error;
+        else if(!loaded.warnings.isEmpty()) devices->config.error=loaded.warnings.join(QStringLiteral("\n"));
+        QFile join(QStringLiteral(":/ztgui/voice-chat/sounds/join.wav"));
+        QFile leave(QStringLiteral(":/ztgui/voice-chat/sounds/leave.wav"));
+        if(!join.open(QIODevice::ReadOnly) || !leave.open(QIODevice::ReadOnly))
+            throw std::runtime_error("Bundled voice-chat notification sounds are missing");
+        devices->sounds=std::make_shared<VoiceSoundPlayer>(devices->clips, join.readAll(), leave.readAll());
+        devices->sounds->setOutputDevice(devices->config.output);
+        devices->sounds->setVolume(devices->config.volume);
+        devices->sounds->setDeafened(devices->config.deafened);
         return {};
     }
     void requestStop(QObject *context,std::function<void(api::CreateResult)> completed) override {
         for(const auto &controller:controllers) if(controller) controller->stopForUnload();
-        if(devices->audio) devices->audio->close(context,[completed](media::Result<bool> r) { completed({r.ok(),r.error.message}); });
-        else completed({});
+        if(devices->sounds) devices->sounds->stop();
+        auto state=std::make_shared<QPair<int,QString>>(2,QString());
+        const auto finish=[state,completed](const QString &error) {
+            if(!error.isEmpty() && state->second.isEmpty()) state->second=error;
+            if(--state->first==0) completed({state->second.isEmpty(),state->second});
+        };
+        if(devices->audio)
+            devices->audio->close(context,[finish](media::Result<bool> r) { finish(r.ok()?QString():r.error.message); });
+        else finish({});
+        if(devices->clips)
+            devices->clips->close(context,[finish](media::Result<bool> r) { finish(r.ok()?QString():r.error.message); });
+        else finish({});
     }
     vusiif::ztgui::api::PluginDefinition definition() override {
         vusiif::ztgui::api::PluginDefinition result;

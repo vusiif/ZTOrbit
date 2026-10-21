@@ -2,6 +2,7 @@
 #include <ztgui/PluginInterface.h>
 #include <ztgui/PluginLifecycle.h>
 #include <ztgui/PluginFiles.h>
+#include <ztgui/PluginStorage.h>
 #include <ztgui/ZeroTierService.h>
 #include <ztprotocol/NetworkAddress.h>
 #include <type_traits>
@@ -15,7 +16,25 @@ static_assert(!vusiif::ztgui::api::isApiCompatible(0, 4));
 static_assert(!vusiif::ztgui::api::isApiCompatible(0, 2));
 static_assert(std::is_abstract_v<vusiif::ztgui::util::HostServices>);
 static_assert(std::is_abstract_v<vusiif::ztgui::util::PluginFiles>);
+static_assert(std::is_abstract_v<vusiif::ztgui::util::PluginStorage>);
 static_assert(std::is_abstract_v<vusiif::ztgui::util::ZeroTierService>);
+
+// The installed SDK exposes the optional cross-process transaction extension
+// only through a dynamic_cast on the borrowed file service.
+void consumeStorage(vusiif::ztgui::util::HostServices &services)
+{
+    auto *storage = dynamic_cast<vusiif::ztgui::util::PluginStorage *>(&services.files());
+    if (!storage) return;
+    const auto transaction = storage->updateFile("state.txt",
+        [](const vusiif::ztgui::util::PluginFileSnapshot &snapshot) {
+            if (!snapshot.exists) return vusiif::ztgui::util::PluginFileUpdate::keep();
+            return vusiif::ztgui::util::PluginFileUpdate::replace(snapshot.data);
+        });
+    if (transaction.ok && transaction.changed) {
+        const auto allowed = storage->legacyImportAllowed();
+        if (allowed.ok() && allowed.allowed) (void)storage->completeLegacyImport();
+    }
+}
 
 // These methods must compile using only installed public headers.
 class ConsumerLifecycle : public vusiif::ztgui::api::PluginLifecycleInterface {

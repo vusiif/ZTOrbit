@@ -7,7 +7,8 @@ int main(int argc, char **argv) {
     qputenv("QT_MEDIA_BACKEND", "ffmpeg");
     QGuiApplication app(argc, argv);
     protocol::service::Worker worker(
-        QJsonArray{QJsonObject{{"service", media::SessionService}, {"api", media::SessionApi}}});
+        QJsonArray{QJsonObject{{"service", media::SessionService}, {"api", media::SessionApi}},
+                   QJsonObject{{"service", media::ClipService}, {"api", media::ClipApi}}});
     media::engine::ExtensionRegistry extensions;
     auto root = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../..");
     auto error = extensions.load(root);
@@ -21,10 +22,10 @@ int main(int argc, char **argv) {
     deviceThread.start();
     media::engine::DeviceManager *devices = nullptr;
     std::unique_ptr<media::engine::SessionEngine> engine;
-    worker.onCall = [&](const QString &lease, const QString &, const QString &method, const QJsonObject &data,
-                        const QByteArray &, protocol::service::Worker::Reply reply) {
+    worker.onCall = [&](const QString &lease, const QString &service, const QString &method, const QJsonObject &data,
+                        const QByteArray &payload, protocol::service::Worker::Reply reply) {
         if (engine)
-            engine->call(lease, method, data, std::move(reply));
+            engine->call(lease, service, method, data, payload, std::move(reply));
         else
             reply({}, {}, "Media engine not ready");
     };

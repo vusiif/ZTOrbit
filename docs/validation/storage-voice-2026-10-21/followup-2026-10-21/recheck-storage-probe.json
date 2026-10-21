@@ -1,0 +1,25 @@
+{
+    "hostSettingsStillWritableDuringFailedMigration": {
+        "error": "",
+        "finalTheme": "system",
+        "firstMigrationComplete": false,
+        "normalSettingsWriteSucceeded": true,
+        "originalName": "Original Name",
+        "originalNameRecovered": false,
+        "originalTheme": "dark",
+        "prepared": true,
+        "retryError": "",
+        "retryMigrationComplete": true,
+        "retryPrepared": true,
+        "writeError": ""
+    },
+    "sameNameWithCorruptOwnership": {
+        "firstIdClaimedLegacy": true,
+        "legacyStillExists": false,
+        "otherOwnershipPreserved": true,
+        "prepareError": "",
+        "registrationWarnings": [
+            "插件 second-id 的显示名归属无法登记：unterminated object"
+        ]
+    }
+}

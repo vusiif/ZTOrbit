@@ -1,0 +1,36 @@
+{
+  "applicationVersion": "0.2.1",
+  "apiVersion": "0.2",
+  "voiceManifest": {
+    "formatVersion": 1,
+    "host": "server",
+    "id": "voice-chat",
+    "name": "语音聊天",
+    "version": "0.1.0",
+    "apiVersion": "0.2",
+    "mainClass": "vusiif.ztgui.voicechat.VoiceChatPlugin"
+  },
+  "sdk": {
+    "apiVersion": "0.2",
+    "applicationVersion": "0.2.1",
+    "jdk": "25",
+    "inputs": "a703c8326762881d44ed53b6305cf5e81a2ab2f055761b315c85cf3d859d6733"
+  },
+  "sha256": {
+    "build/dist/linux-x64.tar.gz": "7298eb8c517ac2d88a6c1b1b8b6d5d3796d435e341c85e08de1d4fb7baf5a8d4",
+    "build/dist/linux-x64/zt-server.jar": "c42f30e70106b5fd9d24f9e0cbbfa2cb00dd8a88cd4bb0ffc3b267018124b1c0",
+    "build/dist/ZTServer-api-v0.2.zip": "8e5acf3fe1b1cee0be96ada418e80fc0618ef515cea0619693b829c546dd6c7a",
+    "build/dist/ZTServer-api-v0.2/vusiif/ztgui/ztserver-api/0.2/ztserver-api-0.2.jar": "d43cb919b11c59b880eb38b7f98c5a1a968f932a073724505267cf098fc67368",
+    "build/dist/server-plugins/ztserver_voice_chat-v0.1.0.jar": "6f3a22373a7c7567d34b7afcc4581ecd08802d785b422f34e6e662b827d488ab"
+  },
+  "verified": [
+    "host manifest and resources",
+    "API resource",
+    "voice plugin manifest and class",
+    "tar permissions and content",
+    "SDK ZIP CRC and metadata",
+    "tar/ZIP JAR identity"
+  ]
+}
+依赖检查通过：Java 25，/mnt/d/User/Code/Github/Utils/zerotier-gui/build/dist/linux-x64/zt-server.jar
+0.2.1

@@ -1,9 +1,9 @@
 #include "PluginImport.h"
+#include "plugins/PackageChangeLock.h"
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
 #include <QSaveFile>
-#include <QLockFile>
 namespace vusiif::ztgui::plugins {
 QString importPlugin(const QString &source, const QString &directory) {
     const QFileInfo input(source), targetDirectory(directory);
@@ -13,8 +13,9 @@ QString importPlugin(const QString &source, const QString &directory) {
     if (targetDirectory.isSymLink() || targetDirectory.isJunction() || (targetDirectory.exists() && !targetDirectory.isDir()))
         return QStringLiteral("插件目录必须是普通目录。");
     if (!QDir().mkpath(directory)) return QStringLiteral("无法创建插件目录。");
-    QLockFile lock(QDir(directory).filePath(".import.lock"));
-    if (!lock.tryLock()) return QStringLiteral("另一个导入操作正在进行。");
+    PackageChangeLock lock(directory);
+    QString lockError;
+    if (!lock.acquire(lockError)) return lockError;
     const auto destination = QDir(directory).filePath(input.fileName());
     const QFileInfo existing(destination);
     if (existing.exists() || existing.isSymLink()) return QStringLiteral("同名插件已存在，请先卸载后移除旧文件。");

@@ -4,7 +4,7 @@ Linux 无界面 ZeroTier 只读查询与插件转发服务。宿主负责 TCP/UD
 
 - 运行时：Java 25（不内置 JRE），Netty 4.2.x NIO。
 - 构建：Maven 3.9+，`maven.compiler.release=25`。
-- 版本：服务端程序与 API 由客户端侧维护的根 `SERVER_VERSION` 指定；程序 `0.2.1-beta`，插件 API `0.2-beta`。客户端 `VERSION` 不再决定服务端版本。
+- 版本：服务端程序与 API 由客户端侧维护的根 `SERVER_VERSION` 指定；程序 `0.2.1`，插件 API `0.2`。客户端 `VERSION` 不再决定服务端版本。
 - 旧 C++ 实现归档在 [`../server-old/`](../server-old/README.md)。
 
 ## 目录
@@ -31,7 +31,7 @@ mvn -f src/server/pom.xml -Drevision="$revision" -DapiVersion="$api_version" cle
 Linux 发行打包：
 
 ```bash
-bash scripts/build-linux.sh                        # build/dist/linux-x64.tar.gz + build/dist/ZTServer-api-v0.2-beta.zip
+bash scripts/build-linux.sh                        # build/dist/linux-x64.tar.gz + build/dist/ZTServer-api-v0.2.zip
 bash scripts/build-linux.sh --build-voice-plugin   # 另生成 build/dist/server-plugins/ztserver_voice_chat-v0.1.0.jar
 ```
 

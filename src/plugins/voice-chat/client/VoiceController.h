@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QPointer>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <memory>
 #include <functional>
 namespace vusiif::ztgui::voice_chat {
@@ -88,7 +89,7 @@ private:
     QJsonObject m_remarks;
     bool m_remarksWritable=true;
     void updateMemberNames();
-    void save();
+    bool persistField(const QString &key, const QJsonValue &value);
     void configureAudio();
     void refreshDevices();
     void requestDeviceRefresh();

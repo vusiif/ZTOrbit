@@ -1,0 +1,85 @@
+********* Start testing of QmlTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : QmlTests::initTestCase()
+QWARN  : QmlTests::trayAndMinimizePauseUiPollingAndRefreshOnRestore() QSystemTrayIcon::setVisible: No Icon set
+QWARN  : QmlTests::trayAndMinimizePauseUiPollingAndRefreshOnRestore() This plugin does not support raise()
+QWARN  : QmlTests::trayAndMinimizePauseUiPollingAndRefreshOnRestore() This plugin does not support raise()
+PASS   : QmlTests::trayAndMinimizePauseUiPollingAndRefreshOnRestore()
+QWARN  : QmlTests::hiddenWindowCancelsMemberRequestsAndPings() QSystemTrayIcon::setVisible: No Icon set
+QWARN  : QmlTests::hiddenWindowCancelsMemberRequestsAndPings() This plugin does not support raise()
+PASS   : QmlTests::hiddenWindowCancelsMemberRequestsAndPings()
+QWARN  : QmlTests::pluginSelectionAndDeleteConfirmation() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::pluginSelectionAndDeleteConfirmation()
+QWARN  : QmlTests::missingDependencyShowsNoticeWithoutLoading() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::missingDependencyShowsNoticeWithoutLoading()
+QWARN  : QmlTests::serviceDependenciesBlockUnload(light) QSystemTrayIcon::setVisible: No Icon set
+QINFO  : QmlTests::serviceDependenciesBlockUnload(light) [worker] Owned process started; pid 29908
+QINFO  : QmlTests::serviceDependenciesBlockUnload(light) [worker] IPC authenticated; waiting for service preparation; pid 29908
+QWARN  : QmlTests::serviceDependenciesBlockUnload(light) [worker] No QtMultimedia backends found. Only QMediaDevices, QAudioDevice, QSoundEffect, QAudioSink, and QAudioSource are available.?
+
+QINFO  : QmlTests::serviceDependenciesBlockUnload(light) [worker] Service preparation completed; pid 29908
+PASS   : QmlTests::serviceDependenciesBlockUnload(light)
+QWARN  : QmlTests::serviceDependenciesBlockUnload(dark) QSystemTrayIcon::setVisible: No Icon set
+QINFO  : QmlTests::serviceDependenciesBlockUnload(dark) [worker] Owned process started; pid 36928
+QINFO  : QmlTests::serviceDependenciesBlockUnload(dark) [worker] IPC authenticated; waiting for service preparation; pid 36928
+QWARN  : QmlTests::serviceDependenciesBlockUnload(dark) [worker] No QtMultimedia backends found. Only QMediaDevices, QAudioDevice, QSoundEffect, QAudioSink, and QAudioSource are available.?
+
+QINFO  : QmlTests::serviceDependenciesBlockUnload(dark) [worker] Service preparation completed; pid 36928
+PASS   : QmlTests::serviceDependenciesBlockUnload(dark)
+SKIP   : QmlTests::mediaOnlyUnloadMemory() Set ZTGUI_TEST_MEDIA_MEMORY=1 for the repeated physical worker memory check
+D:\User\Code\Github\Utils\zerotier-gui\src\tests\QmlTests.cpp(233) : failure location
+PASS   : QmlTests::recordUpdatesPreserveRowsAndExpansion()
+QWARN  : QmlTests::qmlWindowLoadsBothThemesAndScales() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::qmlWindowLoadsBothThemesAndScales()
+QWARN  : QmlTests::applicationVersionLabelsMatchRootVersion() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::applicationVersionLabelsMatchRootVersion()
+QWARN  : QmlTests::themeToggleAndMoonPopupHaveUsableGeometry() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::themeToggleAndMoonPopupHaveUsableGeometry()
+QWARN  : QmlTests::gpuAccelerationPreferenceSurvivesWindowRecreation() QSystemTrayIcon::setVisible: No Icon set
+QWARN  : QmlTests::gpuAccelerationPreferenceSurvivesWindowRecreation() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::gpuAccelerationPreferenceSurvivesWindowRecreation()
+SKIP   : QmlTests::gpuAccelerationCommandLineOverrideIsTemporary() Run with --disable-gpu-acceleration to test override
+D:\User\Code\Github\Utils\zerotier-gui\src\tests\QmlTests.cpp(381) : failure location
+QWARN  : QmlTests::infoPollingDebouncesFailuresAndRecovers() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::infoPollingDebouncesFailuresAndRecovers()
+PASS   : QmlTests::timeoutCountsEachRequestOnce()
+QWARN  : QmlTests::joinDialogUsesAsyncCommandAndReportsFailure() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::joinDialogUsesAsyncCommandAndReportsFailure()
+QWARN  : QmlTests::pollingSurvivesFailuresAndRetainsRemarks() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::pollingSurvivesFailuresAndRetainsRemarks()
+PASS   : QmlTests::pluginPagesUseQuickAndValidateOwnership()
+QWARN  : QmlTests::storageSectionShowsPathsAndCleansOrphanData() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::storageSectionShowsPathsAndCleansOrphanData()
+QWARN  : QmlTests::storageScanIsAsynchronousAndPreviewsPendingCleanup() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::storageScanIsAsynchronousAndPreviewsPendingCleanup()
+QWARN  : QmlTests::settingsIsMenuAndTooltipWaitsBeforeShowing() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::settingsIsMenuAndTooltipWaitsBeforeShowing()
+QWARN  : QmlTests::navigationCreatesQuickPagesLazily() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::navigationCreatesQuickPagesLazily()
+QWARN  : QmlTests::pluginReloadKeepsOtherPagesInteractiveUntilReady() QSystemTrayIcon::setVisible: No Icon set
+QINFO  : QmlTests::pluginReloadKeepsOtherPagesInteractiveUntilReady() [插件] test-cancellable onCreate 1072 ms
+QINFO  : QmlTests::pluginReloadKeepsOtherPagesInteractiveUntilReady() [插件] test-cancellable onCreate 1069 ms
+PASS   : QmlTests::pluginReloadKeepsOtherPagesInteractiveUntilReady()
+PASS   : QmlTests::confirmationCancelsWithoutMutation()
+PASS   : QmlTests::closingWaitsForOperationsAndKeepsEventLoopAlive()
+QWARN  : QmlTests::emptyListsAndGuideRemainUsable() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::emptyListsAndGuideRemainUsable()
+QWARN  : QmlTests::memberPollingRetainsEditorAndCancelsOnCollapse() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::memberPollingRetainsEditorAndCancelsOnCollapse()
+QWARN  : QmlTests::closingDuringInitializationRemainsResponsive(cooperative) QSystemTrayIcon::setVisible: No Icon set
+QINFO  : QmlTests::closingDuringInitializationRemainsResponsive(cooperative) [插件] test-cancellable onCreate 11 ms
+PASS   : QmlTests::closingDuringInitializationRemainsResponsive(cooperative)
+QWARN  : QmlTests::closingDuringInitializationRemainsResponsive(bounded-call) QSystemTrayIcon::setVisible: No Icon set
+QINFO  : QmlTests::closingDuringInitializationRemainsResponsive(bounded-call) [插件] test-cancellable_blocked onCreate 352 ms
+PASS   : QmlTests::closingDuringInitializationRemainsResponsive(bounded-call)
+QWARN  : QmlTests::manualColumnsPersistAndDetailsRemainNonModal() QSystemTrayIcon::setVisible: No Icon set
+QWARN  : QmlTests::manualColumnsPersistAndDetailsRemainNonModal() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::manualColumnsPersistAndDetailsRemainNonModal()
+SKIP   : QmlTests::windowsCaptionTrayAndRestore() Native Windows tray requires the windows platform
+D:\User\Code\Github\Utils\zerotier-gui\src\tests\QmlTests.cpp(748) : failure location
+PASS   : QmlTests::configurationImportOnlyJoinsAfterSuccessfulCopy()
+QWARN  : QmlTests::lazyEditorsMenusAndDialogsKeepTheirInteraction() QSystemTrayIcon::setVisible: No Icon set
+PASS   : QmlTests::lazyEditorsMenusAndDialogsKeepTheirInteraction()
+PASS   : QmlTests::cleanupTestCase()
+Totals: 32 passed, 0 failed, 3 skipped, 0 blacklisted, 85494ms
+********* Finished testing of QmlTests *********

@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQuick.Dialogs
-import QtCore
 import Qt.labs.platform as Platform
 
 ApplicationWindow {
@@ -23,8 +22,13 @@ ApplicationWindow {
         pluginNoticeLoader.open()
     }
     property real guideScrollPosition: 0
-    width: windowSettings.savedWidth
-    height: windowSettings.savedHeight
+    // Host settings live in one INI owned by SettingsStore; QML persistence goes
+    // through the backend so the shared-root migration gate covers it too.
+    property int savedWidth: Number(backend.hostSetting("window/qml/savedWidth", 1024))
+    property int savedHeight: Number(backend.hostSetting("window/qml/savedHeight", 760))
+    property real sidebarWidth: Number(backend.hostSetting("window/qml/sidebarWidth", 190))
+    width: savedWidth
+    height: savedHeight
     minimumWidth: 720
     minimumHeight: 480
     visible: true
@@ -46,11 +50,10 @@ ApplicationWindow {
     palette.alternateBase: Theme.side
     onClosing: close => { close.accepted = false; backend.requestQuit() }
     Component.onCompleted: { Theme.dark = Qt.binding(() => backend.dark); layoutReady = true }
-    Settings { id: windowSettings; category: "window/qml"; property int savedWidth: 1024; property int savedHeight: 760; property real sidebarWidth: 190 }
     Component.onDestruction: {
         if (visibility !== Window.Maximized && visibility !== Window.Minimized) {
-            windowSettings.savedWidth = Math.max(minimumWidth, width)
-            windowSettings.savedHeight = Math.max(minimumHeight, height)
+            backend.setHostSetting("window/qml/savedWidth", Math.max(minimumWidth, width))
+            backend.setHostSetting("window/qml/savedHeight", Math.max(minimumHeight, height))
         }
     }
     property string pendingMenu: ""
@@ -112,10 +115,10 @@ ApplicationWindow {
         handle: Rectangle { implicitWidth: 10; color: "transparent" }
         Rectangle {
             id: sidebar
-            SplitView.preferredWidth: windowSettings.sidebarWidth
+            SplitView.preferredWidth: window.sidebarWidth
             SplitView.minimumWidth: 150
             SplitView.maximumWidth: 270
-            onWidthChanged: if (window.layoutReady && width >= 150) windowSettings.sidebarWidth = width
+            onWidthChanged: if (window.layoutReady && width >= 150) backend.setHostSetting("window/qml/sidebarWidth", width)
             color: Theme.side
             radius: 6
             ColumnLayout {

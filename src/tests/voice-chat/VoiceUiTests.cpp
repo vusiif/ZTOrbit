@@ -1,8 +1,10 @@
 #include "VoiceController.h"
 #include "AudioDeviceCache.h"
+#include "VoiceConfig.h"
 #include "VoiceSession.h"
 #include <Protocol.h>
 #include <ztgui/PluginPage.h>
+#include <ztgui/PluginStorage.h>
 #include <ztprotocol/NetworkAddress.h>
 #include <ztprotocol/WireProtocol.h>
 #include <QGuiApplication>
@@ -16,6 +18,8 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QFontDatabase>
+#include <QJsonDocument>
+#include <QPointer>
 #include <QtTest>
 #include <algorithm>
 using namespace vusiif::ztgui;
@@ -62,13 +66,153 @@ public:
     void getNetworkRelays(const QString &,QObject *,util::RelayCallback) override {}
     util::NetworkSubscription *subscribeNetworkData(const QString &,QObject *,util::NetworkCallback) override { return nullptr; }
 };
-class RemarkFiles final : public util::PluginFiles {
+class ClipLease final : public util::ServiceLease {
 public:
-    QByteArray data;
+    struct Call { QString method; QJsonObject data; QByteArray payload; };
+    QList<Call> calls;
+    util::ServiceCallback events;
+    QString lastId;
+    int serial=0;
+    quint64 generation() const override { return 1; }
+    bool available() const override { return true; }
+    void call(const QString &method,const QJsonObject &data,const QByteArray &payload,QObject *context,util::ServiceCallback completed) override {
+        calls.append({method,data,payload});
+        QJsonObject result;
+        if(method=="play") { lastId=QString::number(++serial); result={{"clipId",lastId}}; }
+        if(method=="stop") result={{"clipId",data["clipId"].toString()}};
+        if(completed) QTimer::singleShot(0,context,[completed,result] { completed({result,{},{}}); });
+    }
+    void subscribe(QObject *,util::ServiceCallback callback) override { events=std::move(callback); }
+    void close(QObject *context,util::ServiceCallback completed) override { events={}; if(context && completed) QTimer::singleShot(0,context,[completed] { completed({}); }); }
+    void finish(const QString &id) { if(events) events(util::ServiceResult{{{"event","finished"},{"clip",id}},{},{}}); }
+    void fail(const QString &id) { if(events) events(util::ServiceResult{{{"event","failed"},{"clip",id},{"message","failed"}},{},{}}); }
+    int plays() const { return int(std::count_if(calls.cbegin(),calls.cend(),[](const Call &call) { return call.method=="play"; })); }
+    int stops() const { return int(std::count_if(calls.cbegin(),calls.cend(),[](const Call &call) { return call.method=="stop"; })); }
+};
+
+// Minimal voice control server used to exercise the real VoiceSession read
+// loop: hello, successful/failed room responses and silent cancellation.
+class VoiceServerFixture final : public QObject {
+public:
+    enum class RoomReply { Success, Failure, Ignore };
+    RoomReply roomReply = RoomReply::Success;
+    quint32 sessionId = 7;
+    quint32 roomId = 1;
+    int hellos = 0;
+    int roomRequests = 0;
+    QJsonArray initialMembers;
+
+    explicit VoiceServerFixture(QObject *parent = nullptr) : QObject(parent)
+    {
+        initialMembers = QJsonArray{
+            QJsonObject{{"id", qint64(sessionId)}, {"nickname", "Self"}, {"self", true}},
+            QJsonObject{{"id", 9}, {"ztid", "a1b2c3d4e5"}, {"nickname", "Remote"}, {"self", false}}};
+        connect(&server, &QTcpServer::newConnection, this, [this] {
+            while (server.hasPendingConnections()) {
+                if (socket) {
+                    socket->disconnect(this);
+                    socket->deleteLater();
+                }
+                socket = server.nextPendingConnection();
+                buffered.clear();
+                connect(socket, &QTcpSocket::readyRead, this, [this] { read(); });
+                connect(socket, &QTcpSocket::disconnected, this, [this] { buffered.clear(); });
+            }
+        });
+    }
+    bool listen() { return server.listen(QHostAddress::LocalHost, 0); }
+    ~VoiceServerFixture() override
+    {
+        // Child sockets may emit disconnected() while the server tears them
+        // down after this object's members are already being destroyed.
+        server.close();
+        const auto sockets = server.findChildren<QTcpSocket *>();
+        for (auto *child : sockets) child->disconnect(this);
+        server.disconnect(this);
+    }
+    quint16 port() const { return server.serverPort(); }
+    void dropConnection()
+    {
+        if (!socket) return;
+        auto *old = socket.data();
+        socket = nullptr;
+        old->disconnect(this);
+        old->abort();
+        old->deleteLater();
+    }
+
+private:
+    QTcpServer server;
+    QPointer<QTcpSocket> socket;
+    QByteArray buffered;
+    void respond(int id, bool ok, const QJsonObject &data = {}, const QString &error = {})
+    {
+        QJsonObject message{{"v", voice_chat::ProtocolVersion}, {"id", id}, {"ok", ok}};
+        if (ok) message["data"] = data; else message["error"] = error;
+        if (socket) socket->write(protocol::frame("voice-chat",
+            QJsonDocument(message).toJson(QJsonDocument::Compact)));
+    }
+    void read()
+    {
+        if (!socket) return;
+        buffered += socket->readAll();
+        for (;;) {
+            protocol::Packet packet;
+            const auto result = protocol::takeFrame(buffered, packet);
+            if (result == protocol::ReadResult::Incomplete) break;
+            if (result == protocol::ReadResult::Invalid || packet.plugin != "voice-chat") continue;
+            const auto message = QJsonDocument::fromJson(packet.payload).object();
+            const auto operation = message.value("op").toString();
+            const int id = message.value("id").toInt();
+            if (operation == "hello") {
+                ++hellos;
+                respond(id, true, {{"session", qint64(sessionId)}, {"udpPort", 18100}, {"rooms", QJsonArray{}}});
+            } else if (operation == "join" || operation == "create") {
+                ++roomRequests;
+                if (roomReply == RoomReply::Ignore) continue;
+                if (roomReply == RoomReply::Failure) {
+                    respond(id, false, {}, QStringLiteral("room_not_found"));
+                    continue;
+                }
+                respond(id, true, {{"token", QString(32, 'a')},
+                    {"room", QJsonObject{{"id", qint64(roomId)}, {"name", "Room A"}, {"members", initialMembers}}}});
+            }
+        }
+    }
+};
+
+class MemoryStorage final : public util::PluginFiles, public util::PluginStorage {
+public:
+    QMap<QString,QByteArray> files;
     bool fail=false;
-    util::FileResult readFile(const QString &path) override { return path=="member-remarks.json"?util::FileResult{data,{}}:util::FileResult{{},"missing"}; }
+    bool legacyAllowed=true;
+    QString legacyError;
+    util::FileResult readFile(const QString &path) override {
+        if(!files.contains(path)) return {{},"missing"};
+        return {files.value(path),{}};
+    }
     util::FileResult writeFile(const QString &path,const QByteArray &bytes) override {
-        if(fail || path!="member-remarks.json") return {{},"write failed"}; data=bytes; return {};
+        if(fail) return {{},"write failed"};
+        files[path]=bytes; return {};
+    }
+    util::PluginFileTransaction updateFile(const QString &path,const util::PluginFileUpdater &updater) override {
+        util::PluginFileTransaction result;
+        if(fail) { result.error=QStringLiteral("write failed"); return result; }
+        util::PluginFileSnapshot snapshot;
+        snapshot.exists=files.contains(path);
+        snapshot.data=files.value(path);
+        util::PluginFileUpdate update;
+        try { update=updater(snapshot); }
+        catch(const std::exception &exception) { result.error=QString::fromUtf8(exception.what()); return result; }
+        if(update.action==util::PluginFileUpdate::Action::Keep) { result.ok=true; result.data=snapshot.data; return result; }
+        if(update.action==util::PluginFileUpdate::Action::Fail) { result.error=update.error; return result; }
+        if(snapshot.exists && snapshot.data==update.data) { result.ok=true; result.data=update.data; return result; }
+        files[path]=update.data; result.ok=true; result.changed=true; result.data=update.data; return result;
+    }
+    util::LegacyImportState legacyImportAllowed() override { return {legacyAllowed,legacyError}; }
+    util::StorageResult completeLegacyImport() override {
+        if(!legacyError.isEmpty()) return {legacyError};
+        legacyAllowed=false; return {};
     }
 };
 
@@ -77,7 +221,7 @@ class VoiceUiTests : public QObject {
 private slots:
     void memberRemarksPersistByIdentityAndPreserveFailedWrites() {
         QTemporaryDir directory; QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
-        RemarkFiles files; auto cache=std::make_shared<voice_chat::AudioDeviceCache>(); cache->files=&files;
+        MemoryStorage storage; auto cache=std::make_shared<voice_chat::AudioDeviceCache>(); cache->files=&storage; cache->storage=&storage;
         const auto room=[](int id,const QString &nickname) { return QJsonObject{{"id",1},{"name","Room"},{"members",QJsonArray{
             QJsonObject{{"id",id},{"ztid","a1b2c3d4e5"},{"nickname",nickname},{"self",false}},
             QJsonObject{{"id",1},{"ztid","1234567890"},{"nickname","Self"},{"self",true}}}}}; };
@@ -85,10 +229,11 @@ private slots:
             voice_chat::VoiceController controller(nullptr,cache); auto *session=controller.findChild<voice_chat::VoiceSession *>(); QVERIFY(session);
             session->roomChanged(room(42,"Server name")); QCOMPARE(controller.members().first().toMap()["displayName"].toString(),QString("Server name"));
             controller.setMemberRemark(42,QStringLiteral(" 本地朋友 ")); QCOMPARE(controller.members().first().toMap()["displayName"].toString(),QStringLiteral("本地朋友"));
-            QVERIFY(QJsonDocument::fromJson(files.data).object().contains("a1b2c3d4e5"));
-            const auto saved=files.data; controller.setMemberRemark(1,"Cannot rename self"); QCOMPARE(files.data,saved);
-            files.fail=true; controller.setMemberRemark(42,"Lost update"); QCOMPARE(files.data,saved);
-            QCOMPARE(controller.members().first().toMap()["displayName"].toString(),QStringLiteral("本地朋友")); files.fail=false;
+            const auto saved=storage.files.value("member-remarks.json");
+            QVERIFY(QJsonDocument::fromJson(saved).object().contains("a1b2c3d4e5"));
+            controller.setMemberRemark(1,"Cannot rename self"); QCOMPARE(storage.files.value("member-remarks.json"),saved);
+            storage.fail=true; controller.setMemberRemark(42,"Lost update"); QCOMPARE(storage.files.value("member-remarks.json"),saved);
+            QCOMPARE(controller.members().first().toMap()["displayName"].toString(),QStringLiteral("本地朋友")); storage.fail=false;
         }
         {
             voice_chat::VoiceController controller(nullptr,cache); auto *session=controller.findChild<voice_chat::VoiceSession *>();
@@ -96,15 +241,17 @@ private slots:
             controller.setMemberRemark(99,""); QCOMPARE(controller.members().first().toMap()["displayName"].toString(),QString("New nickname"));
             session->roomChanged(room(100,"")); QCOMPARE(controller.members().first().toMap()["displayName"].toString(),QString("a1b2c3d4e5"));
         }
-        files.data="corrupted";
+        storage.files["member-remarks.json"]="corrupted";
         {
             voice_chat::VoiceController controller(nullptr,cache); controller.findChild<voice_chat::VoiceSession *>()->roomChanged(room(42,"Server"));
-            controller.setMemberRemark(42,"Cannot overwrite"); QCOMPARE(files.data,QByteArray("corrupted"));
+            controller.setMemberRemark(42,"Cannot overwrite"); QCOMPARE(storage.files.value("member-remarks.json"),QByteArray("corrupted"));
         }
     }
     void emptyNicknameUsesIdentityAndCanCancel() {
         QTemporaryDir directory; QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
-        IdentityService identity; auto cache=std::make_shared<voice_chat::AudioDeviceCache>(); cache->zeroTier=&identity;
+        IdentityService identity; MemoryStorage storage;
+        auto cache=std::make_shared<voice_chat::AudioDeviceCache>(); cache->zeroTier=&identity;
+        cache->files=&storage; cache->storage=&storage; cache->config=voice_chat::loadVoiceConfig(storage).config;
         voice_chat::VoiceController c(nullptr,cache); c.setNickname("  ");
         QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost,0)); c.setAddress("127.0.0.1:"+QString::number(server.serverPort()));
         c.toggleConnection(); QVERIFY(c.busy()); c.toggleConnection(); QTest::qWait(40); QVERIFY(!server.hasPendingConnections()); QVERIFY(!c.busy());
@@ -122,7 +269,9 @@ private slots:
     }
     void microphoneLoopbackRestoresMuteAndStops() {
         QTemporaryDir directory; QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
+        MemoryStorage storage;
         auto lease=std::make_shared<RecordingLease>(); auto cache=std::make_shared<voice_chat::AudioDeviceCache>(); cache->audio=std::make_shared<media::MediaSession>(lease);
+        cache->files=&storage; cache->storage=&storage; cache->config=voice_chat::loadVoiceConfig(storage).config;
         voice_chat::VoiceController c(nullptr,cache); QTest::qWait(30); c.setMuted(true); c.setDeafened(true);
         lease->calls.clear(); c.setMicrophoneTesting(true); QVERIFY(c.microphoneTesting());
         QTRY_VERIFY(std::any_of(lease->calls.cbegin(),lease->calls.cend(),[](const auto &v) { return v.method=="track.start"; }));
@@ -148,7 +297,9 @@ private slots:
     }
     void deviceChangesDoNotRestartCapture() {
         QTemporaryDir directory;QSettings::setDefaultFormat(QSettings::IniFormat);QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
+        MemoryStorage storage;
         auto lease=std::make_shared<RecordingLease>();auto cache=std::make_shared<voice_chat::AudioDeviceCache>();cache->audio=std::make_shared<media::MediaSession>(lease);
+        cache->files=&storage; cache->storage=&storage; cache->config=voice_chat::loadVoiceConfig(storage).config;
         voice_chat::VoiceController controller(nullptr,cache);QTest::qWait(30);controller.setMicrophoneTesting(true);QTRY_VERIFY(!lease->tracks.isEmpty());QTest::qWait(50);lease->calls.clear();
         lease->event({{{"event","sources"}},{},{}});QTRY_VERIFY(std::any_of(lease->calls.cbegin(),lease->calls.cend(),[](const auto &call){return call.method=="sources";}));QTest::qWait(50);
         QVERIFY(std::none_of(lease->calls.cbegin(),lease->calls.cend(),[](const auto &call){return call.method=="track.create"||call.method=="track.start"||call.method=="track.remove";}));controller.stopForUnload();
@@ -156,23 +307,443 @@ private slots:
     void devicePreferencesSurviveAsynchronousDiscovery() {
         QTemporaryDir directory; QCoreApplication::setOrganizationName("ZTGUI-Voice-UI"); QCoreApplication::setApplicationName("VoiceUI");
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
-        const QByteArray device("saved-device-id"); QSettings().setValue("voice-chat/input",device); QSettings().setValue("voice-chat/output",device);
-        voice_chat::VoiceController c(nullptr,std::make_shared<voice_chat::AudioDeviceCache>());
+        const QByteArray device("saved-device-id");
+        {
+            QSettings legacy(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZTGUI");
+            legacy.setValue("voice-chat/input",device); legacy.setValue("voice-chat/output",device);
+            legacy.sync();
+        }
+        MemoryStorage storage;
+        auto cache=std::make_shared<voice_chat::AudioDeviceCache>(); cache->files=&storage; cache->storage=&storage;
+        cache->config=voice_chat::loadVoiceConfig(storage).config;
+        QVERIFY(!storage.legacyAllowed);
+        voice_chat::VoiceController c(nullptr,cache);
         QTest::qWait(20); QCOMPARE(c.input(),QString::fromLatin1(device.toHex())); QCOMPARE(c.output(),c.input());
-        QCOMPARE(QSettings().value("voice-chat/input").toByteArray(),device);
+        const auto saved=QJsonDocument::fromJson(storage.files.value("config.json")).object();
+        QCOMPARE(saved.value("input").toString(),QString::fromLatin1(device.toHex()));
+        {
+            // Imported legacy keys are cleared from the current source.
+            QSettings legacy(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZTGUI");
+            QVERIFY(!legacy.contains("voice-chat/input"));
+            QVERIFY(!legacy.contains("voice-chat/output"));
+        }
         c.stopForUnload(); c.setAddress("127.0.0.1:18100"); c.setNickname("Stopped"); c.toggleConnection(); QVERIFY(!c.busy());
     }
+    void legacyConfigClearsOnlyImportedSourceKeys()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QCoreApplication::setOrganizationName("ZTGUI-Voice-UI");
+        QCoreApplication::setApplicationName("VoiceUI");
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
+        {
+            QSettings current(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZTGUI");
+            current.setValue("voice-chat/address","  example.com:18100 ");
+            current.setValue("voice-chat/nickname","Alice");
+            current.setValue("voice-chat/volume",500); // Target already has a different value.
+            current.setValue("voice-chat/muted",true);
+            current.setValue("voice-chat/input",QByteArray::fromHex("AABBCC"));
+            current.setValue("voice-chat/port",9999); // Unknown key must survive.
+            current.sync();
+            QSettings previous(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZeroTier GUI");
+            previous.setValue("voice-chat/inputVolume",150);
+            previous.setValue("voice-chat/deafened",true);
+            previous.setValue("voice-chat/output",QByteArray::fromHex("DDEEFF"));
+            previous.sync();
+        }
+        MemoryStorage storage;
+        storage.files["config.json"]=R"({"format":1,"volume":35})";
+        const auto loaded=voice_chat::loadVoiceConfig(storage);
+        QVERIFY2(loaded.error.isEmpty(),qPrintable(loaded.error));
+        QVERIFY2(loaded.warnings.isEmpty(),qPrintable(loaded.warnings.join('\n')));
+        QCOMPARE(loaded.config.address,QString("example.com:18100"));
+        QCOMPARE(loaded.config.nickname,QString("Alice"));
+        QCOMPARE(loaded.config.volume,35); // Target wins over the conflicting source.
+        QCOMPARE(loaded.config.inputVolume,150);
+        QCOMPARE(loaded.config.muted,true);
+        QCOMPARE(loaded.config.deafened,true);
+        QCOMPARE(loaded.config.input,QByteArray::fromHex("aabbcc"));
+        QCOMPARE(loaded.config.output,QByteArray::fromHex("ddeeff"));
+        {
+            QSettings current(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZTGUI");
+            QVERIFY(!current.contains("voice-chat/address"));
+            QVERIFY(!current.contains("voice-chat/nickname"));
+            QVERIFY(!current.contains("voice-chat/muted"));
+            QVERIFY(!current.contains("voice-chat/input"));
+            // Conflicting and unknown keys are never removed.
+            QCOMPARE(current.value("voice-chat/volume").toInt(),500);
+            QCOMPARE(current.value("voice-chat/port").toInt(),9999);
+            QSettings previous(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZeroTier GUI");
+            QVERIFY(!previous.contains("voice-chat/inputVolume"));
+            QVERIFY(!previous.contains("voice-chat/deafened"));
+            QVERIFY(!previous.contains("voice-chat/output"));
+        }
+        QVERIFY(!storage.legacyAllowed);
+        const auto committed=storage.files.value("config.json");
+        const auto again=voice_chat::loadVoiceConfig(storage);
+        QVERIFY2(again.error.isEmpty(),qPrintable(again.error));
+        QVERIFY(again.warnings.isEmpty());
+        QCOMPARE(storage.files.value("config.json"),committed);
+        QCOMPARE(again.config.volume,35);
+        QCOMPARE(again.config.input,QByteArray::fromHex("aabbcc"));
+    }
+
+    void legacySourcesSurviveTargetCommitFailure()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QCoreApplication::setOrganizationName("ZTGUI-Voice-UI");
+        QCoreApplication::setApplicationName("VoiceUI");
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
+        {
+            QSettings current(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZTGUI");
+            current.setValue("voice-chat/address","example.com");
+            current.setValue("voice-chat/muted",true);
+            current.sync();
+        }
+        MemoryStorage storage;
+        storage.fail=true;
+        const auto loaded=voice_chat::loadVoiceConfig(storage);
+        QVERIFY(!loaded.error.isEmpty());
+        QVERIFY(!storage.files.contains("config.json"));
+        QVERIFY(storage.legacyAllowed); // The one-way marker was not committed.
+        QSettings current(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZTGUI");
+        QVERIFY(current.contains("voice-chat/address"));
+        QVERIFY(current.contains("voice-chat/muted"));
+    }
+
     void independentInputAndOutputPreferences() {
         QTemporaryDir directory;
         QCoreApplication::setOrganizationName("ZTGUI-Voice-UI"); QCoreApplication::setApplicationName("VoiceUI");
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
-        QSettings().setValue("voice-chat/volume",80);
-        { voice_chat::VoiceController c(nullptr,std::make_shared<voice_chat::AudioDeviceCache>());
+        MemoryStorage storage;
+        const auto makeCache=[&storage] {
+            auto cache=std::make_shared<voice_chat::AudioDeviceCache>();
+            cache->files=&storage; cache->storage=&storage; cache->config=voice_chat::loadVoiceConfig(storage).config;
+            return cache;
+        };
+        { voice_chat::VoiceController c(nullptr,makeCache());
           QCOMPARE(c.volume(),80); QCOMPARE(c.inputVolume(),100); c.setInputVolume(150); c.setVolume(200);
           QCOMPARE(c.inputVolume(),150); QCOMPARE(c.volume(),200); c.setMemberVolume(1,0); QCOMPARE(c.memberVolume(1),100); }
-        { voice_chat::VoiceController c(nullptr,std::make_shared<voice_chat::AudioDeviceCache>());
+        { voice_chat::VoiceController c(nullptr,makeCache());
           QCOMPARE(c.inputVolume(),150); QCOMPARE(c.volume(),200); c.setInputVolume(900); QCOMPARE(c.inputVolume(),200); c.setVolume(-1); QCOMPARE(c.volume(),0); }
+        const auto saved=QJsonDocument::fromJson(storage.files.value("config.json")).object();
+        QCOMPARE(saved.value("volume").toInt(),0); QCOMPARE(saved.value("inputVolume").toInt(),200);
     }
+    void roomMemberSetDiffProducesLogicalEvents() {
+        auto lease=std::make_shared<RecordingLease>();
+        auto cache=std::make_shared<voice_chat::AudioDeviceCache>();
+        cache->audio=std::make_shared<media::MediaSession>(lease);
+        voice_chat::VoiceSession session(cache);
+        QSignalSpy joined(&session,&voice_chat::VoiceSession::memberJoined);
+        QSignalSpy left(&session,&voice_chat::VoiceSession::memberLeft);
+        session.testBeginRoom(7,1);
+        session.testRoomSnapshot({{"id",7},{"members",QJsonArray{
+            QJsonObject{{"id",1},{"nickname","Self"}},
+            QJsonObject{{"id",2},{"nickname","Remote"}}}}});
+        QCOMPARE(joined.size(),0); QCOMPARE(left.size(),0); // Initial members establish the baseline.
+        session.testRoomSnapshot({{"id",7},{"members",QJsonArray{
+            QJsonObject{{"id",1},{"nickname","Self"}},
+            QJsonObject{{"id",2},{"nickname","Remote"}},
+            QJsonObject{{"id",3},{"nickname","New"}}}}});
+        QCOMPARE(joined.size(),1); QCOMPARE(joined.first().first().toUInt(),3u); QCOMPARE(left.size(),0);
+        // Nickname and mute changes with the same set must not ring.
+        session.testRoomSnapshot({{"id",7},{"members",QJsonArray{
+            QJsonObject{{"id",1},{"nickname","Self"}},
+            QJsonObject{{"id",2},{"nickname","Renamed"},{"muted",true}},
+            QJsonObject{{"id",3},{"nickname","New"}}}}});
+        QCOMPARE(joined.size(),1); QCOMPARE(left.size(),0);
+        // Same member count with one entry and one exit still produces both events.
+        session.testRoomSnapshot({{"id",7},{"members",QJsonArray{
+            QJsonObject{{"id",1},{"nickname","Self"}},
+            QJsonObject{{"id",2},{"nickname","Renamed"}},
+            QJsonObject{{"id",4},{"nickname","Other"}}}}});
+        QCOMPARE(joined.size(),2); QCOMPARE(joined.last().first().toUInt(),4u);
+        QCOMPARE(left.size(),1); QCOMPARE(left.first().first().toUInt(),3u);
+        session.testRoomSnapshot({{"id",7},{"members",QJsonArray{
+            QJsonObject{{"id",1},{"nickname","Self"}},
+            QJsonObject{{"id",2},{"nickname","Renamed"}}}}});
+        QCOMPARE(left.size(),2); QCOMPARE(left.last().first().toUInt(),4u);
+    }
+
+    void selfJoinedCueRequiresSuccessfulJoin()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, directory.path());
+        MemoryStorage storage;
+        auto clipLease = std::make_shared<ClipLease>();
+        auto clips = std::make_shared<media::AudioClipClient>(clipLease);
+        auto sounds = std::make_shared<voice_chat::VoiceSoundPlayer>(clips, QByteArray("join-wav"),
+                                                                     QByteArray("leave-wav"));
+        auto cache = std::make_shared<voice_chat::AudioDeviceCache>();
+        cache->files = &storage;
+        cache->storage = &storage;
+        cache->audio = std::make_shared<media::MediaSession>(std::make_shared<RecordingLease>());
+        cache->clips = clips;
+        cache->sounds = sounds;
+        cache->config = voice_chat::loadVoiceConfig(storage).config;
+        VoiceServerFixture server;
+        QVERIFY(server.listen());
+        voice_chat::VoiceController controller(nullptr, cache);
+        auto *session = controller.findChild<voice_chat::VoiceSession *>();
+        QVERIFY(session);
+        QSignalSpy selfJoined(session, &voice_chat::VoiceSession::selfJoined);
+        controller.setAddress("127.0.0.1:" + QString::number(server.port()));
+        controller.setNickname("Test");
+        controller.toggleConnection();
+        QTRY_VERIFY(controller.connected());
+        QCOMPARE(server.hellos, 1);
+
+        // A successful join rings exactly once, and the first member snapshot
+        // (which already contains a remote member) only establishes the baseline.
+        controller.joinRoom(1);
+        QTRY_COMPARE(selfJoined.size(), 1);
+        QTRY_COMPARE(clipLease->plays(), 1);
+
+        controller.toggleConnection();
+        QTRY_VERIFY(!controller.connected());
+        QCOMPARE(controller.currentRoom(), QStringLiteral("尚未加入房间"));
+
+        // A rejected join response never rings.
+        server.roomReply = VoiceServerFixture::RoomReply::Failure;
+        controller.toggleConnection();
+        QTRY_VERIFY(controller.connected());
+        controller.joinRoom(1);
+        QTRY_VERIFY(!controller.busy());
+        QCOMPARE(selfJoined.size(), 1);
+        QCOMPARE(clipLease->plays(), 1);
+
+        // Disconnecting while the join request is pending is a cancellation.
+        server.roomReply = VoiceServerFixture::RoomReply::Ignore;
+        controller.joinRoom(1);
+        QTest::qWait(50);
+        QVERIFY(controller.busy());
+        controller.toggleConnection();
+        QTRY_VERIFY(!controller.busy());
+        QCOMPARE(selfJoined.size(), 1);
+        QCOMPARE(clipLease->plays(), 1);
+
+        // Reconnecting with the same session ID and joining again rings once for
+        // the new successful join, not for the members that were already present.
+        server.roomReply = VoiceServerFixture::RoomReply::Success;
+        controller.toggleConnection();
+        QTRY_VERIFY(controller.connected());
+        controller.joinRoom(1);
+        QTRY_COMPARE(selfJoined.size(), 2);
+        QTRY_COMPARE(clipLease->plays(), 2);
+        QCOMPARE(server.roomRequests, 4);
+        controller.stopForUnload();
+    }
+
+    void memberCuesFollowBaselineResetAndReconnect()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, directory.path());
+        MemoryStorage storage;
+        auto clipLease = std::make_shared<ClipLease>();
+        auto clips = std::make_shared<media::AudioClipClient>(clipLease);
+        auto sounds = std::make_shared<voice_chat::VoiceSoundPlayer>(clips, QByteArray("join-wav"),
+                                                                     QByteArray("leave-wav"));
+        auto cache = std::make_shared<voice_chat::AudioDeviceCache>();
+        cache->files = &storage;
+        cache->storage = &storage;
+        cache->audio = std::make_shared<media::MediaSession>(std::make_shared<RecordingLease>());
+        cache->clips = clips;
+        cache->sounds = sounds;
+        cache->config = voice_chat::loadVoiceConfig(storage).config;
+        voice_chat::VoiceController controller(nullptr, cache);
+        auto *session = controller.findChild<voice_chat::VoiceSession *>();
+        QVERIFY(session);
+        QSignalSpy joined(session, &voice_chat::VoiceSession::memberJoined);
+        QSignalSpy left(session, &voice_chat::VoiceSession::memberLeft);
+        const auto member = [](quint32 id, const QString &nickname = {}) {
+            return QJsonObject{{"id", qint64(id)},
+                               {"nickname", nickname.isEmpty() ? QString::number(id) : nickname}};
+        };
+        const auto snapshot = [&](const QJsonArray &ids) {
+            QJsonArray members{member(5, "Self")};
+            for (const auto &id : ids) members.append(id.toObject());
+            session->testRoomSnapshot({{"id", 1}, {"name", "Room A"}, {"members", members}});
+        };
+        session->testBeginRoom(1, 5);
+        snapshot({member(2), member(3)});
+        QCOMPARE(clipLease->plays(), 0); // baseline only
+        snapshot({member(3, "Renamed"), QJsonObject{{"id", 2}, {"nickname", "2"}, {"muted", true}}});
+        QCOMPARE(clipLease->plays(), 0); // rename/mute/reorder never rings
+        snapshot({member(2), member(3), member(4)});
+        QTRY_COMPARE(clipLease->plays(), 1);
+        QCOMPARE(joined.size(), 1);
+        QCOMPARE(joined.last().first().toUInt(), 4u);
+        clipLease->finish(clipLease->lastId);
+        QTest::qWait(20);
+
+        snapshot({member(2), member(4)});
+        QTRY_COMPARE(clipLease->plays(), 2);
+        QCOMPARE(left.size(), 1);
+        QCOMPARE(left.last().first().toUInt(), 3u);
+        clipLease->finish(clipLease->lastId);
+        QTest::qWait(20);
+
+        // A burst keeps the join playing and queues the following leave; a room
+        // reset (disconnect/reconnect) clears both and the old finish callback.
+        snapshot({member(2), member(4), member(8)});
+        QTRY_COMPARE(clipLease->plays(), 3);
+        snapshot({member(2), member(8)});
+        QTest::qWait(30);
+        QCOMPARE(clipLease->plays(), 3);
+        session->testBeginRoom(1, 5);
+        QTRY_VERIFY(clipLease->stops() >= 1);
+        const int afterReset = clipLease->plays();
+        clipLease->finish(clipLease->lastId);
+        QTest::qWait(30);
+        QCOMPARE(clipLease->plays(), afterReset);
+
+        // Same session ID after reconnect: the first snapshot is only a baseline.
+        snapshot({member(2), member(8)});
+        QCOMPARE(clipLease->plays(), afterReset);
+        snapshot({member(2), member(8), member(6)});
+        QTRY_COMPARE(clipLease->plays(), afterReset + 1);
+        clipLease->finish(clipLease->lastId);
+        QTest::qWait(20);
+
+        // Same member count with one entry and one exit rings both kinds.
+        const int beforeSwap = clipLease->plays();
+        snapshot({member(2), member(6), member(7)});
+        QCOMPARE(joined.size(), 4);
+        QCOMPARE(left.size(), 3);
+        QTRY_COMPARE(clipLease->plays(), beforeSwap + 1);
+        clipLease->finish(clipLease->lastId);
+        QTRY_COMPARE(clipLease->plays(), beforeSwap + 2);
+        clipLease->finish(clipLease->lastId);
+        QTest::qWait(20);
+
+        // Stopping clears the pending queue and ignores late terminal events.
+        controller.stopForUnload();
+        const int afterStop = clipLease->plays();
+        clipLease->finish(clipLease->lastId);
+        QTest::qWait(30);
+        QCOMPARE(clipLease->plays(), afterStop);
+    }
+
+    void soundQueueMergesAdjacentKindsAndRespectsLimits() {
+        const QByteArray join("join-wav"), leave("leave-wav");
+        auto lease=std::make_shared<ClipLease>();
+        auto clips=std::make_shared<media::AudioClipClient>(lease);
+        voice_chat::VoiceSoundPlayer player(clips,join,leave);
+        player.setOutputDevice(QByteArray::fromHex("aabb"));
+        player.setVolume(150);
+        player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Join);
+        QTRY_COMPARE(lease->calls.size(),1);
+        QCOMPARE(lease->calls.first().method,QString("play"));
+        QCOMPARE(lease->calls.first().data["device"].toString(),QString("aabb"));
+        QCOMPARE(lease->calls.first().data["gain"].toDouble(),1.5);
+        QCOMPARE(lease->calls.first().payload,join);
+        // Adjacent waiting joins merge; a following leave stays separate.
+        player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Join);
+        player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Leave);
+        QCOMPARE(lease->calls.size(),1);
+        lease->finish(lease->lastId);
+        QTRY_COMPARE(lease->calls.size(),2);
+        QCOMPARE(lease->calls.last().payload,leave);
+        lease->finish(lease->lastId);
+        QTest::qWait(20);
+        QCOMPARE(lease->calls.size(),2);
+        player.stop();
+    }
+
+    void soundQueueKeepsEightItemsAndDropsExpiredWaiting() {
+        const QByteArray join("join-wav"), leave("leave-wav");
+        {
+            auto lease=std::make_shared<ClipLease>();
+            auto clips=std::make_shared<media::AudioClipClient>(lease);
+            voice_chat::VoiceSoundPlayer player(clips,join,leave);
+            for(int i=0;i<20;++i)
+                player.enqueue(i%2 ? voice_chat::VoiceSoundPlayer::Cue::Leave : voice_chat::VoiceSoundPlayer::Cue::Join);
+            QTRY_COMPARE(lease->calls.size(),1);
+            int plays=1;
+            for(int i=0;i<30 && plays<8;++i) {
+                if(lease->calls.isEmpty()) break;
+                const int before=lease->calls.size();
+                lease->finish(lease->lastId);
+                QTest::qWait(10);
+                if(lease->calls.size()>before) plays=lease->calls.size();
+                else if(lease->calls.size()==before) break;
+            }
+            QVERIFY(plays<=8);
+            QVERIFY(lease->calls.size()<=8);
+            player.stop();
+        }
+        {
+            auto lease=std::make_shared<ClipLease>();
+            auto clips=std::make_shared<media::AudioClipClient>(lease);
+            voice_chat::VoiceSoundPlayer player(clips,join,leave);
+            player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Join);
+            QTRY_COMPARE(lease->calls.size(),1);
+            player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Leave);
+            QTest::qWait(2100); // Waiting items older than two seconds are dropped.
+            lease->finish(lease->lastId);
+            QTest::qWait(50);
+            QCOMPARE(lease->calls.size(),1);
+            player.stop();
+        }
+    }
+
+    void soundQueueAdvancesOnFailedAndUnknownClipIds() {
+        const QByteArray join("join-wav"), leave("leave-wav");
+        auto lease=std::make_shared<ClipLease>();
+        auto clips=std::make_shared<media::AudioClipClient>(lease);
+        voice_chat::VoiceSoundPlayer player(clips,join,leave);
+        player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Join);
+        QTRY_COMPARE(lease->calls.size(),1);
+        player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Join); // merged
+        player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Leave);
+        // Empty/unknown failure IDs must still advance the pending request and
+        // must never leave m_current stuck at "starting".
+        lease->fail(QString());
+        QCOMPARE(lease->calls.size(),2);
+        QCOMPARE(lease->calls.last().payload,leave);
+        lease->fail(QStringLiteral("unknown-clip"));
+        QTest::qWait(40);
+        QCOMPARE(lease->calls.size(),2); // stale play replies must not restart a clip
+        player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Join);
+        QTRY_COMPARE(lease->calls.size(),3);
+        QCOMPARE(lease->calls.last().payload,join);
+        // A known failed clip id advances the queue just like finished.
+        lease->fail(lease->lastId);
+        player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Leave);
+        QTRY_COMPARE(lease->calls.size(),4);
+        QCOMPARE(lease->calls.last().payload,leave);
+        lease->finish(lease->lastId);
+        player.stop();
+    }
+
+    void deafenStopsCurrentClipAndClearsQueue() {
+        const QByteArray join("join-wav"), leave("leave-wav");
+        auto lease=std::make_shared<ClipLease>();
+        auto clips=std::make_shared<media::AudioClipClient>(lease);
+        voice_chat::VoiceSoundPlayer player(clips,join,leave);
+        player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Join);
+        QTRY_COMPARE(lease->calls.size(),1);
+        player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Leave);
+        player.setDeafened(true);
+        QTRY_VERIFY(std::any_of(lease->calls.cbegin(),lease->calls.cend(),
+            [](const ClipLease::Call &call) { return call.method=="stop"; }));
+        const auto stops=lease->calls.size();
+        lease->finish(lease->lastId);
+        QTest::qWait(30);
+        QCOMPARE(lease->calls.size(),stops);
+        player.setDeafened(false);
+        player.enqueue(voice_chat::VoiceSoundPlayer::Cue::Join);
+        QTRY_COMPARE(lease->calls.size(),stops+1);
+        player.stop();
+    }
+
     void endpointParsing() {
         QCOMPARE(protocol::serverEndpoint("example.com").port, quint16(18100));
         QCOMPARE(protocol::serverEndpoint("127.0.0.1:19000").port, quint16(19000));
@@ -190,9 +761,9 @@ private slots:
         QTemporaryDir directory; QVERIFY(directory.isValid());
         QCoreApplication::setOrganizationName("ZTGUI-Voice-UI"); QCoreApplication::setApplicationName("VoiceUI");
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
-        QSettings().setValue("voice-chat/port",19001); // Obsolete preference must not override the default.
-        RemarkFiles files;
-        auto lease=std::make_shared<RecordingLease>(); auto cache=std::make_shared<voice_chat::AudioDeviceCache>(); cache->audio=std::make_shared<media::MediaSession>(lease); cache->files=&files;
+        MemoryStorage storage;
+        auto lease=std::make_shared<RecordingLease>(); auto cache=std::make_shared<voice_chat::AudioDeviceCache>(); cache->audio=std::make_shared<media::MediaSession>(lease);
+        cache->files=&storage; cache->storage=&storage; cache->config=voice_chat::loadVoiceConfig(storage).config;
         voice_chat::VoiceController controller(nullptr,cache);
         QQmlEngine engine; QStringList warnings;
         connect(&engine,&QQmlEngine::warnings,this,[&](const QList<QQmlError> &errors){ for(const auto &error:errors) warnings.append(error.toString()); });
@@ -212,8 +783,8 @@ private slots:
         auto *testButton=page->findChild<QQuickItem *>("voiceTestMicrophone"); QVERIFY(testButton);
         const auto clickTest=[&] { QTest::mouseClick(window.get(),Qt::LeftButton,{},testButton->mapToScene(QPointF(testButton->width()/2,testButton->height()/2)).toPoint()); };
         clickTest(); QTRY_VERIFY(controller.microphoneTesting()); clickTest(); QTRY_VERIFY(!controller.microphoneTesting()); clickTest(); QTRY_VERIFY(controller.microphoneTesting());
-        QVERIFY(QDir().mkpath("screenshots"));
-        QVERIFY(window->grabWindow().save(dark?"screenshots/voice-audio-dark.png":"screenshots/voice-audio-light.png"));
+        QVERIFY(QDir().mkpath(".tmp/screenshots"));
+        QVERIFY(window->grabWindow().save(dark?".tmp/screenshots/voice-audio-dark.png":".tmp/screenshots/voice-audio-light.png"));
         QTest::keyClick(window.get(),Qt::Key_Escape); QTRY_VERIFY(!popup->property("visible").toBool());
         QVERIFY(!controller.microphoneTesting());
         QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost,18100));
@@ -230,7 +801,7 @@ private slots:
         socket->write(protocol::frame("voice-chat",QJsonDocument(reply).toJson(QJsonDocument::Compact)));
         QTRY_VERIFY(controller.connected()); QTRY_COMPARE(controller.rooms().size(),2);
         page->setProperty("selectedRoom",1); QTest::qWait(220);
-        QVERIFY(window->grabWindow().save(dark?"screenshots/voice-rooms-dark.png":"screenshots/voice-rooms-light.png"));
+        QVERIFY(window->grabWindow().save(dark?".tmp/screenshots/voice-rooms-dark.png":".tmp/screenshots/voice-rooms-light.png"));
         controller.toggleConnection(); QTRY_VERIFY(!controller.connected());
         auto *session=controller.findChild<voice_chat::VoiceSession *>(); QVERIFY(session);
         session->roomChanged({{"id",1},{"name","Room A"},{"members",QJsonArray{QJsonObject{{"id",42},{"ztid","a1b2c3d4e5"},{"nickname","Remote"},{"self",false},{"volume",100}},QJsonObject{{"id",1},{"nickname","Self"},{"self",true}}}}});
@@ -244,7 +815,7 @@ private slots:
             QVERIFY(controller.memberVolume(42)>100);
             auto *remark=page->findChild<QQuickItem *>("voiceMemberRemark"); QVERIFY(remark); QVERIFY(remark->isEnabled());
             remark->setProperty("text",QStringLiteral("本地朋友"));
-            QVERIFY(window->grabWindow().save(dark?"screenshots/voice-member-remark-dark.png":"screenshots/voice-member-remark-light.png"));
+            QVERIFY(window->grabWindow().save(dark?".tmp/screenshots/voice-member-remark-dark.png":".tmp/screenshots/voice-member-remark-light.png"));
             auto *save=page->findChild<QQuickItem *>("voiceSaveMemberRemark"); QVERIFY(save);
             QTest::mouseClick(window.get(),Qt::LeftButton,{},save->mapToScene(QPointF(save->width()/2,save->height()/2)).toPoint());
             QTRY_COMPARE(controller.members().first().toMap()["displayName"].toString(),QStringLiteral("本地朋友"));

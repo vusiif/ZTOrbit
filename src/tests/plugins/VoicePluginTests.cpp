@@ -14,7 +14,9 @@
 #include <QNetworkDatagram>
 #include <ztprotocol/NetworkAddress.h>
 #include <QFile>
+#include <QDir>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QNetworkProxy>
 #include <QDateTime>
 #include <QFontDatabase>
@@ -33,6 +35,11 @@ class VoicePluginTests : public QObject {
     Q_OBJECT
     QTemporaryDir installed;
     QString voicePath;
+    static QJsonObject voiceConfig() {
+        QFile file(QDir(QCoreApplication::applicationDirPath()).filePath("plugins-data/id-voice-chat/config.json"));
+        if (!file.open(QIODevice::ReadOnly)) return {};
+        return QJsonDocument::fromJson(file.readAll()).object();
+    }
     static QJsonObject control(QTcpSocket &socket,QByteArray &buffer,int &serial,const QString &op,const QJsonObject &data={}) {
         const int id=++serial;
         socket.write(vusiif::ztgui::protocol::frame("voice-chat",QJsonDocument(QJsonObject{{"v",1},{"id",id},{"op",op},{"data",data}}).toJson(QJsonDocument::Compact)));
@@ -53,17 +60,51 @@ class VoicePluginTests : public QObject {
         QTest::mouseClick(&window,Qt::LeftButton,{},button->mapToScene(QPointF(button->width()/2,button->height()/2)).toPoint());
     }
 private slots:
-    void previewSdkConsumerRendersVideo() {
-        const auto probe=qEnvironmentVariable("ZTGUI_PREVIEW_PLUGIN");if(probe.isEmpty())QSKIP("Set ZTGUI_PREVIEW_PLUGIN to the independently built SDK preview package");
-        QTemporaryDir directory;QVERIFY(directory.isValid());QVERIFY(QFile::copy(probe,directory.filePath("preview.ztplugin")));QVERIFY(QFile::copy(MEDIA_PLUGIN,directory.filePath("media.ztplugin")));
-        QQmlEngine engine;QQuickWindow window;window.resize(1000,640);window.show();QTest::qWait(100);window.hide();window.show();QTRY_VERIFY(window.isExposed());
-        PluginRegistry registry;PluginLoader loader;loader.scan(directory.path(),registry);QTRY_COMPARE_WITH_TIMEOUT(registry.plugins().size(),2,80000);QTRY_COMPARE_WITH_TIMEOUT(registry.preparationState("media-preview-probe"),PreparationState::Ready,15000);
-        auto page=registry.page("media-preview-probe/preview",&engine,window.contentItem());QVERIFY2(page.result.ok(),qPrintable(page.result.message));page.page->setSize(QSizeF(1000,640));auto *model=controller(page.page);QVERIFY(model);QVERIFY(QMetaObject::invokeMethod(model,"start",Q_ARG(QString,"synthetic")));
-        QTRY_VERIFY_WITH_TIMEOUT(model->property("status").toString().contains(QStringLiteral("正在回送")),10000);QTest::qWait(500);
-        for(const char *name:{"sourcePreviewHost","decodedPreviewHost"}) {
-            auto *host=page.page->findChild<QQuickItem *>(name);QVERIFY(host);auto grab=host->grabToImage();QVERIFY(grab);QSignalSpy ready(grab.data(),&QQuickItemGrabResult::ready);QTRY_VERIFY(!ready.isEmpty());auto image=grab->image();QVERIFY(!image.isNull());auto pixel=image.pixelColor(image.width()/5,image.height()/2);QVERIFY2(pixel.red()>180&&pixel.green()<100&&pixel.blue()<100,name);
+    void oldMediaPackageWithoutClipServiceIsRejected() {
+        using namespace vusiif::ztgui;
+        const auto media = package::inspect(MEDIA_PLUGIN);
+        QVERIFY2(media.ok(), qPrintable(media.error));
+        QVERIFY(media.info["provides"].toArray().size() > 0);
+        std::unique_ptr<QTemporaryDir> extracted;
+        std::unique_ptr<QLockFile> extractedLock;
+        QString entry;
+        QVERIFY2(package::extract(media, extracted, entry, extractedLock).isEmpty(), "extract media package");
+        QJsonArray files;
+        for (const auto &value : media.info["files"].toArray()) {
+            auto item = value.toObject();
+            item["source"] = QDir(extracted->path()).filePath(item["path"].toString());
+            files.append(item);
         }
-        loader.requestShutdown();QTRY_VERIFY_WITH_TIMEOUT(loader.shutdownComplete(),10000);
+        QJsonArray provides;
+        for (const auto &value : media.info["provides"].toArray()) {
+            if (value.toObject()["service"].toString() != QStringLiteral("media.clip"))
+                provides.append(value);
+        }
+        QCOMPARE(provides.size(), media.info["provides"].toArray().size() - 1);
+        const QJsonObject manifest{{"files", files}, {"runtime", media.info["runtime"]},
+            {"requiresHost", media.info["requiresHost"]},
+            {"execution", media.info["execution"]},
+            {"dependencies", media.info["dependencies"]},
+            {"provides", provides}};
+        QTemporaryDir install;
+        QVERIFY(install.isValid());
+        const auto oldMedia = install.filePath("media.ztplugin");
+        const auto error = package::writeBundle(manifest, oldMedia, media.info);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QVERIFY(QFile::copy(VOICE_PLUGIN, install.filePath("voice.ztplugin")));
+        PluginRegistry registry;
+        PluginLoader loader;
+        QSignalSpy finished(&loader, &PluginLoader::loadFinished);
+        QVERIFY(loader.loadFile(install.filePath("voice.ztplugin"), registry).ok());
+        QTRY_VERIFY_WITH_TIMEOUT(!finished.isEmpty(), 15000);
+        QVERIFY(!finished.first()[1].toBool());
+        const auto message = finished.first()[2].toString();
+        QVERIFY2(message.contains(QStringLiteral("media.clip")), qPrintable(message));
+        QVERIFY(registry.plugins().isEmpty());
+        loader.requestShutdown();
+        QTRY_VERIFY_WITH_TIMEOUT(loader.shutdownComplete(), 10000);
+        extractedLock.reset();
+        package::discardCache(extracted);
     }
     void mediaWorkerUsesPackagedCoreAndCrt() {
 #ifdef Q_OS_WIN
@@ -171,6 +212,26 @@ private slots:
         voicePath=installed.filePath("voice.ztplugin");
         QVERIFY(QFile::copy(QString::fromUtf8(VOICE_PLUGIN),voicePath));
         QVERIFY(QFile::copy(MEDIA_PLUGIN,installed.filePath("media.ztplugin")));
+        // The production plugin uses its real per-user data root. Give these
+        // integration checks a deterministic empty config and one-way import
+        // marker so earlier runs cannot leak address/volume into the panel.
+        const auto dataDir=QDir(QCoreApplication::applicationDirPath()).filePath("plugins-data/id-voice-chat");
+        QDir(dataDir).removeRecursively();
+        QVERIFY(QDir().mkpath(dataDir));
+        QFile config(QDir(dataDir).filePath("config.json"));
+        QVERIFY(config.open(QIODevice::WriteOnly));
+        config.write(QJsonDocument(QJsonObject{{"format",1},{"address",""},{"nickname",""},
+            {"volume",80},{"inputVolume",100},{"muted",false},{"deafened",false},
+            {"input",""},{"output",""}}).toJson(QJsonDocument::Indented));
+        config.close();
+        const auto metadata=QDir(QCoreApplication::applicationDirPath()).filePath(".ztgui/plugins");
+        QVERIFY(QDir().mkpath(metadata));
+        QFile ownership(QDir(metadata).filePath("voice-chat.json"));
+        QVERIFY(ownership.open(QIODevice::WriteOnly));
+        ownership.write(QJsonDocument(QJsonObject{{"format",1},{"id","voice-chat"},
+            {"names",QJsonArray{QStringLiteral("语音聊天")}},
+            {"legacyImport",QJsonObject{{"completed",true}}}}).toJson(QJsonDocument::Indented));
+        ownership.close();
 #ifdef Q_OS_WIN
         QVERIFY(!GetModuleHandleW(L"Qt6Multimedia.dll"));
         QVERIFY(!GetModuleHandleW(L"avcodec-61.dll"));
@@ -272,7 +333,7 @@ private slots:
         QTRY_VERIFY(model->property("connected").toBool());
         QTRY_VERIFY(item->findChild<QQuickItem *>("voiceCreateRoom")->isEnabled());
         model->setProperty("muted",true); model->setProperty("deafened",true); model->setProperty("volume",35);
-        QCOMPARE(QSettings().value("voice-chat/volume").toInt(),35);
+        QCOMPARE(voiceConfig().value("volume").toInt(),35);
         click(window,item,"voiceConnect"); QTRY_VERIFY(!model->property("connected").toBool());
         QPointer<QObject> alive=model; QVERIFY(loader->unload("voice-chat",*registry).ok()); QTRY_VERIFY(alive.isNull());
         // Reloading after unloading must not retain a compiled page/controller from the DLL.
@@ -315,6 +376,21 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(first->property("members").toList().size(),2,5000); QTRY_COMPARE_WITH_TIMEOUT(second->property("members").toList().size(),2,5000);
         QVERIFY(QMetaObject::invokeMethod(second,"leaveRoom")); QTRY_COMPARE_WITH_TIMEOUT(first->property("members").toList().size(),1,5000);
         loader->requestShutdown(); secondLoader->requestShutdown(); QTRY_VERIFY(loader->shutdownComplete() && secondLoader->shutdownComplete()); loader.reset(); secondLoader.reset(); firstRegistry.reset(); secondRegistry.reset(); QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
+    }
+    // Runs last: loading a real Qt Quick Controls page keeps Qt6Svg (shipped by
+    // the media worker package) mapped in the host, which would confuse the
+    // module-isolation check above if this test ran first.
+    void previewSdkConsumerRendersVideo() {
+        const auto probe=qEnvironmentVariable("ZTGUI_PREVIEW_PLUGIN");if(probe.isEmpty())QSKIP("Set ZTGUI_PREVIEW_PLUGIN to the independently built SDK preview package");
+        QTemporaryDir directory;QVERIFY(directory.isValid());QVERIFY(QFile::copy(probe,directory.filePath("preview.ztplugin")));QVERIFY(QFile::copy(MEDIA_PLUGIN,directory.filePath("media.ztplugin")));
+        QQmlEngine engine;QQuickWindow window;window.resize(1000,640);window.show();QTest::qWait(100);window.hide();window.show();QTRY_VERIFY(window.isExposed());
+        PluginRegistry registry;PluginLoader loader;loader.scan(directory.path(),registry);QTRY_COMPARE_WITH_TIMEOUT(registry.plugins().size(),2,80000);QTRY_COMPARE_WITH_TIMEOUT(registry.preparationState("media-preview-probe"),PreparationState::Ready,15000);
+        auto page=registry.page("media-preview-probe/preview",&engine,window.contentItem());QVERIFY2(page.result.ok(),qPrintable(page.result.message));page.page->setSize(QSizeF(1000,640));auto *model=controller(page.page);QVERIFY(model);QVERIFY(QMetaObject::invokeMethod(model,"start",Q_ARG(QString,"synthetic")));
+        QTRY_VERIFY_WITH_TIMEOUT(model->property("status").toString().contains(QStringLiteral("正在回送")),10000);QTest::qWait(500);
+        for(const char *name:{"sourcePreviewHost","decodedPreviewHost"}) {
+            auto *host=page.page->findChild<QQuickItem *>(name);QVERIFY(host);auto grab=host->grabToImage();QVERIFY(grab);QSignalSpy ready(grab.data(),&QQuickItemGrabResult::ready);QTRY_VERIFY(!ready.isEmpty());auto image=grab->image();QVERIFY(!image.isNull());auto pixel=image.pixelColor(image.width()/5,image.height()/2);QVERIFY2(pixel.red()>180&&pixel.green()<100&&pixel.blue()<100,name);
+        }
+        loader.requestShutdown();QTRY_VERIFY_WITH_TIMEOUT(loader.shutdownComplete(),10000);
     }
 };
 int main(int argc,char **argv) {

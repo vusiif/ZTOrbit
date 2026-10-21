@@ -1,13 +1,54 @@
 #include "VideoCodec.h"
 #include "AudioMath.h"
 #include "MediaClock.h"
+#include "ClipAudio.h"
+#include "ClipPlayer.h"
 #include <ztmedia/SharedFrames.h>
 #include <ztprotocol/BulkChannel.h>
 #include <QtTest>
 #include <QTemporaryDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QtEndian>
 using namespace vusiif::ztgui;
+namespace {
+QByteArray makeWav(int frames, quint16 format = 1, quint16 channels = 1, quint32 rate = 48000,
+                   quint16 bits = 16, int dataBytes = -1, bool padding = false)
+{
+    const int data = dataBytes >= 0 ? dataBytes : frames * (bits / 8) * channels;
+    QByteArray wav("RIFF", 4);
+    QByteArray body;
+    body += "fmt ";
+    QByteArray fmtSize(4, '\0');
+    qToLittleEndian(quint32(16), reinterpret_cast<uchar *>(fmtSize.data()));
+    body += fmtSize;
+    QByteArray fmt(16, '\0');
+    qToLittleEndian(format, reinterpret_cast<uchar *>(fmt.data()));
+    qToLittleEndian(channels, reinterpret_cast<uchar *>(fmt.data() + 2));
+    qToLittleEndian(rate, reinterpret_cast<uchar *>(fmt.data() + 4));
+    qToLittleEndian(rate * channels * (bits / 8), reinterpret_cast<uchar *>(fmt.data() + 8));
+    qToLittleEndian(quint16(channels * (bits / 8)), reinterpret_cast<uchar *>(fmt.data() + 12));
+    qToLittleEndian(bits, reinterpret_cast<uchar *>(fmt.data() + 14));
+    body += fmt;
+    body += "data";
+    QByteArray length(4, '\0');
+    qToLittleEndian(quint32(data), reinterpret_cast<uchar *>(length.data()));
+    body += length;
+    QByteArray samples(data, '\0');
+    for (int i = 0; i + 1 < data; i += 2) {
+        const qint16 value = qint16((i / 2) % 2000 - 1000);
+        qToLittleEndian(quint16(value), reinterpret_cast<uchar *>(samples.data() + i));
+    }
+    body += samples;
+    if (padding) body += '\0';
+    QByteArray size(4, '\0');
+    qToLittleEndian(quint32(body.size() + 4), reinterpret_cast<uchar *>(size.data()));
+    wav += size;
+    wav += "WAVE";
+    wav += body;
+    return wav;
+}
+}
 class MediaEngineTests : public QObject {
     Q_OBJECT
   private slots:
@@ -28,6 +69,200 @@ class MediaEngineTests : public QObject {
         QCOMPARE(copy.pts, p.pts);
         QCOMPARE(copy.dts, p.dts);
         QCOMPARE(copy.data, p.data);
+    }
+    void clipWavValidation() {
+        using namespace media::engine;
+        const auto valid = parseClipWav(makeWav(7680));
+        QVERIFY2(valid.ok(), qPrintable(valid.error));
+        QCOMPARE(valid.samples.size(), 7680);
+        QVERIFY(qAbs(valid.samples.first() - (-1000.0f / 32768.0f)) < 1e-6f);
+        const auto padded = parseClipWav(makeWav(960, 1, 1, 48000, 16, 960, true));
+        QVERIFY2(padded.ok(), qPrintable(padded.error));
+        QCOMPARE(padded.samples.size(), 480);
+
+        const auto expectError = [](const QByteArray &wav) {
+            const auto audio = parseClipWav(wav);
+            return !audio.ok() && !audio.error.isEmpty();
+        };
+        QVERIFY(expectError({}));
+        QVERIFY(expectError(QByteArray(100, 'x')));
+        auto truncated = makeWav(480);
+        truncated.resize(truncated.size() - 10);
+        QVERIFY(expectError(truncated));
+        QVERIFY(expectError(makeWav(480, 3))); // float format
+        QVERIFY(expectError(makeWav(480, 1, 2))); // stereo
+        QVERIFY(expectError(makeWav(480, 1, 1, 44100))); // wrong rate
+        QVERIFY(expectError(makeWav(480, 1, 1, 48000, 8))); // wrong depth
+        QVERIFY(expectError(makeWav(480, 1, 1, 48000, 16, 3))); // odd PCM16 data
+        QVERIFY(expectError(makeWav(48001 * 2))); // more than two seconds
+        QVERIFY(expectError(QByteArray(256 * 1024 + 1, 'x')));
+        auto huge = makeWav(480);
+        const quint32 hugeSize = 0x7fffffffu;
+        qToLittleEndian(hugeSize, reinterpret_cast<uchar *>(huge.data() + 40));
+        QVERIFY(expectError(huge));
+        auto duplicate = makeWav(480);
+        duplicate += "data";
+        duplicate += QByteArray(4, '\0');
+        QVERIFY(expectError(duplicate));
+    }
+    void clipPlayerEmitsOneFailureAndStopsFeeding()
+    {
+        using namespace media::engine;
+        QVector<QVector<float>> chunks;
+        for (int i = 0; i < 6; ++i) chunks.append(QVector<float>(960, 0.1f));
+        int fed = 0, finished = 0, failed = 0;
+        QString message;
+        ClipPlayer::Hooks hooks;
+        hooks.feed = [&](QVector<float>, std::function<void(bool)> done) {
+            ++fed;
+            done(fed < 2); // The second chunk is rejected by the output.
+        };
+        hooks.query = [](std::function<void(const ClipPlayer::DrainState &)> done) {
+            done(ClipPlayer::DrainState{});
+        };
+        hooks.finished = [&] { ++finished; };
+        hooks.failed = [&](const QString &reason) { ++failed; message = reason; };
+        ClipPlayer player("clip-1", "lease", chunks, hooks);
+        player.start();
+        QTRY_COMPARE_WITH_TIMEOUT(failed, 1, 2000);
+        QCOMPARE(fed, 2);
+        QCOMPARE(finished, 0);
+        QVERIFY(!message.isEmpty());
+        QTest::qWait(80); // No retries or a second terminal event.
+        QCOMPARE(fed, 2);
+        QCOMPARE(failed, 1);
+        QCOMPARE(finished, 0);
+        QVERIFY(player.terminal());
+    }
+    void clipPlayerWaitsForTheMixQueueAndSinkBacklog()
+    {
+        using namespace media::engine;
+        QVector<QVector<float>> chunks;
+        for (int i = 0; i < 4; ++i) chunks.append(QVector<float>(960, 0.1f));
+        int fed = 0, finished = 0, failed = 0, queries = 0;
+        ClipPlayer::Hooks hooks;
+        hooks.feed = [&](QVector<float>, std::function<void(bool)> done) {
+            ++fed;
+            QTimer::singleShot(0, this, [done] { done(true); });
+        };
+        hooks.query = [&](std::function<void(const ClipPlayer::DrainState &)> done) {
+            ++queries;
+            QTimer::singleShot(0, this, [&, done] {
+                ClipPlayer::DrainState state;
+                state.queuedFrames = queries < 5 ? 1 : 0;
+                state.pendingBytes = queries < 6 ? 32 : 0;
+                done(state);
+            });
+        };
+        hooks.finished = [&] { ++finished; };
+        hooks.failed = [&](const QString &) { ++failed; };
+        ClipPlayer player("clip-2", "lease", chunks, hooks);
+        player.setDrainTimeoutMs(3000);
+        player.start();
+        QTRY_COMPARE_WITH_TIMEOUT(finished, 1, 3000);
+        QCOMPARE(fed, 4);
+        QCOMPARE(failed, 0);
+        QVERIFY(queries >= 6);
+        // The terminal event is emitted exactly once.
+        QTest::qWait(60);
+        QCOMPARE(finished, 1);
+    }
+    void clipPlayerFailsWhenTheOutputDisappears()
+    {
+        using namespace media::engine;
+        QVector<QVector<float>> chunks;
+        chunks.append(QVector<float>(960, 0.1f));
+        int finished = 0, failed = 0;
+        QString message;
+        ClipPlayer::Hooks hooks;
+        hooks.feed = [](QVector<float>, std::function<void(bool)> done) { done(true); };
+        hooks.query = [](std::function<void(const ClipPlayer::DrainState &)> done) {
+            ClipPlayer::DrainState state;
+            state.output = false;
+            state.sinkActive = false;
+            done(state);
+        };
+        hooks.finished = [&] { ++finished; };
+        hooks.failed = [&](const QString &reason) { ++failed; message = reason; };
+        ClipPlayer player("clip-3", "lease", chunks, hooks);
+        player.setDrainTimeoutMs(500);
+        player.start();
+        QTRY_COMPARE_WITH_TIMEOUT(failed, 1, 2000);
+        QCOMPARE(finished, 0);
+        QVERIFY(message.contains(QStringLiteral("输出")));
+    }
+    void clipPlayerTimesOutInsteadOfBlockingTheQueue()
+    {
+        using namespace media::engine;
+        QVector<QVector<float>> chunks;
+        chunks.append(QVector<float>(960, 0.1f));
+        int finished = 0, failed = 0;
+        QString message;
+        ClipPlayer::Hooks hooks;
+        hooks.feed = [](QVector<float>, std::function<void(bool)> done) { done(true); };
+        hooks.query = [](std::function<void(const ClipPlayer::DrainState &)> done) {
+            ClipPlayer::DrainState state;
+            state.queuedFrames = 1; // The sink never consumes the data.
+            done(state);
+        };
+        hooks.finished = [&] { ++finished; };
+        hooks.failed = [&](const QString &reason) { ++failed; message = reason; };
+        ClipPlayer player("clip-4", "lease", chunks, hooks);
+        player.setDrainTimeoutMs(80);
+        player.start();
+        QTRY_COMPARE_WITH_TIMEOUT(failed, 1, 2000);
+        QCOMPARE(finished, 0);
+        QVERIFY(message.contains(QStringLiteral("排空")));
+    }
+    void clipPlayerWatchdogFailsWhenTheDeviceReplyIsLost()
+    {
+        using namespace media::engine;
+        QVector<QVector<float>> chunks;
+        chunks.append(QVector<float>(960, 0.1f));
+        int finished = 0, failed = 0;
+        QString message;
+        ClipPlayer::Hooks hooks;
+        hooks.feed = [](QVector<float>, std::function<void(bool)> done) {
+            // Never complete: a lost device-thread reply must not block forever.
+            Q_UNUSED(done);
+        };
+        hooks.query = [](std::function<void(const ClipPlayer::DrainState &)> done) {
+            done(ClipPlayer::DrainState{});
+        };
+        hooks.finished = [&] { ++finished; };
+        hooks.failed = [&](const QString &reason) { ++failed; message = reason; };
+        ClipPlayer player("clip-6", "lease", chunks, hooks);
+        player.setWatchdogTimeoutMs(40);
+        player.start();
+        QTRY_COMPARE_WITH_TIMEOUT(failed, 1, 2000);
+        QCOMPARE(finished, 0);
+        QVERIFY(message.contains(QStringLiteral("超时")));
+    }
+    void clipPlayerStopIsSilent()
+    {
+        using namespace media::engine;
+        QVector<QVector<float>> chunks;
+        for (int i = 0; i < 4; ++i) chunks.append(QVector<float>(960, 0.1f));
+        int finished = 0, failed = 0;
+        ClipPlayer::Hooks hooks;
+        hooks.feed = [&](QVector<float>, std::function<void(bool)> done) {
+            QTimer::singleShot(0, this, [done] { done(true); });
+        };
+        hooks.query = [](std::function<void(const ClipPlayer::DrainState &)> done) {
+            ClipPlayer::DrainState state;
+            state.queuedFrames = 1;
+            done(state);
+        };
+        hooks.finished = [&] { ++finished; };
+        hooks.failed = [&](const QString &) { ++failed; };
+        ClipPlayer player("clip-5", "lease", chunks, hooks);
+        player.start();
+        QTest::qWait(30);
+        player.stop();
+        QTest::qWait(80);
+        QCOMPARE(finished, 0);
+        QCOMPARE(failed, 0);
+        QVERIFY(player.stopped());
     }
     void audioVideoShareClockDomain() {
         media::engine::PlaybackTimeline clock;

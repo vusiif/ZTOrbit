@@ -3,18 +3,22 @@
 #include "ExtensionRegistry.h"
 #include <ztprotocol/ServiceWorker.h>
 #include <QThread>
+#include <QTimer>
+#include <QVector>
 #include <atomic>
 #include <algorithm>
 #include <map>
 namespace vusiif::ztgui::media::engine {
 class SessionActor;
+class ClipPlayer;
 class SessionEngine final : public QObject {
   public:
     using Reply = protocol::service::Worker::Reply;
     SessionEngine(protocol::service::Worker &worker, DeviceManager &devices, ExtensionRegistry &extensions,
                   QObject *parent = nullptr);
     ~SessionEngine() override;
-    void call(const QString &lease, const QString &method, const QJsonObject &data, Reply reply);
+    void call(const QString &lease, const QString &service, const QString &method,
+              const QJsonObject &data, const QByteArray &payload, Reply reply);
     void submit(const QString &lease, const QJsonObject &header, const QByteArray &payload);
     void release(const QString &lease, Reply reply);
     void shutdown();
@@ -61,6 +65,13 @@ class SessionEngine final : public QObject {
     ExtensionRegistry &extensions;
     std::shared_ptr<std::atomic<int>> videoCount = std::make_shared<std::atomic<int>>(0);
     std::map<QString, std::unique_ptr<Session>> sessions;
+    std::map<QString, std::unique_ptr<ClipPlayer>> clips;
+    QMap<QString, QString> leaseClips;
+    void callClip(const QString &lease, const QString &method, const QJsonObject &data,
+                  const QByteArray &payload, Reply reply);
+    // Silent cancellation used by stop, lease release and shutdown.
+    void stopClip(const QString &lease);
+    void finishClip(const QString &clipId, const QString &lease, bool failed, const QString &message);
     Session *session(const QString &lease);
     void detach(const QString &track) {
         QMetaObject::invokeMethod(&devices, [this, track] { devices.detach(track); });

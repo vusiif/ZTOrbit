@@ -1,10 +1,12 @@
 set(ZTGUI_MAIN_SOURCES
     AppController.cpp RecordModel.cpp SystemOperations.cpp AppLog.cpp SingleInstance.cpp PluginImport.cpp
     ClientNetworkService.cpp ZeroTierClient.cpp NetworkMembers.cpp MemberPing.cpp NetworkBundle.cpp MacPlatform.cpp
+    storage/StorageContext.cpp storage/CoordinationLock.cpp storage/SettingsStore.cpp storage/PluginDataStore.cpp storage/StorageMaintenance.cpp storage/StorageMaintenanceScheduler.cpp
     plugins/PluginRegistry.cpp plugins/PluginLoader.cpp plugins/HostServicesImpl.cpp plugins/ServiceBroker.cpp)
 set(ZTGUI_MAIN_HEADERS
     AppController.h RecordModel.h SystemOperations.h AppLog.h SingleInstance.h PluginImport.h ZeroTierClient.h
-    NetworkBundle.h MemberPing.h MacPlatform.h plugins/PluginRegistry.h plugins/PluginLoader.h plugins/HostServicesImpl.h plugins/ServiceBroker.h)
+    NetworkBundle.h MemberPing.h MacPlatform.h storage/StorageContext.h storage/CoordinationLock.h storage/SettingsStore.h storage/PluginDataStore.h storage/StorageMaintenance.h storage/StorageMaintenanceScheduler.h
+    plugins/PluginRegistry.h plugins/PluginLoader.h plugins/HostServicesImpl.h plugins/ServiceBroker.h)
 list(TRANSFORM ZTGUI_MAIN_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 list(TRANSFORM ZTGUI_MAIN_HEADERS PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 set(ZTGUI_MAIN_SOURCES "${ZTGUI_MAIN_SOURCES}" PARENT_SCOPE)

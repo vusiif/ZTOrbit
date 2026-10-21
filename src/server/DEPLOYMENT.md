@@ -39,7 +39,7 @@ cd /root/Server/ZTServer
 ./start-server.sh --check-deps    # 仅检查，不启动
 ./start-server.sh                 # 默认 --server --listen 0.0.0.0 --port 18100
 ./start-server.sh --server --port 18200
-./start-server.sh --version       # 0.2.1-beta
+./start-server.sh --version       # 0.2.1
 ./start-server.sh --help
 ```
 
@@ -70,12 +70,12 @@ unit 的 `WorkingDirectory` 与 `ExecStart` 固定为 `/root/Server/ZTServer`，
   "id": "voice-chat",
   "name": "语音聊天",
   "version": "0.1.0",
-  "apiVersion": "0.2-beta",
+  "apiVersion": "0.2",
   "mainClass": "vusiif.ztgui.voicechat.VoiceChatPlugin"
 }
 ```
 
-- `apiVersion` 必须精确等于宿主 API（0.2-beta）；ID 匹配 `[A-Za-z0-9_-]{1,128}` 且不能为 `builtin`；显示名唯一并决定数据目录。
+- `apiVersion` 必须精确等于宿主 API（0.2）；ID 匹配 `[A-Za-z0-9_-]{1,128}` 且不能为 `builtin`；显示名唯一并决定数据目录。
 - 不再读取旧 `.ztplugin`，发现时记录 `unsupported package, use .jar`。
 - 启动失败保留已加载对象但不 ready；增减插件后重启，不支持热加载。
 - 语音 JAR 由 `bash scripts/build-linux.sh --build-voice-plugin` 生成到 `build/dist/server-plugins/`，复制到 `plugins/` 后重启。插件是可信代码，宿主不做沙箱或依赖隔离。
@@ -87,12 +87,26 @@ unit 的 `WorkingDirectory` 与 `ExecStart` 固定为 `/root/Server/ZTServer`，
 | `--install zerotier` | `bash zt-installer.sh --action 2` |
 | `--install ztncui` | `bash zt-installer.sh --action 3` |
 | `--install all` | `bash zt-installer.sh --action 1` |
-| `--moon` | `bash zt-installer.sh --action 4` |
-| `--uninstall ztncui` | `bash zt-installer.sh --action 5` |
-| `--uninstall all` | `bash zt-installer.sh --action 6` |
-| `--uninstall zerotier` | `bash zt-installer.sh --action 7` |
+| `--moon` | `bash zt-installer.sh --action 5` |
+| `--uninstall ztncui` | `bash zt-installer.sh --action 6` |
+| `--uninstall all` | `bash zt-installer.sh --action 8` |
+| `--uninstall zerotier` | `bash zt-installer.sh --action 9` |
 
-脚本保持原菜单/`--action` 行为：安装 ZeroTier 会生成或复用并导出 Moon；仅安装 ztncui 要求已有 ZeroTier；卸载 ZeroTier 删除节点身份；`--force` 重建 Moon/容器；`--ip` 指定公网 IPv4；仅支持 Ubuntu/Debian + systemd。它不删除无关数据，也不改动 ztncui 之外的服务。
+全量安装（选项 1）包含 ZeroTier、Moon、ztncui 和 pylon。菜单选项 **4「仅安装pylon」** 也可直接运行 `sudo bash zt-installer.sh --action 4`；后续选项为 5「导出moon文件」、6「仅卸载ztncui」、7「仅卸载pylon」、8「卸载」，仅命令行可用的「仅卸载ZeroTier」为 `--action 9`。仅安装 pylon 只准备 Docker 并部署 pylon，无需本机安装 ZeroTier，也不拉取 ztncui 镜像。pylon 使用以下命令，容器名为 `ztpylon`，以 `reflect` 模式运行：
+
+```bash
+docker run --name ztpylon --init -d -p 9443:443 zerotier/pylon:latest reflect
+```
+
+请在云安全组放行 **9443/TCP**（pylon）与 **9993/UDP**（ZeroTier）。ZeroTier 本地管理 API 也会监听 **9993/TCP**，因此同机部署时不能将 pylon 的宿主端口映射到 9993；pylon 默认使用 9443/TCP 映射容器的 443/TCP，与[官方 Docker 示例](https://github.com/zerotier/pylon#docker)的 TCP 映射一致。
+
+9443/TCP 已被其他服务占用时，可使用 `sudo bash zt-installer.sh --action 4 --pylon-port 8443`（也支持 `--pylon-port=8443`）；自定义端口限于 1–65535，防火墙、安全组和客户端的 `tcpFallbackRelay` 地址都应使用该端口。脚本先检查 TCP 端口，发现冲突会在删除或创建容器前退出。
+
+相同端口下，已运行的 pylon 容器会跳过创建，已停止的容器会启动。运行过的容器需要改端口时，使用 `--force --pylon-port <新端口>` 重建。上次因端口绑定失败留下的 `created` 状态容器若映射不同端口，会在新端口预检通过后自动重建；新的 Docker 启动失败若留下未启动容器，会自动清理，便于再次执行。
+
+选项 **7「仅卸载pylon」**（`sudo bash zt-installer.sh --action 7`）删除 `ztpylon` 容器与 `zerotier/pylon:latest` 镜像，保留 ZeroTier、Moon 和 ztncui。选项 **8「卸载」** 会清理 ztncui、pylon 的容器和镜像、ztncui 配置，再卸载 ZeroTier 及其数据目录；Docker 不可用或容器/镜像清理失败时停止操作并报错。选项 6 仅卸载 ztncui，`--action 9` 仅卸载 ZeroTier，均保留 pylon。交互菜单中的卸载操作需要二次确认；`--action` 模式直接执行。
+
+安装 ZeroTier 会生成或复用并导出 Moon；仅安装 ztncui 要求已有 ZeroTier；卸载 ZeroTier 删除节点身份；`--force` 还会重建 Moon；`--ip` 指定公网 IPv4；仅支持 Ubuntu/Debian + systemd。
 
 ## 6. 从旧 C++ 服务迁移与回滚
 

@@ -30,7 +30,19 @@ class DeviceManager final : public QObject {
     QJsonArray sources();
     QString attach(const QString &track, const TrackConfig &config, Consumer consumer);
     void detach(const QString &track);
-    void play(const QString &track, const QString &device, QVector<float> samples);
+    bool play(const QString &track, const QString &device, QVector<float> samples);
+    // Read-only view of one clip track in a device mix: frames still waiting in
+    // the per-track queue and bytes converted but not yet written to the sink.
+    // output is false when the device disappeared; sinkActive is false when the
+    // sink stopped unexpectedly.
+    struct PlaybackState {
+        int queuedFrames = 0;
+        qint64 pendingBytes = 0;
+        bool output = false;
+        bool sinkActive = false;
+    };
+    PlaybackState playbackState(const QString &device, const QString &track) const;
+    bool outputAvailable(const QString &device) const;
     std::function<void()> changed;
     QJsonObject statistics() const;
 
@@ -58,6 +70,7 @@ class DeviceManager final : public QObject {
         QByteArray pending;
         PcmConverter converter;
         quint64 bytes = 0;
+        int drainTicks = 0;
     };
     QMediaDevices devices;
     QTimer timer;
@@ -66,5 +79,11 @@ class DeviceManager final : public QObject {
     QMap<QString, QCapturableWindow> windows;
     void mix();
     static QAudioDevice audioDevice(bool input, const QString &id);
+    // Test-only injection used by media integration tests through a file whose
+    // path is supplied in ZTGUI_MEDIA_TEST_CLIP_FAILURE. Production processes
+    // never set that variable, so this stays inert.
+    bool injectedPlaybackFailure();
+    QString m_testFailureNonce;
+    int m_testAcceptedPlays = 0;
 };
 } // namespace vusiif::ztgui::media::engine

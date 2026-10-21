@@ -106,15 +106,27 @@ void VoiceSession::mute(bool value) {
 void VoiceSession::clearRoom() {
     if(microphoneTesting) { microphoneTesting=false; emit microphoneTestingChanged(false); }
     audio->stop(); audio->clearMemberVolumes(); registration->stop(); token.clear(); members.clear();
-    room = 0; udpReady = false; sequence = 0; emit roomChanged({});
+    baselineValid=false; baselineRoom=0;
+    room = 0; udpReady = false; sequence = 0; emit roomChanged({}); emit roomReset();
 }
 void VoiceSession::updateRoom(const QJsonObject &value) {
     if (quint32(value.value("id").toDouble()) != room) return;
-    members.clear();
+    std::set<quint32> next;
     for (const auto &entry : value.value("members").toArray()) {
         const auto id = quint32(entry.toObject().value("id").toDouble());
-        if (id != session) members.insert(id);
+        if (id != session) next.insert(id);
     }
+    // A logical event is derived from the member set, never from snapshot
+    // count or roomChanged invocation count. The first snapshot after entering
+    // a room only establishes the baseline.
+    if (!baselineValid || baselineRoom != room) {
+        baselineValid = true;
+        baselineRoom = room;
+    } else {
+        for (const auto id : next) if (!members.count(id)) emit memberJoined(id);
+        for (const auto id : members) if (!next.count(id)) emit memberLeft(id);
+    }
+    members = std::move(next);
     retainMembers();
     auto snapshot=value; auto rows=value["members"].toArray();
     for(qsizetype i=0;i<rows.size();++i) { auto row=rows[i].toObject(); row["self"]=quint32(row["id"].toDouble())==session; rows[i]=row; }
@@ -169,6 +181,7 @@ void VoiceSession::read()
             updateRoom(object.value("room").toObject());
             if (muted) request("mute", {{"muted", true}});
             registrationAttempts = 0; sendRegistration(); registration->start();
+            emit selfJoined();
             emit notice(QStringLiteral("已入房，正在验证语音通道…"));
         } else if (operation == "rooms") emit roomsChanged(data.toArray());
         else if (operation == "leave") emit notice(QStringLiteral("已退出房间"));

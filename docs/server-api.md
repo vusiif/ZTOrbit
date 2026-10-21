@@ -1,20 +1,20 @@
 # 服务端插件 API 与传输协议
 
-宿主是 Java 25 + Netty 的 `zt-server`。公开 SDK 在 `src/server/api/`（Maven 模块 `ztserver-api`），实现位于 `src/server/main/`（模块 `ztserver`），Java 插件默认在 `src/plugins/<name>/server/`。服务端程序版本由客户端侧维护的根 `SERVER_VERSION` 指定，当前程序 `0.2.1-beta`、API `0.2-beta`；Java 插件必须精确匹配完整 API 版本（含预发布后缀）。客户端与服务端版本相互独立。
+宿主是 Java 25 + Netty 的 `zt-server`。公开 SDK 在 `src/server/api/`（Maven 模块 `ztserver-api`），实现位于 `src/server/main/`（模块 `ztserver`），Java 插件默认在 `src/plugins/<name>/server/`。服务端程序版本由客户端侧维护的根 `SERVER_VERSION` 指定，当前程序 `0.2.1`、API `0.2`；Java 插件必须精确匹配完整 API 版本（含预发布后缀）。客户端与服务端版本相互独立。
 
 旧 C++ 服务端与 C++ `.ztplugin` 已归档到 `src/server-old/`，不再由宿主加载。
 
 ## 独立 SDK
 
-发布构建生成 `build/dist/ZTServer-api-v0.2-beta.zip`，目录本身是 Maven 仓库根：
+发布构建生成 `build/dist/ZTServer-api-v0.2.zip`，目录本身是 Maven 仓库根：
 
 ```text
-ZTServer-api-v0.2-beta/
-  vusiif/ztgui/ztserver-api/0.2-beta/
-    ztserver-api-0.2-beta.jar
-    ztserver-api-0.2-beta-sources.jar
-    ztserver-api-0.2-beta-javadoc.jar
-    ztserver-api-0.2-beta.pom
+ZTServer-api-v0.2/
+  vusiif/ztgui/ztserver-api/0.2/
+    ztserver-api-0.2.jar
+    ztserver-api-0.2-sources.jar
+    ztserver-api-0.2-javadoc.jar
+    ztserver-api-0.2.pom
   sample/           最小插件项目
   sdk.json          API/程序版本、JDK 要求、输入指纹
   README.md         SDK 说明与独立消费示例
@@ -26,7 +26,7 @@ ZTServer-api-v0.2-beta/
 <dependency>
   <groupId>vusiif.ztgui</groupId>
   <artifactId>ztserver-api</artifactId>
-  <version>0.2-beta</version>
+  <version>0.2</version>
   <scope>provided</scope>
 </dependency>
 ```
@@ -34,7 +34,7 @@ ZTServer-api-v0.2-beta/
 `provided` 表示运行时由宿主提供 API、Jackson 与 Netty，插件 JAR 不应 shade 这些依赖。SDK 的 `sample/pom.xml` 通过 `file:` 仓库直接引用解压目录，可在临时本地仓库验证：
 
 ```bash
-mvn -f build/dist/ZTServer-api-v0.2-beta/sample/pom.xml package
+mvn -f build/dist/ZTServer-api-v0.2/sample/pom.xml package
 ```
 
 ## 插件格式与加载
@@ -48,12 +48,12 @@ mvn -f build/dist/ZTServer-api-v0.2-beta/sample/pom.xml package
   "id": "voice-chat",
   "name": "语音聊天",
   "version": "0.1.0",
-  "apiVersion": "0.2-beta",
+  "apiVersion": "0.2",
   "mainClass": "vusiif.ztgui.voicechat.VoiceChatPlugin"
 }
 ```
 
-校验规则：`formatVersion==1`、`host=="server"`、ID 匹配 `[A-Za-z0-9_-]{1,128}` 且大小写不敏感地不等于 `builtin`、显示名去空白非空、版本非空、`apiVersion` 精确等于宿主 API（当前 `0.2-beta`，含预发布后缀）、`mainClass` 非空；JAR 最大 256 MiB，manifest 最大 64 KiB。仅接受直接子目录中的 `.jar`，拒绝符号链接和非普通文件；发现 `.ztplugin` 时记录 `unsupported package, use .jar`。
+校验规则：`formatVersion==1`、`host=="server"`、ID 匹配 `[A-Za-z0-9_-]{1,128}` 且大小写不敏感地不等于 `builtin`、显示名去空白非空、版本非空、`apiVersion` 精确等于宿主 API（当前 `0.2`，含预发布后缀）、`mainClass` 非空；JAR 最大 256 MiB，manifest 最大 64 KiB。仅接受直接子目录中的 `.jar`，拒绝符号链接和非普通文件；发现 `.ztplugin` 时记录 `unsupported package, use .jar`。
 
 宿主用 `URLClassLoader`（parent 为宿主 classloader）实例化 mainClass（无参构造），实例必须实现 `ServerPlugin`，`info()` 的 `id/name/version` 必须与 manifest 完全一致。重复 ID 或重复显示名（大小写不敏感）拒绝后加载的插件。加载失败关闭 classloader；启动失败保留已加载对象但不 ready，停止时仍调用 `onStop` 并关闭 classloader。只在启动时扫描，增减插件后重启。
 

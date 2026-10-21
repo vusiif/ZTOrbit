@@ -58,8 +58,6 @@ Result PluginRegistry::registerPlugin(PluginDefinition definition, PluginLifecyc
         return {Error::IncompatibleApi, QStringLiteral("插件要求的 API 版本不兼容")};
     if (std::any_of(m_plugins.cbegin(),m_plugins.cend(),[&](const api::PluginDefinition &p) { return p.info.id.compare(info.id,Qt::CaseInsensitive)==0; }))
         return {Error::DuplicatePlugin, QStringLiteral("插件 ID 已注册：%1").arg(info.id)};
-    for(const auto &registered:m_plugins) if(registered.info.name.compare(info.name,Qt::CaseInsensitive)==0)
-        return {Error::DuplicatePlugin,QStringLiteral("插件显示名对应的数据目录已被使用")};
     QSet<QString> ids;
     for (const auto &menu : definition.menus) {
         if (!validId(menu.id) || ids.contains(menu.id) || menu.title.trimmed().isEmpty() || !menu.createPage)

@@ -29,9 +29,11 @@ private slots:
         int calls = 0; PingResult result;
         pingMember(this, QHostAddress::LocalHost, [&](auto value) { result=value; ++calls; }, FAKE_PING);
         QCOMPARE(calls, 0); QTRY_COMPARE(calls, 1); QCOMPARE(result.text, QString("12 ms"));
+        QVERIFY(result.state == PingState::Success);
         qputenv("ZT_TEST_PING_MODE", "unreachable");
         pingMember(this, QHostAddress::LocalHost, [&](auto value) { result=value; ++calls; }, FAKE_PING);
         QTRY_COMPARE(calls, 2); QCOMPARE(result.text, QStringLiteral("不可达"));
+        QVERIFY(result.state == PingState::Unreachable);
     }
     void deadlineAndCancellation() {
         qputenv("ZT_TEST_PING_MODE", "hang");
@@ -40,6 +42,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(calls, 1, 5000);
         QVERIFY(elapsed.elapsed() >= 3500); QVERIFY(elapsed.elapsed() < 5000);
         QCOMPARE(result.text, QStringLiteral("不可达")); QVERIFY(result.detail.contains(QStringLiteral("超时")));
+        QVERIFY(result.state == PingState::Unreachable);
         auto *context = new QObject;
         pingMember(context, QHostAddress::LocalHost, [&](auto) { ++calls; }, FAKE_PING);
         QTRY_VERIFY(context->findChild<QProcess *>() && context->findChild<QProcess *>()->state() == QProcess::Running);

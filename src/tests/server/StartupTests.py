@@ -43,7 +43,7 @@ class StartupTests(unittest.TestCase):
             "PY\n"
         )
         self.fake_java.chmod(0o755)
-        for command in ("dirname", "sed", "head", "python3"):
+        for command in ("dirname", "sed", "head", "python3", "cat"):
             executable = shutil.which(command)
             if executable:
                 (self.bin / command).symlink_to(executable)
@@ -91,7 +91,7 @@ class StartupTests(unittest.TestCase):
 
     def test_missing_java_blocks_start(self):
         self.fake_java.unlink()
-        result = self.run_launcher()
+        result = self.run_launcher(PATH=str(self.bin))
         self.assertEqual(result.returncode, 78)
         self.assertIn("Java", result.stderr)
 

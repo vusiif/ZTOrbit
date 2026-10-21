@@ -1,8 +1,8 @@
 #include "VoiceController.h"
+#include "VoiceConfig.h"
 #include "VoiceSession.h"
 #include <QCoreApplication>
 #include <QPermissions>
-#include <QSettings>
 #include <QRegularExpression>
 #include <QJsonDocument>
 #include <ztprotocol/NetworkAddress.h>
@@ -12,12 +12,12 @@ namespace vusiif::ztgui::voice_chat {
 VoiceController::VoiceController(QObject *parent, std::shared_ptr<AudioDeviceCache> cache)
     : QObject(parent), m_session(new VoiceSession(cache,this)), m_cache(std::move(cache))
 {
-    QSettings settings;
-    m_address = settings.value("voice-chat/address").toString(); m_nickname = settings.value("voice-chat/nickname").toString();
-    m_volume = std::clamp(settings.value("voice-chat/volume", 80).toInt(), 0, 200);
-    m_inputVolume=std::clamp(settings.value("voice-chat/inputVolume",100).toInt(),0,200);
-    m_muted = settings.value("voice-chat/muted", false).toBool(); m_deafened = settings.value("voice-chat/deafened", false).toBool();
-    m_input = settings.value("voice-chat/input").toByteArray(); m_output = settings.value("voice-chat/output").toByteArray();
+    const auto &config = m_cache->config;
+    m_address = config.address; m_nickname = config.nickname;
+    m_volume = config.volume; m_inputVolume = config.inputVolume;
+    m_muted = config.muted; m_deafened = config.deafened;
+    m_input = config.input; m_output = config.output;
+    if (!config.error.isEmpty()) m_status = config.error;
     if(m_cache->files) {
         const auto saved=m_cache->files->readFile("member-remarks.json");
         if(saved.ok() && !saved.data.isEmpty()) {
@@ -43,26 +43,71 @@ VoiceController::VoiceController(QObject *parent, std::shared_ptr<AudioDeviceCac
         updateMemberNames();
         emit stateChanged();
     });
+    if(m_cache->sounds) {
+        connect(m_session,&VoiceSession::selfJoined,this,[this] { m_cache->sounds->enqueue(VoiceSoundPlayer::Cue::Join); });
+        connect(m_session,&VoiceSession::memberJoined,this,[this](quint32) { m_cache->sounds->enqueue(VoiceSoundPlayer::Cue::Join); });
+        connect(m_session,&VoiceSession::memberLeft,this,[this](quint32) { m_cache->sounds->enqueue(VoiceSoundPlayer::Cue::Leave); });
+        connect(m_session,&VoiceSession::roomReset,this,[this] { m_cache->sounds->reset(); });
+        m_cache->sounds->setOutputDevice(m_output);
+        m_cache->sounds->setVolume(m_volume);
+        m_cache->sounds->setDeafened(m_deafened);
+    }
     configureAudio();
     if (m_cache->snapshot().ready) monitorDevices();
-    requestDeviceRefresh(); setMuted(m_muted); setDeafened(m_deafened); setVolume(m_volume); setInputVolume(m_inputVolume);
+    requestDeviceRefresh();
+    // Seed the session with persisted state without writing the config again.
+    QMetaObject::invokeMethod(m_session, [worker = m_session, muted = m_muted, deafened = m_deafened,
+                                           volume = m_volume, inputVolume = m_inputVolume] {
+        worker->mute(muted); worker->deafen(deafened); worker->volume(volume); worker->inputVolume(inputVolume);
+    });
 }
 VoiceController::~VoiceController()
 {
-    save();
     stopForUnload();
     m_cache->audio->packet={}; m_cache->audio->error={}; m_cache->audio->sourcesChanged={};
 }
-void VoiceController::stopForUnload() { m_stopping=true; m_testRequested=false; delete m_identityRequest.data(); m_session->stopForUnload(); m_busy=false; m_connected=false; emit stateChanged(); }
-void VoiceController::setAddress(const QString &value) { if (m_connected || m_busy) return; m_address = value; save(); emit stateChanged(); }
-void VoiceController::setNickname(const QString &value) { if (m_connected || m_busy) return; m_nickname = value.left(64); save(); emit stateChanged(); }
+void VoiceController::stopForUnload() { m_stopping=true; m_testRequested=false; delete m_identityRequest.data(); m_session->stopForUnload(); if(m_cache->sounds) m_cache->sounds->stop(); m_busy=false; m_connected=false; emit stateChanged(); }
+bool VoiceController::persistField(const QString &key, const QJsonValue &value)
+{
+    if(m_stopping) return false;
+    if(!m_cache->storage) {
+        m_status=QStringLiteral("宿主未提供插件存储事务接口，无法保存语音配置");
+        emit stateChanged(); return false;
+    }
+    QString error;
+    if(!saveVoiceConfigField(*m_cache->storage,key,value,error)) {
+        m_status=QStringLiteral("无法保存语音配置：%1").arg(error);
+        emit stateChanged(); return false;
+    }
+    return true;
+}
+void VoiceController::setAddress(const QString &value) {
+    if (m_connected || m_busy) return;
+    const auto normalized=value.trimmed();
+    if(normalized==m_address) return;
+    if(!persistField("address",normalized)) return;
+    m_address = normalized; emit stateChanged();
+}
+void VoiceController::setNickname(const QString &value) {
+    if (m_connected || m_busy) return;
+    const auto normalized=value.left(64);
+    if(normalized==m_nickname) return;
+    if(!persistField("nickname",normalized)) return;
+    m_nickname = normalized; emit stateChanged();
+}
 void VoiceController::setVolume(int value)
 {
-    m_volume = std::clamp(value, 0, 200); save(); emit stateChanged();
+    value=std::clamp(value,0,200);
+    if(value==m_volume) return;
+    if(!persistField("volume",value)) return;
+    m_volume = value; if(m_cache->sounds) m_cache->sounds->setVolume(value); emit stateChanged();
     QMetaObject::invokeMethod(m_session, [worker = m_session, value = m_volume] { worker->volume(value); });
 }
 void VoiceController::setInputVolume(int value) {
-    m_inputVolume=std::clamp(value,0,200); save(); emit stateChanged();
+    value=std::clamp(value,0,200);
+    if(value==m_inputVolume) return;
+    if(!persistField("inputVolume",value)) return;
+    m_inputVolume=value; emit stateChanged();
     QMetaObject::invokeMethod(m_session,[worker=m_session,value=m_inputVolume] { worker->inputVolume(value); });
 }
 void VoiceController::setMemberVolume(quint32 member,int value) {
@@ -86,20 +131,41 @@ void VoiceController::updateMemberNames() {
     }
 }
 void VoiceController::setMemberRemark(quint32 member, const QString &remark) {
-    if(m_stopping || !m_inRoom || !m_cache->files || !m_remarksWritable) return;
+    if(m_stopping || !m_inRoom || !m_cache->storage || !m_remarksWritable) return;
     for(const auto &value:m_members) {
         const auto row=value.toMap(); if(row["id"].toUInt()!=member || !row["canRemark"].toBool()) continue;
-        auto updated=m_remarks; const auto id=row["ztid"].toString(); const auto name=remark.trimmed().left(64);
-        if(name.isEmpty()) updated.remove(id); else updated[id]=name;
-        const auto result=m_cache->files->writeFile("member-remarks.json",QJsonDocument(updated).toJson(QJsonDocument::Indented));
-        if(!result.ok()) { m_status=QStringLiteral("无法保存成员备注：%1").arg(result.error); emit stateChanged(); return; }
+        const auto id=row["ztid"].toString(); QJsonObject updated; QString error;
+        // Only this ZeroTier ID changes; concurrent remarks from another user survive.
+        if(!updateMemberRemark(*m_cache->storage,id,remark,updated,error)) {
+            m_remarksWritable=false;
+            m_status=QStringLiteral("无法保存成员备注：%1").arg(error); emit stateChanged(); return;
+        }
         m_remarks=updated; updateMemberNames(); emit stateChanged(); return;
     }
 }
-void VoiceController::setMuted(bool value) { m_muted = value; save(); emit stateChanged(); QMetaObject::invokeMethod(m_session, [worker = m_session, value] { worker->mute(value); }); }
-void VoiceController::setDeafened(bool value) { m_deafened = value; save(); emit stateChanged(); QMetaObject::invokeMethod(m_session, [worker = m_session, value] { worker->deafen(value); }); }
-void VoiceController::setInput(const QString &value) { m_input = QByteArray::fromHex(value.toLatin1()); configureAudio(); save(); emit devicesChanged(); }
-void VoiceController::setOutput(const QString &value) { m_output = QByteArray::fromHex(value.toLatin1()); configureAudio(); save(); emit devicesChanged(); }
+void VoiceController::setMuted(bool value) { if(value==m_muted) return; if(!persistField("muted",value)) m_status=QStringLiteral("麦克风状态已应用，但保存失败"); m_muted = value; emit stateChanged(); QMetaObject::invokeMethod(m_session, [worker = m_session, value] { worker->mute(value); }); }
+void VoiceController::setDeafened(bool value) {
+    if(value==m_deafened) return;
+    if(!persistField("deafened",value)) m_status=QStringLiteral("禁听状态已应用，但保存失败");
+    m_deafened = value;
+    if(m_cache->sounds) m_cache->sounds->setDeafened(value);
+    emit stateChanged();
+    QMetaObject::invokeMethod(m_session, [worker = m_session, value] { worker->deafen(value); });
+}
+void VoiceController::setInput(const QString &value) {
+    const auto bytes=QByteArray::fromHex(value.toLatin1());
+    if(bytes==m_input) return;
+    if(!persistField("input",QString::fromLatin1(bytes.toHex()))) return;
+    m_input = bytes; configureAudio(); emit devicesChanged();
+}
+void VoiceController::setOutput(const QString &value) {
+    const auto bytes=QByteArray::fromHex(value.toLatin1());
+    if(bytes==m_output) return;
+    if(!persistField("output",QString::fromLatin1(bytes.toHex()))) return;
+    m_output = bytes;
+    if(m_cache->sounds) m_cache->sounds->setOutputDevice(bytes);
+    configureAudio(); emit devicesChanged();
+}
 void VoiceController::toggleConnection()
 {
     if(m_stopping) return;
@@ -117,12 +183,13 @@ void VoiceController::toggleConnection()
             if(!result.ok() || !identity.match(id).hasMatch()) id.clear();
             if(name.isEmpty() && id.isEmpty()) { m_busy=false; m_status=QStringLiteral("无法读取 ZeroTier ID，请填写昵称后重试"); emit stateChanged(); return; }
             if(name.isEmpty()) m_nickname=id;
-            save(); emit stateChanged(); m_session->open(endpoint.host,endpoint.port,name.isEmpty()?id:name,id);
+            if(name.isEmpty()) persistField("nickname",id);
+            emit stateChanged(); m_session->open(endpoint.host,endpoint.port,name.isEmpty()?id:name,id);
         });
         return;
     }
     if(name.isEmpty()) { m_status=QStringLiteral("无法读取 ZeroTier ID，请填写昵称后重试"); emit stateChanged(); return; }
-    save(); m_busy = true; emit stateChanged();
+    m_busy = true; emit stateChanged();
     QMetaObject::invokeMethod(m_session, [worker = m_session, endpoint, name] { worker->open(endpoint.host, endpoint.port, name); });
 }
 void VoiceController::setMicrophoneTesting(bool enabled)
@@ -179,14 +246,6 @@ void VoiceController::monitorDevices()
     if (m_monitoring) return;
     m_monitoring = true;
     m_cache->audio->sourcesChanged=[this] { requestDeviceRefresh(); m_status=QStringLiteral("音频设备已变化，请检查设备选择"); emit stateChanged(); };
-}
-void VoiceController::save()
-{
-    QSettings settings;
-    settings.setValue("voice-chat/address", m_address.trimmed()); settings.remove("voice-chat/port");
-    settings.setValue("voice-chat/nickname", m_nickname.trimmed()); settings.setValue("voice-chat/input", m_input); settings.setValue("voice-chat/output", m_output);
-    settings.setValue("voice-chat/inputVolume",m_inputVolume);
-    settings.setValue("voice-chat/volume", m_volume); settings.setValue("voice-chat/muted", m_muted); settings.setValue("voice-chat/deafened", m_deafened);
 }
 void VoiceController::withPermission(std::function<void()> action)
 {

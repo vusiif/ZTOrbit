@@ -11,8 +11,13 @@
 namespace vusiif::ztgui::media {
 inline constexpr auto SessionService = "media.session";
 inline constexpr auto SessionApi = "1";
+inline constexpr auto ClipService = "media.clip";
+inline constexpr auto ClipApi = "1";
 inline constexpr int FrameSamples = 960;
 inline constexpr int MaxOpusBytes = 1170;
+inline constexpr int ClipSampleRate = 48000;
+inline constexpr int MaxClipBytes = 256 * 1024;
+inline constexpr int MaxClipDurationMs = 2000;
 struct MediaError {
     QString code, message;
     bool ok() const { return code.isEmpty(); }

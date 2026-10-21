@@ -1,6 +1,6 @@
 # 语音服务端插件（Java）
 
-`ztserver_voice_chat.jar` 是 ZTServer 的 Java 插件，路由 ID `voice-chat`、显示名“语音聊天”、版本 0.1.0、API 0.2-beta。成员房间与 `ZTV1` 音频协议与旧 C++ 插件完全一致；客户端无需修改。
+`ztserver_voice_chat.jar` 是 ZTServer 的 Java 插件，路由 ID `voice-chat`、显示名“语音聊天”、版本 0.1.0、API 0.2。成员房间与 `ZTV1` 音频协议与旧 C++ 插件完全一致；客户端无需修改。
 
 ## 构建与部署
 
@@ -24,7 +24,7 @@ install -m644 /path/ztserver_voice_chat.jar plugins/
 systemctl restart zt-server.service
 ```
 
-插件加载要求 manifest `apiVersion` 与宿主完全一致；构建脚本使用根 `SERVER_VERSION` 的前两段数字和同一预发布后缀（当前 0.2-beta）。
+插件加载要求 manifest `apiVersion` 与宿主完全一致；构建脚本使用根 `SERVER_VERSION` 的前两段数字和同一预发布后缀（当前 0.2）。
 
 ## 运行规则
 

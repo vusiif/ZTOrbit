@@ -1,0 +1,11 @@
+test_capacity (__main__.ServerTests.test_capacity) ... ok
+test_dead_session_removed (__main__.ServerTests.test_dead_session_removed) ... ok
+test_malformed_control_rejected (__main__.ServerTests.test_malformed_control_rejected) ... ok
+test_member_identity_and_legacy_clients (__main__.ServerTests.test_member_identity_and_legacy_clients) ... ok
+test_room_lifecycle_and_validation (__main__.ServerTests.test_room_lifecycle_and_validation) ... ok
+test_udp_isolation_mute_and_expired_credentials (__main__.ServerTests.test_udp_isolation_mute_and_expired_credentials) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 28.738s
+
+OK

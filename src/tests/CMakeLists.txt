@@ -20,6 +20,23 @@ if(MSVC)
     target_compile_options(network_tests PRIVATE /utf-8)
 endif()
 add_test(NAME network_transport COMMAND network_tests)
+add_executable(storage_tests StorageTests.cpp
+    "${ZTGUI_ROOT_DIR}/src/client/main/storage/StorageContext.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/storage/CoordinationLock.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/storage/SettingsStore.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/storage/PluginDataStore.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/storage/StorageMaintenance.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/storage/StorageMaintenanceScheduler.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/AppLog.cpp")
+target_include_directories(storage_tests PRIVATE "${ZTGUI_ROOT_DIR}/src/client/main"
+    "${ZTGUI_ROOT_DIR}/src/client/api/include")
+target_compile_definitions(storage_tests PRIVATE ZEROTIER_TESTING
+    ZEROTIER_GUI_VERSION="${ZEROTIER_VERSION}")
+target_link_libraries(storage_tests PRIVATE Qt6::Test Qt6::Core Qt6::Concurrent)
+if(MSVC)
+    target_compile_options(storage_tests PRIVATE /utf-8)
+endif()
+add_test(NAME storage_core COMMAND storage_tests)
 add_executable(fake_ping FakePing.cpp)
 target_link_libraries(fake_ping PRIVATE Qt6::Core)
 set_target_properties(fake_ping PROPERTIES OUTPUT_NAME "ping" RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}/ping-fixture")
@@ -35,6 +52,17 @@ add_test(NAME member_icmp_ping COMMAND member_ping_tests)
 set_tests_properties(member_icmp_ping PROPERTIES TIMEOUT 30)
 if(WIN32)
     add_test(NAME windows_port_preflight COMMAND powershell -NoProfile -NonInteractive -File "${CMAKE_CURRENT_SOURCE_DIR}/WindowsPortTests.ps1")
+    # Native read-only install check: a deny ACE replaces the regular-file fault
+    # injection and proves the fallback probe works without administrator help.
+    add_executable(readonly_probe ReadOnlyProbe.cpp
+        "${ZTGUI_ROOT_DIR}/src/client/main/storage/StorageContext.cpp")
+    target_include_directories(readonly_probe PRIVATE "${ZTGUI_ROOT_DIR}/src/client/main")
+    target_compile_definitions(readonly_probe PRIVATE ZEROTIER_TESTING)
+    target_link_libraries(readonly_probe PRIVATE Qt6::Core)
+    set_target_properties(readonly_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}")
+    add_test(NAME windows_native_readonly COMMAND powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass
+        -File "${CMAKE_CURRENT_SOURCE_DIR}/ReadOnlyProbe.ps1" -Probe "$<TARGET_FILE:readonly_probe>")
+    set_tests_properties(windows_native_readonly PROPERTIES TIMEOUT 60)
 endif()
 add_executable(instance_probe InstanceProbe.cpp "${ZTGUI_ROOT_DIR}/src/client/main/SingleInstance.cpp")
 target_include_directories(instance_probe PRIVATE "${ZTGUI_ROOT_DIR}/src/client/main")
@@ -83,15 +111,36 @@ set_tests_properties(gpu_acceleration_override PROPERTIES
     WORKING_DIRECTORY "${ZTGUI_BUILD_DIR}" TIMEOUT 30
     ENVIRONMENT "QT_QUICK_BACKEND=software")
 
+add_executable(storage_update_probe StorageUpdateProbe.cpp
+    "${ZTGUI_ROOT_DIR}/src/client/main/plugins/HostServicesImpl.cpp"
+    "${ZTGUI_ROOT_DIR}/src/plugins/voice-chat/client/VoiceConfig.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/plugins/ServiceBroker.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/ClientNetworkService.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/ZeroTierClient.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/NetworkMembers.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/AppLog.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/storage/StorageContext.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/storage/CoordinationLock.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/storage/SettingsStore.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/storage/PluginDataStore.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/MacPlatform.cpp")
+ztgui_configure_host(storage_update_probe)
+target_compile_definitions(storage_update_probe PRIVATE ZEROTIER_TESTING)
+set_target_properties(storage_update_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}")
+if(MSVC)
+    target_compile_options(storage_update_probe PRIVATE /utf-8)
+endif()
+
 qt_add_executable(core_tests CoreTests.cpp ${ZTGUI_MAIN_SOURCES} ${ZTGUI_MAIN_HEADERS})
 ztgui_configure_host(core_tests)
 target_link_libraries(core_tests PRIVATE Qt6::Test Qt6::Widgets)
-target_compile_definitions(core_tests PRIVATE ZEROTIER_TESTING)
-add_dependencies(core_tests fake_zerotier_cli app_log_probe instance_probe)
+target_compile_definitions(core_tests PRIVATE ZEROTIER_TESTING
+    STORAGE_UPDATE_PROBE="$<TARGET_FILE:storage_update_probe>")
+add_dependencies(core_tests fake_zerotier_cli app_log_probe instance_probe storage_update_probe)
 add_test(NAME core_regressions COMMAND core_tests -platform offscreen)
 set_tests_properties(core_regressions PROPERTIES WORKING_DIRECTORY "${ZTGUI_BUILD_DIR}" TIMEOUT 120)
 
-foreach(kind good bad obsolete legacy lifecycle lifecycle_failed cancellable cancellable_second cancellable_queued cancellable_blocked)
+foreach(kind good bad obsolete legacy lifecycle lifecycle_failed cancellable cancellable_second cancellable_queued cancellable_blocked twin_a twin_b)
     set(FIXTURE_API_VERSION "${ZTGUI_API_VERSION}")
     if(kind STREQUAL "bad")
         set(FIXTURE_API_VERSION "0.999")
@@ -124,6 +173,14 @@ foreach(kind good bad obsolete legacy lifecycle lifecycle_failed cancellable can
     elseif(kind MATCHES "^cancellable")
         set(pack_id "test-${kind}")
         set(pack_name "test-${kind}")
+    elseif(kind STREQUAL "twin_a")
+        # Two distinct IDs deliberately declare one display name; the storage
+        # layer must not let the first installed package claim legacy data.
+        set(pack_id "test-twin-a")
+        set(pack_name "Shared Name")
+    elseif(kind STREQUAL "twin_b")
+        set(pack_id "test-twin-b")
+        set(pack_name "Shared Name")
     endif()
     set(pack_iid "vusiif.ztgui.api.PluginInterface/3.0")
     if(kind STREQUAL "obsolete" OR kind STREQUAL "legacy")
@@ -136,8 +193,20 @@ foreach(kind good bad obsolete legacy lifecycle lifecycle_failed cancellable can
     add_dependencies(plugin_fixture_${kind} ztplugin_pack)
 endforeach()
 qt_add_executable(plugin_loader_tests plugins/LoaderTests.cpp
-    "${ZTGUI_ROOT_DIR}/src/client/main/plugins/PluginLoader.cpp" "${ZTGUI_ROOT_DIR}/src/client/main/plugins/PluginRegistry.cpp")
+    "${ZTGUI_ROOT_DIR}/src/client/main/plugins/PluginLoader.cpp" "${ZTGUI_ROOT_DIR}/src/client/main/plugins/PluginRegistry.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/PluginImport.cpp")
 target_link_libraries(plugin_loader_tests PRIVATE ZTGUI::Api Qt6::Test Qt6::Concurrent)
+add_executable(package_lock_probe PackageLockProbe.cpp)
+target_link_libraries(package_lock_probe PRIVATE Qt6::Core)
+set_target_properties(package_lock_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}")
+add_executable(coordination_lock_probe CoordinationLockProbe.cpp
+    "${ZTGUI_ROOT_DIR}/src/client/main/storage/CoordinationLock.cpp")
+target_include_directories(coordination_lock_probe PRIVATE "${ZTGUI_ROOT_DIR}/src/client/main")
+target_link_libraries(coordination_lock_probe PRIVATE Qt6::Core)
+set_target_properties(coordination_lock_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${ZTGUI_BUILD_DIR}")
+if(MSVC)
+    target_compile_options(coordination_lock_probe PRIVATE /utf-8)
+endif()
 
 # Plugin tools are implemented by the host, never by the public SDK.
 function(ztgui_add_plugin_tools_test target)
@@ -148,12 +217,19 @@ function(ztgui_add_plugin_tools_test target)
         "${ZTGUI_ROOT_DIR}/src/client/main/ZeroTierClient.cpp"
         "${ZTGUI_ROOT_DIR}/src/client/main/NetworkMembers.cpp"
         "${ZTGUI_ROOT_DIR}/src/client/main/AppLog.cpp"
+        "${ZTGUI_ROOT_DIR}/src/client/main/storage/StorageContext.cpp"
+    "${ZTGUI_ROOT_DIR}/src/client/main/storage/CoordinationLock.cpp"
+        "${ZTGUI_ROOT_DIR}/src/client/main/storage/SettingsStore.cpp"
+        "${ZTGUI_ROOT_DIR}/src/client/main/storage/PluginDataStore.cpp"
+        "${ZTGUI_ROOT_DIR}/src/client/main/storage/StorageMaintenance.cpp"
         "${ZTGUI_ROOT_DIR}/src/client/main/MacPlatform.cpp")
     ztgui_configure_host(${target})
     target_compile_definitions(${target} PRIVATE ZEROTIER_TESTING)
 endfunction()
 ztgui_add_plugin_tools_test(plugin_loader_tests)
 target_compile_definitions(plugin_loader_tests PRIVATE
+    PACKAGE_LOCK_PROBE="$<TARGET_FILE:package_lock_probe>"
+    COORDINATION_LOCK_PROBE="$<TARGET_FILE:coordination_lock_probe>"
     FIXTURE_LEGACY="$<TARGET_FILE_DIR:plugin_fixture_legacy>/plugin_fixture_legacy.ztplugin"
     FIXTURE_GOOD="$<TARGET_FILE_DIR:plugin_fixture_good>/plugin_fixture_good.ztplugin" FIXTURE_BAD="$<TARGET_FILE_DIR:plugin_fixture_bad>/plugin_fixture_bad.ztplugin"
     FIXTURE_OBSOLETE="$<TARGET_FILE_DIR:plugin_fixture_obsolete>/plugin_fixture_obsolete.ztplugin"
@@ -162,14 +238,17 @@ target_compile_definitions(plugin_loader_tests PRIVATE
     FIXTURE_CANCELLABLE="$<TARGET_FILE_DIR:plugin_fixture_cancellable>/plugin_fixture_cancellable.ztplugin"
     FIXTURE_CANCELLABLE_SECOND="$<TARGET_FILE_DIR:plugin_fixture_cancellable_second>/plugin_fixture_cancellable_second.ztplugin"
     FIXTURE_CANCELLABLE_QUEUED="$<TARGET_FILE_DIR:plugin_fixture_cancellable_queued>/plugin_fixture_cancellable_queued.ztplugin"
-    FIXTURE_CANCELLABLE_BLOCKED="$<TARGET_FILE_DIR:plugin_fixture_cancellable_blocked>/plugin_fixture_cancellable_blocked.ztplugin")
+    FIXTURE_CANCELLABLE_BLOCKED="$<TARGET_FILE_DIR:plugin_fixture_cancellable_blocked>/plugin_fixture_cancellable_blocked.ztplugin"
+    FIXTURE_TWIN_A="$<TARGET_FILE_DIR:plugin_fixture_twin_a>/plugin_fixture_twin_a.ztplugin"
+    FIXTURE_TWIN_B="$<TARGET_FILE_DIR:plugin_fixture_twin_b>/plugin_fixture_twin_b.ztplugin")
 if(MSVC)
     target_compile_options(plugin_loader_tests PRIVATE /utf-8)
 endif()
-add_dependencies(plugin_loader_tests plugin_fixture_good plugin_fixture_bad plugin_fixture_obsolete
+add_dependencies(plugin_loader_tests package_lock_probe plugin_fixture_good plugin_fixture_bad plugin_fixture_obsolete
     plugin_fixture_legacy
     plugin_fixture_lifecycle plugin_fixture_lifecycle_failed plugin_fixture_cancellable
-    plugin_fixture_cancellable_second plugin_fixture_cancellable_queued plugin_fixture_cancellable_blocked)
+    plugin_fixture_cancellable_second plugin_fixture_cancellable_queued plugin_fixture_cancellable_blocked
+    plugin_fixture_twin_a plugin_fixture_twin_b coordination_lock_probe)
 add_test(NAME dynamic_plugins COMMAND plugin_loader_tests -platform offscreen)
 
 target_compile_definitions(zerotier_gui_tests PRIVATE

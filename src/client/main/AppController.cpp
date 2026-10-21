@@ -6,12 +6,13 @@
 #include "NetworkMembers.h"
 #include "PluginImport.h"
 #include "SingleInstance.h"
+#include "storage/StorageMaintenance.h"
 #include <ztprotocol/NetworkAddress.h>
 #include <QClipboard>
+#include <QDateTime>
 #include <QGuiApplication>
 #include <QFutureWatcher>
 #include <QtConcurrentRun>
-#include <QSettings>
 #include <QStandardPaths>
 #include <QRegularExpression>
 #include <QJsonArray>
@@ -41,11 +42,6 @@ LRESULT CALLBACK captionProcedure(HWND handle, UINT message, WPARAM wParam, LPAR
     return DefSubclassProc(handle, message, wParam, lParam);
 }
 #endif
-QString localName(const QString &kind, const QString &id, const QString &fallback = {})
-{
-    const auto value = QSettings().value("names/" + kind + '/' + id).toString().trimmed();
-    return value.isEmpty() ? (fallback.isEmpty() ? id : fallback) : value;
-}
 QVariantMap row(const QString &id, const QString &name, const QStringList &cells, const QJsonObject &details)
 {
     return {{"rowId", id}, {"name", name}, {"cells", cells}, {"details", details.toVariantMap()}};
@@ -64,14 +60,60 @@ QString normalizeMoonId(const QString &id)
     return QRegularExpression("^[0-9a-fA-F]{1,16}$").match(id).hasMatch() ? id.toLower().rightJustified(16, '0') : id;
 }
 }
-AppController::AppController(QObject *parent, const QString &pluginDirectory, SystemOperations *operations)
-    : QObject(parent), m_operations(operations ? operations : new SystemOperations(this)),
+AppController::AppController(QObject *parent, const QString &pluginDirectory, SystemOperations *operations,
+                             const storage::StorageContext &storage)
+    : QObject(parent), m_storage(storage), m_settings(m_storage.settingsFile()),
+      m_operations(operations ? operations : new SystemOperations(this)),
       m_infoPoller(new zerotier::JsonPoller(this, "info", true)),
       m_networkPoller(new zerotier::JsonPoller(this, "listnetworks")),
       m_peerPoller(new zerotier::JsonPoller(this, "listpeers")),
       m_moonPoller(new zerotier::JsonPoller(this, "listmoons")),
       m_pluginDirectory(pluginDirectory.isEmpty() ? QCoreApplication::applicationDirPath() + "/plugins" : pluginDirectory)
 {
+    QString storageError;
+    if (m_storage.isValid()) m_storage.prepare(storageError);
+    else storageError = m_storage.error();
+    if (m_storage.isValid()) {
+        package::CacheContext cacheContext;
+        cacheContext.root = m_storage.pluginPackageCacheRoot();
+        cacheContext.userKey = m_storage.userKeyValue();
+        cacheContext.runId = m_storage.runId();
+        cacheContext.installKey = m_storage.installKeyValue();
+        cacheContext.legacy = false;
+        const auto cacheError = package::prepareCacheSession(cacheContext);
+        if (!cacheError.isEmpty() && storageError.isEmpty()) storageError = cacheError;
+        package::cleanStaleCache(cacheContext);
+    }
+    QString errorMessage = storageError;
+    // A failed copy of the host INI must not be occupied by defaults: every
+    // persistent host write (C++ setters, plugin enable state and QML window /
+    // column state through setHostSetting) is refused until the retry settles.
+    const auto settingsProtection = storage::SettingsStore::guardStorageMigration(m_settings, m_storage);
+    const auto migration = storage::SettingsStore::migrateLegacy(m_settings, m_storage.metadataDirectory(),
+                                                                 m_storage.userKey());
+    QStringList warnings = m_storage.warnings();
+    if (!settingsProtection.isEmpty()) warnings.append(settingsProtection);
+    for (const auto &warning : migration.warnings) warnings.append(warning);
+    if (!migration.error.isEmpty()) errorMessage = migration.error;
+    for (const auto &warning : warnings) util::log::write(QStringLiteral("存储：") + warning);
+    if (!errorMessage.isEmpty()) util::log::write(QStringLiteral("存储错误：") + errorMessage);
+    m_storageWarning = errorMessage.isEmpty() ? warnings.join(QLatin1Char('\n')) : errorMessage;
+    m_loader.setSettings(&m_settings);
+    m_loader.setStorage(m_storage);
+    m_loader.setCacheWriteNotifier([this](const QString &path) {
+        if (m_maintenance) m_maintenance->notifyCacheWrite(path);
+    });
+    // Authorized deletes recorded by an earlier run must complete before the
+    // package scan can see the moved packages as installed.
+    const auto recoveredDeletions = m_loader.recoverPendingDeletions(m_pluginDirectory);
+    if (recoveredDeletions > 0)
+        util::log::write(QStringLiteral("存储：已完成 %1 个待删插件事务。").arg(recoveredDeletions));
+    const auto pendingIssues = m_loader.pendingDeletionIssues();
+    if (!pendingIssues.isEmpty()) {
+        for (const auto &issue : pendingIssues) util::log::write(QStringLiteral("存储：") + issue);
+        const auto text = pendingIssues.join(QLatin1Char('\n'));
+        m_storageWarning = m_storageWarning.isEmpty() ? text : m_storageWarning + QLatin1Char('\n') + text;
+    }
     m_serviceStatus.known = false;
     connect(&m_loader,&plugins::PluginLoader::stateChanged,this,&AppController::menusChanged);
     connect(&m_loader,&plugins::PluginLoader::loadFinished,this,[this](const QString &id,bool success,const QString &message) {
@@ -164,9 +206,37 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
     if (!pluginDirectory.isEmpty()) m_loader.scan(m_pluginDirectory, m_registry);
 #endif
     updateService(); refreshMoonFiles();
+    refreshStorageUsage();
+    m_maintenance = std::make_unique<storage::StorageMaintenanceScheduler>(m_storage, this);
+    connect(m_maintenance.get(), &storage::StorageMaintenanceScheduler::cleanupFinished, this,
+            [this](const storage::CleanupReport &report) {
+        m_storageMaintenance = QVariantMap{{"releasedBytes", double(report.releasedBytes)},
+            {"released", report.released.size()}, {"skipped", report.skipped.size()},
+            {"failed", report.failed.size()}, {"error", report.error},
+            {"lastRun", m_maintenance ? m_maintenance->lastRun().toString(Qt::ISODate) : QString()}};
+        if (!report.error.isEmpty())
+            util::log::write(QStringLiteral("存储自动维护：%1").arg(report.error));
+        // Update only the maintenance line; a full directory scan here would
+        // block the GUI on every debounced cache write.
+        m_storageUsage["maintenance"] = maintenanceText();
+        emit storageUsageChanged();
+    });
+    // Rotation and cache-write notifications only schedule work; the cleanup
+    // itself runs on a worker thread and never blocks the GUI.
+    util::log::setRotationCallback([scheduler = QPointer<storage::StorageMaintenanceScheduler>(m_maintenance.get())] {
+        if (scheduler) scheduler->notifyLogRotation();
+    });
+#ifndef ZEROTIER_TESTING
+    // GUI regressions use these controllers with temporary storage; automatic
+    // maintenance is covered by dedicated scheduler tests instead of running
+    // background filesystem scans during unrelated timing-sensitive cases.
+    m_maintenance->start();
+#endif
 }
 AppController::~AppController()
 {
+    util::log::setRotationCallback({});
+    m_maintenance.reset();
 #ifdef Q_OS_WIN
     if (m_windowId && IsWindow(reinterpret_cast<HWND>(m_windowId)))
         RemoveWindowSubclass(reinterpret_cast<HWND>(m_windowId), captionProcedure, reinterpret_cast<UINT_PTR>(this));
@@ -198,25 +268,25 @@ void AppController::updateService()
     m_serviceStatus = zerotier::serviceStatus(); emit stateChanged();
 #endif
 }
-QString AppController::theme() const { return QSettings().value("appearance/theme", "light").toString() == "dark" ? "dark" : "light"; }
+QString AppController::theme() const { return m_settings.value("appearance/theme", "light").toString() == "dark" ? "dark" : "light"; }
 bool AppController::dark() const { return theme() == "dark"; }
 void AppController::setTheme(const QString &value)
 {
     if (value != "light" && value != "dark") return;
-    QSettings().setValue("appearance/theme", value); emit themeChanged();
+    m_settings.setValue("appearance/theme", value); emit themeChanged();
 }
 bool AppController::disableGpuAcceleration() const
 {
-    return QSettings().value("rendering/disableGpuAcceleration", true).toBool();
+    return m_settings.value("rendering/disableGpuAcceleration", true).toBool();
 }
 void AppController::setDisableGpuAcceleration(bool disabled)
 {
     if (disableGpuAcceleration() == disabled) return;
-    QSettings settings;
-    settings.setValue("rendering/disableGpuAcceleration", disabled);
-    const bool showHint=!settings.value("rendering/restartHintShown",false).toBool();
-    settings.setValue("rendering/restartHintShown",true);
-    settings.sync();
+    m_settings.setValue("rendering/disableGpuAcceleration", disabled);
+    const bool showHint=!m_settings.value("rendering/restartHintShown",false).toBool();
+    m_settings.setValue("rendering/restartHintShown",true);
+    QString syncError;
+    if (!m_settings.sync(syncError)) feedback(QStringLiteral("无法保存设置：%1").arg(syncError));
     emit disableGpuAccelerationChanged();
     if(showHint) emit pluginNoticeRequested(QStringLiteral("需要重启程序"),QStringLiteral("GPU 加速设置已保存，完全退出并重新启动程序后生效。"));
 }
@@ -224,11 +294,296 @@ bool AppController::gpuAccelerationForcedOff() const
 {
     return QCoreApplication::arguments().contains("--disable-gpu-acceleration");
 }
+void AppController::setHostSetting(const QString &key, const QVariant &value)
+{
+    // QML window, sidebar and column state share the host INI with the C++
+    // setters, so the shared-root migration gate applies here as well.
+    m_settings.setValue(key, value);
+    QString error;
+    if (m_settings.sync(error)) return;
+    // Resizing the splitter may retry on every pixel; report the first failure
+    // once instead of flooding the feedback bar.
+    if (!m_settingsWriteReported) {
+        m_settingsWriteReported = true;
+        util::log::write(QStringLiteral("存储：无法保存设置 %1：%2").arg(key, error));
+    }
+}
 QString AppController::version() const { return QCoreApplication::applicationVersion(); }
 QString AppController::apiVersion() const { return QString::fromLatin1(api::ApiVersion); }
 QString AppController::serverVersion() const { return QStringLiteral(ZTGUI_SERVER_VERSION); }
 QString AppController::serverApiVersion() const { return QStringLiteral(ZTGUI_SERVER_API_VERSION); }
 QString AppController::qtVersion() const { return QString::fromLatin1(qVersion()); }
+QString AppController::storageMode() const
+{
+    switch (m_storage.mode()) {
+    case storage::StorageContext::Mode::Personal: return QStringLiteral("personal");
+    case storage::StorageContext::Mode::Ephemeral: return QStringLiteral("ephemeral");
+    case storage::StorageContext::Mode::Shared: break;
+    }
+    return QStringLiteral("shared");
+}
+QString AppController::storageWarning() const
+{
+    return m_storageWarning;
+}
+QStringList AppController::installedPluginIds() const
+{
+    QSet<QString> ids;
+    for (const auto &value : m_loader.catalog()) {
+        const auto id = value.toMap()["id"].toString();
+        if (!id.isEmpty()) ids.insert(id);
+    }
+    for (const auto &plugin : m_registry.plugins()) ids.insert(plugin.id);
+    auto result = QStringList(ids.cbegin(), ids.cend());
+    std::sort(result.begin(), result.end());
+    return result;
+}
+QString AppController::maintenanceText() const
+{
+    if (m_storageMaintenance.isEmpty()) return {};
+    const auto error = m_storageMaintenance.value("error").toString();
+    const auto lastRun = m_storageMaintenance.value("lastRun").toString();
+    if (!error.isEmpty())
+        return QStringLiteral("自动维护失败（%1）：%2").arg(lastRun, error);
+    return QStringLiteral("最近自动维护 %1：释放 %2 项（%3 MiB）。")
+        .arg(lastRun).arg(m_storageMaintenance.value("released").toInt())
+        .arg(QString::number(m_storageMaintenance.value("releasedBytes").toDouble() / (1024.0 * 1024.0), 'f', 1));
+}
+void AppController::refreshStorageUsage()
+{
+    requestStorageScan();
+}
+
+void AppController::requestStorageScan()
+{
+    if (m_closing) return;
+    // A running scan or cleanup owns the filesystem view; coalesce requests.
+    if (m_storageScanBusy || m_storageBusy) {
+        m_storageScanQueued = true;
+        return;
+    }
+    m_storageScanBusy = true;
+    m_storageScanQueued = false;
+    m_storageScanError.clear();
+    emit storageUsageChanged();
+    const auto context = m_storage;
+    const auto installed = installedPluginIds();
+    const bool uncertainPackages = m_loader.hasUncertainPackages();
+    auto *watcher = new QFutureWatcher<StorageScanResult>(this);
+    m_storageScanWatcher = watcher;
+    connect(watcher, &QFutureWatcher<StorageScanResult>::finished, this,
+            &AppController::handleStorageScanFinished);
+    // Directory walks, retention previews and orphan classification never run
+    // on the GUI thread.
+    watcher->setFuture(QtConcurrent::run([context, installed, uncertainPackages] {
+        StorageScanResult result;
+        storage::StorageMaintenance maintenance(context);
+        result.usage = maintenance.usage();
+        result.preview = maintenance.previewRetention();
+        result.orphans = maintenance.orphans(installed, uncertainPackages);
+        result.uncertainPackages = uncertainPackages;
+        return result;
+    }));
+}
+
+void AppController::handleStorageScanFinished()
+{
+    auto *watcher = m_storageScanWatcher;
+    if (!watcher) return;
+    const auto result = watcher->result();
+    watcher->deleteLater();
+    m_storageScanWatcher = nullptr;
+    m_storageScanBusy = false;
+    m_storageScanComplete = true;
+    const auto usage = result.usage;
+    m_storageOrphans.clear();
+    qint64 orphanBytes = 0;
+    int deletable = 0;
+    int manual = 0;
+    QStringList deletableNames;
+    QStringList manualNames;
+    for (const auto &item : result.orphans) {
+        m_storageOrphans.append(QVariantMap{{"id", item.id}, {"directory", item.directory},
+                                            {"path", item.path}, {"bytes", double(item.bytes)},
+                                            {"deletable", item.deletable}, {"reason", item.reason}});
+        orphanBytes += item.bytes;
+        if (item.deletable) {
+            ++deletable;
+            deletableNames.append(item.directory);
+        } else {
+            ++manual;
+            manualNames.append(item.directory);
+        }
+    }
+    QString orphansText;
+    if (result.orphans.isEmpty()) {
+        orphansText = QStringLiteral("无主数据：无");
+    } else {
+        orphansText = QStringLiteral("无主数据：%1 项（%2 MiB）；可删除 %3 项，人工处理 %4 项")
+                          .arg(result.orphans.size())
+                          .arg(QString::number(orphanBytes / (1024.0 * 1024.0), 'f', 1))
+                          .arg(deletable)
+                          .arg(manual);
+        if (!deletableNames.isEmpty()) {
+            const auto shown = deletableNames.mid(0, 6).join(QStringLiteral("、"));
+            orphansText += QStringLiteral("\n可删除：%1%2").arg(shown,
+                deletableNames.size() > 6 ? QStringLiteral("…") : QString());
+        }
+        if (!manualNames.isEmpty()) {
+            const auto shown = manualNames.mid(0, 6).join(QStringLiteral("、"));
+            orphansText += QStringLiteral("\n需人工确认：%1%2").arg(shown,
+                manualNames.size() > 6 ? QStringLiteral("…") : QString());
+        }
+    }
+    if (result.uncertainPackages)
+        orphansText += QStringLiteral("\n存在无法解析或未通过认证的安装包，相关数据归属不确定，已保守保留。");
+    QString pendingText;
+    const auto pending = m_loader.pendingDeletions();
+    if (!pending.isEmpty())
+        pendingText = QStringLiteral("有 %1 个已确认的插件删除事务尚未完成，重启程序会继续处理。").arg(pending.size());
+    m_storageScanError = result.preview.error;
+    m_storageUsage = {{"root", usage.root}, {"settings", usage.settings}, {"logs", usage.logs},
+                      {"pluginData", usage.pluginData}, {"cache", usage.cache}, {"mode", usage.mode},
+                      {"logsBytes", double(usage.logsBytes)}, {"pluginDataBytes", double(usage.pluginDataBytes)},
+                      {"cacheBytes", double(usage.cacheBytes)}, {"logFiles", usage.logFiles},
+                      {"previewLogFiles", result.preview.logFiles},
+                      {"previewLogBytes", double(result.preview.logBytes)},
+                      {"previewCacheFiles", result.preview.cacheFiles},
+                      {"previewCacheBytes", double(result.preview.cacheBytes)},
+                      {"previewText", [&] {
+                           if (result.preview.empty()) return QStringLiteral("待清理：暂无按保留策略可释放的项目。");
+                           return QStringLiteral("待清理：历史日志 %1 个（%2 MiB）；闲置缓存 %3 个（%4 MiB）")
+                               .arg(result.preview.logFiles)
+                               .arg(QString::number(result.preview.logBytes / (1024.0 * 1024.0), 'f', 1))
+                               .arg(result.preview.cacheFiles)
+                               .arg(QString::number(result.preview.cacheBytes / (1024.0 * 1024.0), 'f', 1));
+                       }()},
+                      {"orphansText", orphansText}, {"orphanCount", result.orphans.size()},
+                      {"orphanBytes", double(orphanBytes)},
+                      {"uncertainPackages", result.uncertainPackages},
+                      {"scanError", m_storageScanError},
+                      {"scannedAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
+                      {"maintenance", maintenanceText()}, {"pendingDeletions", pendingText},
+                      {"warning", storageWarning()}};
+    emit storageUsageChanged();
+    emit storageScanFinished();
+    if (m_pendingStorageRequest.valid) {
+        const auto request = m_pendingStorageRequest;
+        m_pendingStorageRequest = {};
+        m_storageScanQueued = false;
+        if (request.confirmed) runStorageCleanup(request.category, request.ids);
+        else cleanupStorage(request.category);
+        return;
+    }
+    if (m_storageScanQueued) {
+        m_storageScanQueued = false;
+        requestStorageScan();
+    }
+}
+
+QVariantList AppController::storageOrphans() const
+{
+    return m_storageOrphans;
+}
+
+void AppController::cleanupStorage(const QString &category)
+{
+    if (m_closing || m_storageBusy) return;
+    if (m_storageScanBusy || !m_storageScanComplete) {
+        m_pendingStorageRequest = {true, category, {}, false};
+        requestStorageScan();
+        return;
+    }
+    if (category == QLatin1String("orphans")) {
+        QStringList ids;
+        QStringList names;
+        for (const auto &value : m_storageOrphans) {
+            const auto row = value.toMap();
+            if (!row["deletable"].toBool()) continue;
+            ids.append(row["id"].toString());
+            names.append(row["directory"].toString());
+        }
+        if (ids.isEmpty()) {
+            feedback(QStringLiteral("没有可自动清理的无主插件数据；未登记归属的旧目录需要人工确认。"));
+            return;
+        }
+        ask(QStringLiteral("清理无主插件数据"),
+            QStringLiteral("将永久删除以下已无安装包使用的插件数据：\n%1\n\n包含插件配置和备注，无法撤销。").arg(names.join(QStringLiteral("、"))),
+            QStringLiteral("永久删除"), [this, ids] { runStorageCleanup(QStringLiteral("orphans"), ids); });
+        return;
+    }
+    if (category != QLatin1String("logs") && category != QLatin1String("cache")) return;
+    const bool logs = category == QLatin1String("logs");
+    const int count = m_storageUsage.value(logs ? QStringLiteral("previewLogFiles")
+                                                : QStringLiteral("previewCacheFiles")).toInt();
+    const auto bytes = m_storageUsage.value(logs ? QStringLiteral("previewLogBytes")
+                                                 : QStringLiteral("previewCacheBytes")).toDouble();
+    if (count <= 0) {
+        feedback(QStringLiteral("没有需要自动清理的%1。")
+                     .arg(logs ? QStringLiteral("历史日志") : QStringLiteral("闲置缓存")));
+        return;
+    }
+    ask(QStringLiteral("存储清理"),
+        QStringLiteral("将删除 %1 个%2文件，释放约 %3 MiB。\n当前进程活动日志和正在使用的文件会被跳过。")
+            .arg(count)
+            .arg(logs ? QStringLiteral("历史日志") : QStringLiteral("闲置缓存"))
+            .arg(QString::number(bytes / (1024.0 * 1024.0), 'f', 1)),
+        QStringLiteral("清理"), [this, category] { runStorageCleanup(category, {}); });
+}
+
+void AppController::runStorageCleanup(const QString &category, const QStringList &ids)
+{
+    if (m_closing || m_storageBusy) return;
+    if (category == QLatin1String("orphans") && m_loader.hasUncertainPackages()) {
+        const auto message = QStringLiteral("存在无法解析或未通过认证的安装包，数据归属不确定，已取消清理。");
+        feedback(message);
+        emit pluginNoticeRequested(QStringLiteral("存储清理"), message);
+        requestStorageScan();
+        return;
+    }
+    // Scans and cleanups never overlap; a confirmed cleanup resumes after the
+    // running scan so the GUI keeps its current view until then.
+    if (m_storageScanBusy) {
+        m_pendingStorageRequest = {true, category, ids, true};
+        return;
+    }
+    m_storageBusy = true;
+    m_storageScanComplete = false;
+    emit storageUsageChanged();
+    const auto context = m_storage;
+    auto *watcher = new QFutureWatcher<storage::CleanupReport>(this);
+    connect(watcher, &QFutureWatcher<storage::CleanupReport>::finished, this, [this, watcher, category] {
+        const auto report = watcher->result();
+        watcher->deleteLater();
+        m_storageBusy = false;
+        QString summary;
+        if (report.released.isEmpty() && report.skipped.isEmpty() && report.failed.isEmpty())
+            summary = QStringLiteral("没有需要清理的%1。").arg(category == QLatin1String("logs") ? QStringLiteral("历史日志") :
+                category == QLatin1String("cache") ? QStringLiteral("闲置缓存") : QStringLiteral("无主数据"));
+        else
+            summary = QStringLiteral("已释放 %1 项（%2 MiB）").arg(report.released.size())
+                .arg(QString::number(report.releasedBytes / (1024.0 * 1024.0), 'f', 1));
+        if (!report.skipped.isEmpty()) summary += QStringLiteral("；在用跳过 %1 项").arg(report.skipped.size());
+        if (!report.failed.isEmpty()) summary += QStringLiteral("；失败 %1 项").arg(report.failed.size());
+        if (!report.error.isEmpty()) summary += QStringLiteral("\n%1").arg(report.error);
+        feedback(summary);
+        emit pluginNoticeRequested(QStringLiteral("存储清理"), summary);
+        emit storageUsageChanged();
+        // Re-scan asynchronously so the preview and orphan list reflect the result.
+        requestStorageScan();
+    });
+    watcher->setFuture(QtConcurrent::run([context, category, ids] {
+        storage::StorageMaintenance maintenance(context);
+        if (category == QLatin1String("logs")) return maintenance.cleanupLogs();
+        if (category == QLatin1String("cache")) return maintenance.cleanupCaches();
+        return maintenance.cleanupOrphanData(ids);
+    }));
+}
+QString AppController::localName(const QString &kind, const QString &id, const QString &fallback) const
+{
+    const auto value = m_settings.value("names/" + kind + '/' + id).toString().trimmed();
+    return value.isEmpty() ? (fallback.isEmpty() ? id : fallback) : value;
+}
 QVariantList AppController::menus() const
 {
     QVariantList result{QVariantMap{{"id", QString::fromLatin1(api::ZeroTierMenuId)}, {"title", QStringLiteral("ZeroTier")}, {"ready", true}, {"message", QString()}}};
@@ -452,7 +807,10 @@ void AppController::refreshMembers()
                     const auto current=m_networks.record(id); if(!current["expanded"].toBool()) return;
                     auto rows=current["members"].toList();
                     for(auto &value:rows) { auto row=value.toMap(); if(row["id"].toString()!=target || row["ip"].toString()!=ips) continue;
-                        row["latency"]=result.text;
+                        // Only the member latency projection maps an unreachable probe to
+                        // ASCII "-"; the detailed reason stays in the tooltip.
+                        row["latency"]=result.state==zerotier::PingState::Unreachable ? QStringLiteral("-") : result.text;
+                        row["latencyState"]=static_cast<int>(result.state);
                         row["latencySource"]=result.detail; value=row;
                     }
                     m_networks.update(id,{{"members",rows}});
@@ -465,7 +823,7 @@ void AppController::rename(const QString &kind, const QString &id, const QString
 {
     if (m_closing || id.isEmpty() || (kind != "networks" && kind != "peers" && kind != "moons")) return;
     const auto name = input.trimmed().left(128); const auto key = "names/" + kind + '/' + id;
-    if (name.isEmpty() || name == id) QSettings().remove(key); else QSettings().setValue(key, name);
+    if (name.isEmpty() || name == id) m_settings.remove(key); else m_settings.setValue(key, name);
     auto *model = kind == "networks" ? &m_networks : kind == "peers" ? &m_peers : &m_moons;
     const auto fallback = kind == "networks" ? model->record(id)["details"].toMap()["name"].toString() : QString();
     model->update(id, {{"name", localName(kind, id, fallback)}});
@@ -592,7 +950,7 @@ void AppController::deleteMoon(const QString &id)
     ask(QStringLiteral("删除 Moon"), QStringLiteral("确定删除“%1”？删除后重启服务。此操作无法撤销。").arg(record["name"].toString()), QStringLiteral("删除并重启"), [this, id, path] {
         if (m_busy) return;
         setBusy(true); m_operations->runElevatedScript(QStringLiteral("删除 Moon 并重启服务"), zerotier::moonDeleteScript(path), [this, id, path](bool ok) {
-            if (!QFileInfo::exists(path)) QSettings().remove("names/moons/" + id);
+            if (!QFileInfo::exists(path)) m_settings.remove("names/moons/" + id);
             setBusy(false); refresh(); feedback(ok ? QString() : QStringLiteral("文件删除或服务启动未完成，请查看本次启动日志。"));
         });
     });
@@ -624,9 +982,18 @@ void AppController::deletePlugin(const QString &path) {
     for(const auto &entry:m_loader.catalog()) {
         const auto row=entry.toMap(); if(row["path"].toString()!=path) continue;
         if(row["loaded"].toBool() || row["loading"].toBool() || row["stopping"].toBool()) return;
-        ask(QStringLiteral("删除插件"),QStringLiteral("确定删除“%1”？\n将从程序中移除此插件，并永久删除 plugins/ 下的插件包及 plugins-data/ 下对应的插件数据。此操作无法撤销。").arg(row["name"].toString()),QStringLiteral("删除"),[this,path] {
-            const auto result=m_loader.removeFile(path,m_pluginDirectory);
-            feedback(result.ok()?QString():result.message);
+        const auto plan=m_loader.deletionPlan(path);
+        const bool dataRemovable=plan.value("dataRemovable").toBool();
+        const auto message=dataRemovable
+            ? QStringLiteral("确定删除“%1”？\n将从程序中移除此插件，并永久删除 plugins/ 下的插件包及 plugins-data/ 下对应的插件数据。此操作无法撤销。").arg(row["name"].toString())
+            : QStringLiteral("确定清理“%1”？\n%2\n\n将只删除 plugins/ 下的插件包文件；插件数据、所有权记录和启用状态会保留，便于修复或重新安装。")
+                  .arg(row["name"].toString(),plan.value("reason").toString());
+        const auto removal=dataRemovable?plugins::PluginLoader::Removal::Full
+                                         :plugins::PluginLoader::Removal::PackageOnly;
+        ask(QStringLiteral("删除插件"),message,QStringLiteral("删除"),[this,path,removal] {
+            const auto result=m_loader.removeFile(path,m_pluginDirectory,{},removal);
+            feedback(result.message);
+            refreshStorageUsage();
             if(!result.ok()) emit pluginNoticeRequested(QStringLiteral("无法删除插件"),result.message);
         }); return;
     }

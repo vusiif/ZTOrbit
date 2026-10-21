@@ -28,8 +28,7 @@ public:
     bool dispatching() const { return m_dispatchDepth!=0; }
     quint64 generation() const { return m_generation; }
     qint64 pid() const { return m_process.processId(); }
-    bool hasLease(const QString &id) const { return m_leases.contains(id); }
-    std::shared_ptr<util::ServiceLease> acquire(const QString &service,const QString &api);
+    bool hasLease(const QString &id) const { return m_leases.contains(id); }    std::shared_ptr<util::ServiceLease> acquire(const QString &service,const QString &api);
 signals:
     void becameReady();
     void failed(const QString &error);
@@ -51,6 +50,8 @@ private:
     QMap<QString,quint64> m_sequences;
     QByteArray m_buffer,m_dataBuffer;
     QString m_credential,m_serverName,m_failure;
+    QString m_cacheRoot;
+    qint64 m_workerPid=0;
     quint64 m_generation=0,m_request=0;
     qint64 m_startDeadline=0,m_stopDeadline=0;
     bool m_ready=false,m_stopping=false,m_failed=false,m_forced=false;

@@ -2,11 +2,18 @@
 #include "RecordModel.h"
 #include "ZeroTierClient.h"
 #include "SystemOperations.h"
+#include "storage/SettingsStore.h"
+#include "storage/StorageContext.h"
+#include "storage/StorageMaintenance.h"
+#include "storage/StorageMaintenanceScheduler.h"
 #include "plugins/PluginRegistry.h"
 #include "plugins/PluginLoader.h"
+#include <QFutureWatcher>
 #include <QQuickWindow>
 #include <QPointer>
 #include <QSet>
+#include <QUrl>
+#include <memory>
 
 namespace vusiif::ztgui::ui {
 class AppController : public QObject {
@@ -31,12 +38,23 @@ class AppController : public QObject {
     Q_PROPERTY(QString serverVersion READ serverVersion CONSTANT)
     Q_PROPERTY(QString serverApiVersion READ serverApiVersion CONSTANT)
     Q_PROPERTY(QString qtVersion READ qtVersion CONSTANT)
+    Q_PROPERTY(QString settingsFile READ settingsFile CONSTANT)
+    Q_PROPERTY(bool settingsWritable READ settingsWritable CONSTANT)
+    Q_PROPERTY(QString storageRoot READ storageRoot CONSTANT)
+    Q_PROPERTY(QString storageMode READ storageMode CONSTANT)
+    Q_PROPERTY(QString storageWarning READ storageWarning CONSTANT)
+    Q_PROPERTY(QVariantMap storageUsage READ storageUsage NOTIFY storageUsageChanged)
+    Q_PROPERTY(bool storageBusy READ storageBusy NOTIFY storageUsageChanged)
+    Q_PROPERTY(bool storageScanBusy READ storageScanBusy NOTIFY storageUsageChanged)
+    Q_PROPERTY(QVariantList pendingDeletions READ pendingDeletions NOTIFY storageUsageChanged)
     Q_PROPERTY(QVariantList menus READ menus NOTIFY menusChanged)
     Q_PROPERTY(QVariantList plugins READ plugins NOTIFY menusChanged)
     Q_PROPERTY(QString activeMenu READ activeMenu NOTIFY activeMenuChanged)
     Q_PROPERTY(bool moonsActive READ moonsActive WRITE setMoonsActive NOTIFY stateChanged)
 public:
-    explicit AppController(QObject *parent = nullptr, const QString &pluginDirectory = {}, SystemOperations *operations = nullptr);
+    explicit AppController(QObject *parent = nullptr, const QString &pluginDirectory = {},
+                           SystemOperations *operations = nullptr,
+                           const storage::StorageContext &storage = storage::StorageContext::resolve());
     ~AppController() override;
     RecordModel *networks() { return &m_networks; }
     RecordModel *peers() { return &m_peers; }
@@ -60,6 +78,27 @@ public:
     QString serverVersion() const;
     QString serverApiVersion() const;
     QString qtVersion() const;
+    QString settingsFile() const { return m_settings.fileName(); }
+    // False while the shared-root migration still has to restore settings.ini.
+    // QML persistence must go through hostSetting()/setHostSetting() so this
+    // gate applies to window, sidebar and column state as well.
+    bool settingsWritable() const { return m_settings.writeProtection().isEmpty(); }
+    Q_INVOKABLE QVariant hostSetting(const QString &key, const QVariant &fallback = {}) const {
+        return m_settings.value(key, fallback);
+    }
+    Q_INVOKABLE void setHostSetting(const QString &key, const QVariant &value);
+    QString storageRoot() const { return m_storage.activeRoot(); }
+    QString storageMode() const;
+    QString storageWarning() const;
+    QVariantMap storageUsage() const { return m_storageUsage; }
+    bool storageBusy() const { return m_storageBusy; }
+    bool storageScanBusy() const { return m_storageScanBusy; }
+    QVariantList pendingDeletions() const { return m_loader.pendingDeletions(); }
+    Q_INVOKABLE void refreshStorageUsage();
+    Q_INVOKABLE void cleanupStorage(const QString &category);
+    Q_INVOKABLE QVariantList storageOrphans() const;
+    storage::StorageContext &storageContext() { return m_storage; }
+    storage::SettingsStore &settings() { return m_settings; }
     QVariantList menus() const;
     QVariantList plugins() const;
     QString activeMenu() const { return m_activeMenu; }
@@ -98,6 +137,8 @@ signals:
     void disableGpuAccelerationChanged();
     void menusChanged();
     void activeMenuChanged();
+    void storageUsageChanged();
+    void storageScanFinished();
     void confirmationRequested(const QString &title, const QString &message, const QString &acceptLabel);
     void pluginNoticeRequested(const QString &title, const QString &message);
     void networkJoined();
@@ -105,6 +146,8 @@ signals:
     void exitFinished();
     void trayRequested();
 private:
+    storage::StorageContext m_storage;
+    storage::SettingsStore m_settings;
     RecordModel m_networks, m_peers, m_moons;
     plugins::PluginRegistry m_registry;
     plugins::PluginLoader m_loader;
@@ -117,7 +160,35 @@ private:
     QVariantMap m_info;
     QJsonDocument m_moonMetadata;
     zerotier::ServiceStatus m_serviceStatus;
-    QString m_pluginDirectory, m_feedback, m_networkStatus, m_peerStatus, m_shutdownMessage;
+    QString m_pluginDirectory, m_feedback, m_networkStatus, m_peerStatus, m_shutdownMessage, m_storageWarning;
+    QVariantMap m_storageUsage;
+    QVariantMap m_storageMaintenance;
+    struct StorageScanResult {
+        storage::StorageUsage usage;
+        storage::RetentionPreview preview;
+        QList<storage::OrphanItem> orphans;
+        bool uncertainPackages = false;
+    };
+    QFutureWatcher<StorageScanResult> *m_storageScanWatcher = nullptr;
+    QVariantList m_storageOrphans;
+    std::unique_ptr<storage::StorageMaintenanceScheduler> m_maintenance;
+    bool m_storageBusy = false;
+    bool m_storageScanBusy = false;
+    bool m_storageScanQueued = false;
+    bool m_storageScanComplete = false;
+    QString m_storageScanError;
+    bool m_settingsWriteReported = false;
+    struct PendingStorageRequest {
+        bool valid = false;
+        QString category;
+        QStringList ids;
+        bool confirmed = false;
+    } m_pendingStorageRequest;
+    void handleStorageScanFinished();
+    QStringList installedPluginIds() const;
+    QString maintenanceText() const;
+    void runStorageCleanup(const QString &category, const QStringList &ids);
+    void requestStorageScan();
     QString m_activeMenu = QString::fromLatin1(api::ZeroTierMenuId);
     bool m_busy = false, m_closing = false, m_shutdownReady = false, m_visible = false, m_moonsActive = false, m_apiAvailable = false;
     bool m_serviceQueryPending = false, m_moonFilesPending = false, m_moonRefreshQueued = false;
@@ -132,6 +203,7 @@ private:
     void updateService();
     void refreshMembers();
     void refreshMoonFiles();
+    QString localName(const QString &kind, const QString &id, const QString &fallback = {}) const;
     void networkCommand(const QString &action, const QString &id, bool moonConfigured = false);
     void importMoonFiles(const QStringList &sources, std::function<void(bool)> completed = {});
     QVariantMap details(const QString &kind, const QString &id) const;

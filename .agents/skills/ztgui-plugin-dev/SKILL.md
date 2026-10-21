@@ -11,7 +11,7 @@ description: 在本项目中创建、编写、修改和独立编译 ZTGUI 的 C+
 
 插件只能依赖公开 SDK 和必要第三方库，不包含 `src/client/main/` 内部头文件。测试放在 `src/tests/`。需要宿主业务能力时明确设计公开服务接口，不访问宿主内部对象绕过 API。
 
-程序版本号由开发者管理，未经开发者明确指示不得自动修改 `VERSION` 或 `SERVER_VERSION`。客户端与服务端版本独立：客户端使用 `VERSION`（当前 `0.5.1-alpha`），服务端使用客户端侧指定的 `SERVER_VERSION`（当前 `0.2.1-beta`）；同端 API 取本端程序版本前两段数字并保留相同预发布后缀（客户端 `0.5-alpha`，服务端 `0.2-beta`）。未指定新版本的变更记录在 `CHANGELOG.md` 的未发布部分。插件自身版本独立于宿主；保留 `PluginInfo` 的默认 API 字段，不重复定义版本常量或生成头文件。
+程序版本号由开发者管理，未经开发者明确指示不得自动修改 `VERSION` 或 `SERVER_VERSION`。客户端与服务端版本独立：客户端使用 `VERSION`（当前 `0.5.1`），服务端使用客户端侧指定的 `SERVER_VERSION`（当前 `0.2.1`）；同端 API 取本端程序版本前两段数字并保留相同预发布后缀（客户端 `0.5`，服务端 `0.2`）。未指定新版本的变更记录在 `CHANGELOG.md` 的未发布部分。插件自身版本独立于宿主；保留 `PluginInfo` 的默认 API 字段，不重复定义版本常量或生成头文件。
 
 插件自身版本号变化时，必须按[编译与打包技能](../ztgui-build/SKILL.md)重新编译对应插件并生成新 `.ztplugin`，核对二进制与包声明版本一致；仅改版本号也不能复用旧二进制，不需要再等待用户单独要求编译。只构建该客户端／服务端插件，不联动其他未变化的插件。构建结束及时删除 `.previous-*` 等旧产物备份，不保留构建备份。
 
@@ -19,7 +19,7 @@ description: 在本项目中创建、编写、修改和独立编译 ZTGUI 的 C+
 
 ## 独立项目示例
 
-目录包含 `CMakeLists.txt`、`Plugin.cpp` 和 `plugin.json.in`。这里以当前客户端 API `0.5-alpha` 为例，实际要求应根据根 `VERSION` 或 `SERVER_VERSION` 填写。
+目录包含 `CMakeLists.txt`、`Plugin.cpp` 和 `plugin.json.in`。这里以当前客户端 API `0.5` 为例，实际要求应根据根 `VERSION` 或 `SERVER_VERSION` 填写。
 
 ```cmake
 cmake_minimum_required(VERSION 3.21.1)
@@ -93,7 +93,7 @@ Pane {
 
 `onExitedTo(api::MenuLocation)` 先于目标插件的 `onEnteredFrom(api::MenuLocation)`，均在GUI线程执行，不得重入导航或修改注册表。`onDestroy()` 在任务完成、页面/工厂释放和查询取消后、根对象与DLL卸载前调用，应允许初始化失败或取消时资源不完整。支持异步停止的插件先完成 `requestStop(context, completed)`，再销毁页面和工厂；停止失败不得强行卸载。旧接口和单参数onCreate已移除，QML页面IID为 `vusiif.ztgui.api.PluginInterface/3.0` 与 `vusiif.ztgui.api.PluginLifecycleInterface/3.0`，旧插件必须重编；程序版本由开发者另行管理。
 
-保存 `onCreate()` 注入的 `HostServices` 借用指针可获得文件和ZeroTier服务，有效至 `onDestroy()` 返回。`files().readFile/writeFile` 支持后台线程，使用程序目录下的 `plugins-data/<PluginInfo.name>/`，宿主自动拼接插件名称，调用只传目录内相对路径；写入原子替换，禁止绝对路径、`..` 或链接路径。名称须合法、稳定且唯一，中文名称可用，同名插件会共用目录，改名需自行迁移数据。工具整文件读写，适用于配置和小型缓存，大文件传输应使用流式IO。`zeroTier().getZTInfo/getZTPeers/getZTNetworks/getZTMoons` 在GUI线程接受QObject上下文和异步 `JsonCallback`，Info返回JSON对象，其余返回数组，失败使用 `JsonResult::error`。上下文销毁或插件卸载时取消请求，不能在 `onDestroy()` 发起查询。详细签名和生命周期顺序见公开API文档。
+保存 `onCreate()` 注入的 `HostServices` 借用指针可获得文件和ZeroTier服务，有效至 `onDestroy()` 返回。`files().readFile/writeFile` 支持后台线程，使用活动存储根下的 `plugins-data/id-<小写插件ID>/`（程序目录不可写时自动回退到当前用户目录），宿主自动拼接插件 ID，调用只传目录内相对路径；写入原子替换，禁止绝对路径、`..` 或链接路径。显示名只用于展示，改名不改变数据目录；同名不同 ID 的插件互不共享数据。工具整文件读写，适用于配置和小型缓存，大文件传输应使用流式IO。需要跨进程字段合并或一次性旧配置迁移时，用 `dynamic_cast<util::PluginStorage *>(&host.files())` 获取 `updateFile`／`legacyImportAllowed`／`completeLegacyImport` 扩展；`updateFile` 回调只做内存转换，不能重入文件服务或访问界面。插件业务 `cache/` 明确可丢弃，宿主按 7 天闲置和每插件 256 MiB 淘汰。`zeroTier().getZTInfo/getZTPeers/getZTNetworks/getZTMoons` 在GUI线程接受QObject上下文和异步 `JsonCallback`，Info返回JSON对象，其余返回数组，失败使用 `JsonResult::error`。上下文销毁或插件卸载时取消请求，不能在 `onDestroy()` 发起查询。详细签名和生命周期顺序见公开API文档。
 
 ## 安装 SDK、构建与启用
 

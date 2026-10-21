@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtCore
 
 ColumnLayout {
     id: root
@@ -29,10 +28,12 @@ ColumnLayout {
         let widths = headers.map((value, column) => preferredWidth(column))
         widths[index] = Math.max(70, widths[index] + delta)
         columnWidths = widths
-        columnSettings.widths = JSON.stringify(widths)
+        root.backend.setHostSetting(root.settingsKey, JSON.stringify(widths))
     }
-    Settings { id: columnSettings; category: "tables/qml/" + root.kind; property string widths: "[]" }
-    Component.onCompleted: { try { columnWidths = JSON.parse(columnSettings.widths) } catch (e) { columnWidths = [] } }
+    readonly property string settingsKey: "tables/qml/" + kind + "/widths"
+    Component.onCompleted: {
+        try { columnWidths = JSON.parse(root.backend.hostSetting(root.settingsKey, "[]")) } catch (e) { columnWidths = [] }
+    }
     signal detailsRequested(string kind, string rowId, string name)
     signal exportRequested(string rowId)
     spacing: 0

@@ -1,0 +1,26 @@
+{
+    "hostSettingsStillWritableDuringFailedMigration": {
+        "error": "",
+        "finalTheme": "dark",
+        "firstMigrationComplete": false,
+        "normalSettingsWriteSucceeded": false,
+        "originalName": "Original Name",
+        "originalNameRecovered": true,
+        "originalTheme": "dark",
+        "prepared": true,
+        "protectionApplied": true,
+        "retryError": "",
+        "retryMigrationComplete": true,
+        "retryPrepared": true,
+        "writeError": "共享设置尚未恢复到个人目录，本次运行的宿主设置不会保存（下次启动会自动重试）。"
+    },
+    "sameNameWithCorruptOwnership": {
+        "firstIdClaimedLegacy": false,
+        "legacyStillExists": true,
+        "otherOwnershipPreserved": true,
+        "prepareError": "",
+        "registrationWarnings": [
+            "插件 second-id 的显示名归属无法登记：unterminated object"
+        ]
+    }
+}

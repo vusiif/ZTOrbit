@@ -48,25 +48,25 @@ void pingMember(QObject *context, const QHostAddress &address, std::function<voi
         if (completed) completed(std::move(result));
     };
     QObject::connect(timeout, &QTimer::timeout, process, [done] {
-        done({QStringLiteral("不可达"), QStringLiteral("ICMP ping 超时（4 秒）")});
+        done({QStringLiteral("不可达"), QStringLiteral("ICMP ping 超时（4 秒）"), PingState::Unreachable});
     });
     QObject::connect(process, &QProcess::errorOccurred, process, [done](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart)
-            done({QStringLiteral("检测失败"), QStringLiteral("无法启动系统 ping 命令")});
+            done({QStringLiteral("检测失败"), QStringLiteral("无法启动系统 ping 命令"), PingState::ToolFailure});
     });
     QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), process,
         [process, done](int code, QProcess::ExitStatus status) {
             const auto latency = parsePingReply(process->readAllStandardOutput());
             if (status == QProcess::NormalExit && code == 0 && !latency.isEmpty())
-                done({latency, QStringLiteral("虚拟 IP ICMP ping RTT")});
-            else done({QStringLiteral("不可达"), QStringLiteral("ICMP ping 未收到有效回显应答（超时或目标不可达）")});
+                done({latency, QStringLiteral("虚拟 IP ICMP ping RTT"), PingState::Success});
+            else done({QStringLiteral("不可达"), QStringLiteral("ICMP ping 未收到有效回显应答（超时或目标不可达）"), PingState::Unreachable});
         });
     QTimer::singleShot(0, process, [process, timeout, address, program, done] {
         if (address.protocol() != QAbstractSocket::IPv4Protocol) {
-            done({QStringLiteral("—"), QStringLiteral("成员没有可探测的虚拟 IPv4 地址")}); return;
+            done({QStringLiteral("—"), QStringLiteral("成员没有可探测的虚拟 IPv4 地址"), PingState::NoAddress}); return;
         }
         const auto executable = program.isEmpty() ? QStandardPaths::findExecutable("ping") : program;
-        if (executable.isEmpty()) { done({QStringLiteral("检测失败"), QStringLiteral("未找到系统 ping 命令")}); return; }
+        if (executable.isEmpty()) { done({QStringLiteral("检测失败"), QStringLiteral("未找到系统 ping 命令"), PingState::ToolFailure}); return; }
 #ifdef Q_OS_WIN
         const QStringList arguments{"-n", "1", "-w", "4000", address.toString()};
         process->setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *args) { args->flags |= CREATE_NO_WINDOW; });

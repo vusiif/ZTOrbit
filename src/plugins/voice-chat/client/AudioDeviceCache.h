@@ -1,5 +1,8 @@
 #pragma once
+#include "VoiceConfig.h"
+#include "VoiceSoundPlayer.h"
 #include <ztmedia/MediaSession.h>
+#include <ztmedia/AudioClipClient.h>
 #include <ztgui/ZeroTierService.h>
 #include <ztgui/PluginFiles.h>
 #include <memory>
@@ -10,7 +13,11 @@ class AudioDeviceCache : public QObject {
 public:
     util::ZeroTierService *zeroTier=nullptr; // Borrowed until plugin destruction.
     util::PluginFiles *files=nullptr;
+    util::PluginStorage *storage=nullptr;
+    VoiceConfig config;
     std::shared_ptr<media::MediaSession> audio=std::make_shared<media::MediaSession>(nullptr);
+    std::shared_ptr<media::AudioClipClient> clips;
+    std::shared_ptr<VoiceSoundPlayer> sounds;
     AudioDeviceSnapshot snapshot() const { return devices; }
     void refresh(QObject *context,std::function<void()> completed) {
         if(!audio) { if(completed) completed(); return; }

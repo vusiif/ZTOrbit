@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
+import vusiif.ztgui.server.api.ApiVersion;
 
 class PluginManifestTest {
     private static PluginManifest parse(String json) throws IOException {
@@ -31,13 +32,13 @@ class PluginManifestTest {
     @Test
     void parsesAValidManifest() throws IOException {
         PluginManifest manifest = parse(
-                manifest(1, "server", "voice-chat", "语音聊天", "0.1.0", "0.2-beta", "example.Plugin"));
+                manifest(1, "server", "voice-chat", "语音聊天", "0.1.0", ApiVersion.value(), "example.Plugin"));
         assertEquals(1, manifest.formatVersion());
         assertEquals("server", manifest.host());
         assertEquals("voice-chat", manifest.id());
         assertEquals("语音聊天", manifest.name());
         assertEquals("0.1.0", manifest.version());
-        assertEquals("0.2-beta", manifest.apiVersion());
+        assertEquals(ApiVersion.value(), manifest.apiVersion());
         assertEquals("example.Plugin", manifest.mainClass());
     }
 

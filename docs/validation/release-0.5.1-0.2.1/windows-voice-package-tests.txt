@@ -1,0 +1,30 @@
+********* Start testing of VoicePluginTests *********
+Config: Using QtTest library 6.8.3, Qt 6.8.3 (x86_64-little_endian-llp64 shared (dynamic) release build; by MSVC 2022), windows 11
+PASS   : VoicePluginTests::initTestCase()
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] Owned process started; pid 24372
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] IPC authenticated; waiting for service preparation; pid 24372
+QWARN  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() [worker] Service preparation completed; pid 24372
+QINFO  : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt() Worker application-local Qt/CRT and backend modules verified: QSet("msvcp140_2.dll", "msvcp140.dll", "vcruntime140.dll", "qt6multimedia.dll", "msvcp140_1.dll", "avutil-59.dll", "openh264.dll", "swscale-8.dll", "ffmpegmediaplugin.dll", "avformat-61.dll", "qt6core.dll", "qt6network.dll", "qt6gui.dll", "avcodec-61.dll", "qwindows.dll", "swresample-5.dll", "avfilter-10.dll", "vcruntime140_1.dll")
+PASS   : VoicePluginTests::mediaWorkerUsesPackagedCoreAndCrt()
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Owned process started; pid 37036
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] IPC authenticated; waiting for service preparation; pid 37036
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Service preparation completed; pid 37036
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Owned process started; pid 13336
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] IPC authenticated; waiting for service preparation; pid 13336
+QWARN  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::panelOnlyConnectsOnClick() [worker] Service preparation completed; pid 13336
+PASS   : VoicePluginTests::panelOnlyConnectsOnClick()
+QINFO  : VoicePluginTests::previewSdkConsumerRendersVideo() [worker] Owned process started; pid 36400
+QINFO  : VoicePluginTests::previewSdkConsumerRendersVideo() [worker] IPC authenticated; waiting for service preparation; pid 36400
+QWARN  : VoicePluginTests::previewSdkConsumerRendersVideo() [worker] qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later?
+
+QINFO  : VoicePluginTests::previewSdkConsumerRendersVideo() [worker] Service preparation completed; pid 36400
+PASS   : VoicePluginTests::previewSdkConsumerRendersVideo()
+PASS   : VoicePluginTests::cleanupTestCase()
+Totals: 5 passed, 0 failed, 0 skipped, 0 blacklisted, 22433ms
+********* Finished testing of VoicePluginTests *********

@@ -4,7 +4,7 @@ The tests never touch real ZeroTier: an in-process mock HTTP service provides re
 responses and the server is started in a temporary working directory with fixture plugin jars.
 
 Example:
-  python3 src/tests/server/build-fixtures.py --api src/server/api/target/ztserver-api-0.2-beta.jar \
+  python3 src/tests/server/build-fixtures.py --api src/server/api/target/ztserver-api-0.2.jar \
       --output /tmp/zt-fixtures
   python3 src/tests/server/IntegrationTests.py --binary src/server/main/target/zt-server.jar \
       --fixtures /tmp/zt-fixtures

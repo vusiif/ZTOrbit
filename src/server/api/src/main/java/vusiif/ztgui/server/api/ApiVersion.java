@@ -5,8 +5,8 @@ import java.io.InputStream;
 import java.util.Properties;
 
 /**
- * API version compiled into this SDK jar, for example {@code 0.2-beta}. The value comes from
- * the filtered {@code api.properties} resource installed with the jar.
+ * API version compiled into this SDK jar. The value comes from the filtered
+ * {@code api.properties} resource installed with the jar.
  */
 public final class ApiVersion {
     private static final String VALUE = load();

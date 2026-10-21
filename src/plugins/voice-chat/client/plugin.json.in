@@ -1,1 +1,1 @@
-{"apiVersion":"@ZTGUI_API_VERSION@", "dependencies":[{"pluginId":"media","versionRange":">=2.0.0 <3.0.0","services":[{"service":"media.session","api":"1"}]}], "provides":[]}
+{"apiVersion":"@ZTGUI_API_VERSION@", "dependencies":[{"pluginId":"media","versionRange":">=2.0.0 <3.0.0","services":[{"service":"media.session","api":"1"},{"service":"media.clip","api":"1"}]}], "provides":[]}

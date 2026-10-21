@@ -1,6 +1,6 @@
 # 插件服务、依赖与媒体隔离
 
-当前客户端 `0.5.1-alpha`、客户端 API `0.5-alpha`，服务端 API `0.2-beta`。进程内入口和生命周期继续使用 `/3.0`；服务访问与停止采用独立扩展接口，因此不修改原 HostServices 虚表或 `PluginDefinition` 布局；服务租约另提供直接数据回调的寿命守卫。语音插件版本 `0.3.0`，媒体提供者与 Media API 为 `2.0.0`，Engine SDK 为 `1.0.0`。音视频能力、扩展 ABI 与构建交付统一见[媒体项目文档](../src/plugins/media/client/docs/media.md)。
+当前客户端 `0.5.1`、客户端 API `0.5`，服务端 API `0.2`。进程内入口和生命周期继续使用 `/3.0`；服务访问与停止采用独立扩展接口，因此不修改原 HostServices 虚表或 `PluginDefinition` 布局；服务租约另提供直接数据回调的寿命守卫。语音插件版本 `0.3.0`，媒体提供者与 Media API 为 `2.0.0`，Engine SDK 为 `1.0.0`。音视频能力、扩展 ABI 与构建交付统一见[媒体项目文档](../src/plugins/media/client/docs/media.md)。
 
 ## 包与兼容
 
@@ -48,8 +48,20 @@ Windows worker 的认证入口放在 `runtime/bin/<worker>.exe`，与 Qt／MSVC 
 - 语音独立项目：`src/plugins/voice-chat/client/` 及同项目 `shared/`；[语音文档](../src/plugins/voice-chat/client/docs/voice-chat.md)。
 - 自动化与夹具：`src/tests/PluginServicesTests.cpp`、`src/tests/plugins/`；宿主不包含媒体、语音或屏幕共享 ID 分支。
 
-主程序与宿主 SDK 用项目构建技能；媒体 API／worker 用 `build-media-windows.ps1`；语音用通用独立插件入口并传 `-AdditionalSdk build/dist/ZTGUI-media-api-v2`。普通构建不自动编译业务插件。详细交付、安装 SDK 的仓库外构建及验收数据由[本轮验证记录](plugin-services-validation.md)维护。
+主程序与宿主 SDK 用项目构建技能；媒体 API／worker 用 `build-media-windows.ps1`；语音用通用独立插件入口并传 `-AdditionalSdk build/dist/ZTGUI-media-api-v2`。普通构建不自动编译业务插件。详细交付、安装 SDK 的仓库外构建及验收数据由[本轮验证记录](validation/plugin-services-2026-10-15/README.md)维护。
 
+
+## 媒体短音服务 media.clip / 1
+
+媒体 worker 同时提供 `media.session / 1` 与通用 `media.clip / 1`。两者共享同一输出设备和混音器，但短音服务不含房间、成员等语音业务；语音插件应同时申请两个租约，只在 `media.session` 上建立房间音轨。旧媒体包缺少 clip 服务时，消费者依赖规划阶段直接拒绝，不得悄悄跳过提示音。
+
+- `play` 的 JSON 选项包含输出设备编码（沿用媒体 SDK 的十六进制设备 ID，空串为系统默认）和 0–2 增益；完整 RIFF/WAVE 通过二进制 payload 发送。只接受 PCM16、48 kHz、单声道、完整 payload 不超过 256 KiB、数据时长不超过 2 秒，并校验 chunk 边界、填充、块对齐和整数溢出，不信任头部声明长度。
+- 成功响应只表示请求已被接受，返回该租约内唯一 clip ID；每个 clip 恰好产生一个终态事件：成功为 `finished`，设备消失、投喂被拒绝或混音队列未在限时内排空为 `failed`，事件均携带 clip ID。格式或设备校验失败在响应中返回错误，不阻塞房间业务。
+- 每个租约同时只允许一个活动 clip；停止与关闭幂等，未知或已结束的 clip ID 视为已停止。关闭租约必须取消 clip、排空任务和回调后才完成；关闭和主动 `stop` 是静默取消，不发送追认的失败事件。语音侧负责 8 项上限的合并队列，媒体不承担排队。
+- 播放复用输出混音，不打开麦克风、不创建发送轨道、不发送到服务器。播放源按 20 ms 分块投喂，每块都检查设备是否接受；最后一块之后查询该轨混音队列与尚未写入输出的积压，二者都为空才发出 `finished` 并解绑，不用固定节拍近似尾音；解绑后的输出对象在有限时间内继续排空设备缓冲，不立即销毁。主动 `stop` 可以丢弃尚未混音的块。已混入设备缓冲的尾音有界，不承诺停止瞬间无声。
+- 每次真正播放前读取最新设备与主音量；麦克风静音不影响提示音，禁听会停止当前 clip 并清空队列；换设备时停止旧输出上的 clip，后续项使用新设备。语音插件停止时等待两个租约都排空后才报告完成。
+
+公开 API 为 `ztmedia/AudioClipClient.h`；`MediaSession.h` 的既有轨道协议不变。工作进程按租约所属服务分发调用并分别排空。
 
 ## 租约直接数据通道
 

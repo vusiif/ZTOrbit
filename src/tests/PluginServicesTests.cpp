@@ -6,6 +6,8 @@
 #include <ztprotocol/ServiceWire.h>
 #include <QtTest>
 #include <QSettings>
+#include <QStandardPaths>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 #include <QQmlEngine>
 #include <QQuickItem>
@@ -265,6 +267,47 @@ private slots:
         broker.stop(); QTRY_VERIFY_WITH_TIMEOUT(broker.exited(),8000); QVERIFY(!broker.forced());
         lock.reset(); package::discardCache(cache);
 #endif
+    }
+    void workerRegistrationTracksBrokerLifetime() {
+        QStandardPaths::setTestModeEnabled(true);
+        QTemporaryDir base;
+        QVERIFY(base.isValid());
+        const auto indexPath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+                                   .filePath("cache-index.json");
+        QFile::remove(indexPath);
+        package::CacheContext context;
+        context.root = QDir(base.path()).filePath("plugin-packages/user/run");
+        context.userKey = "user";
+        context.runId = "run";
+        context.installKey = "install";
+        const auto prepared = package::prepareCacheSession(context);
+        QVERIFY2(prepared.isEmpty(), qPrintable(prepared));
+        const auto pkg = package::inspect(provider(base.path()));
+        QVERIFY2(pkg.ok(), qPrintable(pkg.error));
+        std::unique_ptr<QTemporaryDir> cache;
+        std::unique_ptr<QLockFile> lock;
+        QString entry;
+        QVERIFY(package::extract(pkg,context,cache,entry,lock).isEmpty());
+        plugins::ServiceBroker broker;
+        broker.start(entry,cache->path(),pkg.info);
+        QTRY_VERIFY_WITH_TIMEOUT(broker.ready(),15000);
+        const auto workersPath = QDir(context.root).filePath("workers.json");
+        QFile workersFile(workersPath);
+        QVERIFY(workersFile.open(QIODevice::ReadOnly));
+        const auto workers = QJsonDocument::fromJson(workersFile.readAll()).array();
+        QCOMPARE(workers.size(),1);
+        QCOMPARE(qint64(workers.first().toObject().value("pid").toDouble()),broker.pid());
+        QVERIFY(!workers.first().toObject().value("processStart").toString().isEmpty());
+        workersFile.close();
+        broker.stop();
+        QTRY_VERIFY_WITH_TIMEOUT(broker.exited(),8000);
+        QVERIFY(workersFile.open(QIODevice::ReadOnly));
+        QVERIFY(QJsonDocument::fromJson(workersFile.readAll()).array().isEmpty());
+        workersFile.close();
+        lock.reset();
+        package::discardCache(cache);
+        QFile::remove(indexPath);
+        QStandardPaths::setTestModeEnabled(false);
     }
     void workerFailureSurvivesForcedCleanup() {
         QTemporaryDir dir; const auto path=provider(dir.path()); QVERIFY(!path.isEmpty());

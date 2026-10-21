@@ -18,7 +18,7 @@ set(BUILD_SHARED_LIBS OFF)
 FetchContent_Declare(opus URL https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz
     URL_HASH SHA256=6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1)
 FetchContent_MakeAvailable(opus)
-add_library(ztmedia_engine_runtime STATIC service/DeviceManager.cpp service/SessionEngine.cpp service/VideoCodec.cpp)
+add_library(ztmedia_engine_runtime STATIC service/DeviceManager.cpp service/SessionEngine.cpp service/ClipPlayer.cpp service/VideoCodec.cpp)
 target_link_libraries(ztmedia_engine_runtime PUBLIC ZTGUI::MediaTypes ZTGUI::MediaEngine ZTGUI::Protocol Qt6::Multimedia Opus::opus
     FFmpeg::avcodec FFmpeg::avformat FFmpeg::avfilter FFmpeg::avdevice FFmpeg::swscale FFmpeg::swresample)
 add_executable(ztgui_media_worker service/main.cpp)

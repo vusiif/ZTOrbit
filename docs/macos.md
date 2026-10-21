@@ -45,7 +45,7 @@ QT_ROOT="$HOME/Qt/6.8.3/macos" bash scripts/build-macos.sh
 - 初次读取节点时需要授权。认证文件、端口文件和已签名 Moon 文件缓存到当前 GUI 进程的私有临时目录，CLI 通过 `-D` 指定该目录。认证令牌不放入命令行参数，也不写入日志。
 - 服务或 Moon 操作结束后更新临时目录。若通过其他软件修改 Moon 文件，可重开 ZTGUI 更新本地文件缓存。
 - Moon 导入、删除和 `.ztbundle` 配置包使用与 Windows 相同的界面；实际文件写入系统目录。
-- 日志位于程序可执行文件所在目录的 `logs/YYMMDD-{num}.log`（`.app` 内为 `Contents/MacOS/logs/`），每日从 1 开始，每次启动按已有最大编号递增。该目录需要可写；客户端版本由根目录 `VERSION` 同步，BundleVersion／ShortVersion 使用其数字部分（`0.5.1`），关于界面显示完整版本（`0.5.1-alpha`）。
+- 日志写入活动存储根的 `logs/YYMMDD-{num}.log`：程序目录可写时为可执行文件所在目录（`.app` 内为 `Contents/MacOS/logs/`），只读安装回退到当前用户的本地 profile（`AppLocalDataLocation/installations/<installKey>/profile/logs/`）。每日从 1 开始，每次启动按已有最大编号递增；日志按 10 MiB 轮转、保留 30 天和每个归属 100 MiB。客户端版本由根目录 `VERSION` 同步，BundleVersion／ShortVersion 使用其数字部分（`0.5.1`），关于界面显示完整版本（`0.5.1`）。
 - 中文字体使用 PingFang SC，应用图标在打包时生成 ICNS。
 
 ## 首次实机验证

@@ -1,4 +1,4 @@
-# 插件 API（开发代际 0.5-alpha）
+# 插件 API（开发代际 0.5）
 
 公开 SDK 位于 `src/client/api/`，不依赖 `src/client/main/`。插件通过菜单定义和 Qt Quick/QML 页面工厂接入宿主，可选生命周期负责初始化、导航通知和资源释放；文件与 ZeroTier 工具由宿主注入。
 
@@ -20,7 +20,7 @@
 
 页面可通过 `<ztgui/PluginPage.h>` 的 `createQmlPage(engine,parent,source,initialProperties)` 从插件自己的资源创建。C++控制器通过required属性注入，由页面持有；页面先于工厂和DLL销毁，宿主清理引擎组件缓存后才卸载库。插件不能注册DLL所有的全局QML类型或单例，也不能依赖宿主内部QML模块。可使用Qt Quick Controls并继承应用窗口palette。
 
-客户端应用与 API 均由根 `VERSION` 派生（当前 `0.5.1-alpha` → API `0.5-alpha`），由新入口／生命周期IID `/3.0` 区分页面ABI。旧 `/1.0`、`/2.0` DLL在实例化前拒绝，必须迁移页面工厂并重编。SDK依赖Qt Quick/Qml，已移除Widgets依赖；应用保留Widgets仅供Windows原生托盘菜单后备实现。
+客户端应用与 API 均由根 `VERSION` 派生（当前 `0.5.1` → API `0.5`），由新入口／生命周期IID `/3.0` 区分页面ABI。旧 `/1.0`、`/2.0` DLL在实例化前拒绝，必须迁移页面工厂并重编。SDK依赖Qt Quick/Qml，已移除Widgets依赖；应用保留Widgets仅供Windows原生托盘菜单后备实现。
 
 ## 当前入口与生命周期
 
@@ -116,11 +116,33 @@ FileResult writeFile(const QString &relativePath, const QByteArray &data);
 
 通过 `host->files()` 使用。`FileResult` 包含 `QByteArray data`、`QString error` 和 `ok()`；空文件读取成功，写入成功data为空。字节不做编码转换。
 
-根目录为 `applicationDirPath()/plugins-data/<PluginInfo.name>/`，由宿主绑定。例如程序为 `C:/ztgui/ZTGUI.exe`、插件名为 `chat`，读取 `file1.txt` 就是 `C:/ztgui/plugins-data/chat/file1.txt`；插件不再传名称前缀。现有语音插件使用 `plugins-data/语音聊天/`。
+根目录按经过包校验的稳定插件 ID 归属：`<活动存储根>/plugins-data/id-<小写插件ID>/`。活动存储根默认为程序目录；程序目录不可写时回退到当前用户的本地数据目录。显示名只用于展示和历史迁移，改名不改变数据位置；同名不同 ID 的插件互不共享目录。例如插件 ID 为 `voice-chat` 时，读取 `config.json` 落到 `<活动存储根>/plugins-data/id-voice-chat/config.json`，不再使用 `plugins-data/语音聊天/`。
 
-名称支持中文和内部空格，但必须是普通目录名；非法路径字符、设备名、首尾空白、末尾句点、`.`/`..` 或空名会使文件操作返回错误。名称应稳定且唯一，同名插件共用目录，大小写差异不能保证跨平台分离；改名后使用新目录，迁移需明确数据归属。
+名称支持中文、空格和 `:` 等字符，只用于展示，不参与数据目录选择，也不限制文件读写。相对路径中的绝对路径、盘符／冒号、`.`／`..`、空段、末尾句点或空格、Windows 保留设备名（如 `CON.txt`）、链接／目录联接以及非普通文件会使文件操作返回错误。插件 ID 无效或缺失时宿主不会创建或回退到 `plugins-data/<显示名>`：文件服务返回“插件 ID 无效，无法建立数据目录”，加载器据此拒绝该插件。旧显示名目录只在唯一确认归属、目标不存在且同一协调锁内登记本进程租约前检查到该 ID 没有其他进程／实例租约时迁移；候选仅限 `plugins-data` 下的单一目录名（`../`、绝对路径、分隔符等不参与迁移），重命名前还会复核来源父目录与链接边界。扫描到的全部已认证安装包（含禁用、不兼容）会在任何实例启动前登记显示名归属；同名对应多个 ID、目标与来源同时存在或包含链接时保留并提示，不自动合并或删除。
 
-写入自动创建目录并通过 `QSaveFile` 原子替换；文件操作可在后台线程调用，宿主串行化操作。拒绝绝对路径、`..`、盘符、链接/目录联接以及非普通文件，不能通过工具跨插件目录访问。权限不足或文件不存在通过error返回。整文件读写适合配置和小缓存，大文件需要流式IO。
+个人根迁移仍有未恢复的 `plugin-data` 项（或迁移记录不可读）时，该插件目录的持久写入（`writeFile`／`updateFile` 的配置和业务文件）返回“共享数据尚未恢复”错误，`cache/`、`logs/` 仍可写；这是为了避免插件初始化的默认值占据待恢复目标，下次启动完成复制后自动解除。
+
+写入自动创建目录并通过 `QSaveFile` 原子替换；文件操作可在后台线程调用，宿主以进程内与跨进程协调锁串行化。拒绝绝对路径、`..`、盘符、链接/目录联接以及非普通文件，不能通过工具跨插件目录访问。权限不足或文件不存在通过error返回。整文件读写适合配置和小缓存，大文件需要流式IO。
+
+### 存储事务
+
+文件服务提供可选扩展，通过 `dynamic_cast<util::PluginStorage *>(&host.files())` 取得；它不改变 `PluginFiles` 原虚表：
+
+```cpp
+PluginFileTransaction updateFile(const QString &relativePath, const PluginFileUpdater &updater);
+LegacyImportState legacyImportAllowed();
+StorageResult completeLegacyImport();
+```
+
+`updateFile` 在跨进程锁内读取最新文件，把 `PluginFileSnapshot{exists,data}` 交给同步回调，再按回调结果处理：`Keep` 保留原文件，`Replace` 允许写空字节，`Fail` 返回错误。读取失败、回调抛异常或提交失败时原文件保持不变；只有提交成功才返回 `changed=true`。回调只做内存转换，不能重入文件服务、访问界面或网络，也不能被宿主留存。多个用户同时修改同一文件的不同字段时，应只更新自己负责的字段；普通 `writeFile` 仍是整文件替换，不具备字段合并语义。
+
+`legacyImportAllowed` 返回是否仍允许一次性导入历史宿主设置，并带独立错误状态；元信息不可读时不允许导入，不会默认为允许。`completeLegacyImport` 单向、幂等，记录当前来源用户；标记保存在宿主管理的 `.ztgui/plugins/<id>.json` 中，删除插件数据不会删除该标记。语音插件用这两项能力迁移旧 `voice-chat/*` 配置：目标提交并重新读取校验成功后，只删除实际补缺的当前／历史来源键并再次 `sync()` 校验；冲突、未知和未迁移的键保留。清除失败会报告警告并保持导入资格开放，下次加载重试。
+
+每个使用插件的宿主进程还在 `.ztgui/leases/` 下持有该插件 ID 的租约；删除插件数据前宿主检查其他进程租约，存活不明或权限不足都按正在使用处理，不按文件年龄猜测进程已退出。插件业务 `cache/` 明确可丢弃：宿主按 7 天闲置和每插件 256 MiB 淘汰，插件必须处理缓存未命中；配置、备注等业务文件不做年龄或容量驱动的自动清理。`readFile` 读取 `cache/` 路径时会在短时数据根协调锁内取得该文件的活动锁，随后释放协调锁再读取；其他路径不受影响。清理在协调锁内尝试同一活动锁，仍被读取或其他程序占用而无法删除的文件按“在用跳过”报告，不强制删除；大文件读取不会长时间阻塞其他事务。解压缓存会话记录宿主进程创建标识和 worker 身份，正常退出的清理入口只接受用户缓存索引登记的运行 ID 与所有权令牌，索引、令牌、结构或残留 worker 任一无法验证就保留索引并跳过。
+
+包导入与删除共用安装目录级 `.import.lock`，跨 profile 串行；同时需要数据根协调锁时固定先包锁、后协调锁。完整删除只接受通过认证的包：在锁内重新校验包、认证元信息、ID、数据所有权记录、路径边界和剩余安装引用；所有权记录不可读或 ID 不匹配时取消删除，记录缺失时先写墓碑再继续。认证失败的包不会删除数据或报告安全删除，只提供显式的“仅删除包文件、保留数据”入口并在结果中说明。确认删除先原子写入 `.ztgui/pending-deletions/<id>.json`（阶段 `recorded`／`moved`／`dataDeleted`，并记录真实插件数据根和授权时包文件的 SHA-256），再关闭旧配置导入、移入同卷受控待删区、删除当前活动根数据、删除待删包，全部成功后才移除记录。下次启动在插件扫描前、持有同一安装目录包锁的情况下恢复未完成记录，并重新认证当前安装清单（重装同 ID 包会保留其数据）、所有权和租约；原包与待删包同时存在、路径越界或为链接、租约不明、记录属于另一存储根、包无法重新认证或包内容与授权时不一致时保守保留，并在设置页“存储与清理”显示待处理事务与原因。
+
+日志与业务缓存的保留策略除设置页手动清理外，还由宿主调度器在启动完成后、每日维护、日志轮转后和 `cache/` 文件成功写入后去抖执行；同一时间只运行一个清理任务。设置页的占用统计、保留策略预览和无主数据分类在后台线程扫描，GUI 只接收完成后信号；扫描与清理互斥，确认前显示待清理数量与字节数。自动任务只处理历史日志和可丢弃缓存，不自动删除无主插件数据。存在无法解析或未通过认证的已安装包时，所有稳定 ID 数据目录都标记为归属不确定、不可删除，只有移除该包后才恢复可判定。
 
 ### ZeroTier
 
@@ -167,12 +189,12 @@ NetworkSubscription *subscribeNetworkData(const QString &networkId, QObject *con
 ```powershell
 cmake -S src/client/api -B build/cmake-build-api -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64"
 cmake --build build/cmake-build-api --config Release --target ztplugin_pack
-cmake --install build/cmake-build-api --config Release --prefix build/dist/ZTGUI-api-v0.5-alpha
+cmake --install build/cmake-build-api --config Release --prefix build/dist/ZTGUI-api-v0.5
 ```
 
-独立插件使用 `find_package(ZTGUIPluginApi 0.5 EXACT CONFIG REQUIRED)` 并链接 `ZTGUI::Api`，只需安装后的SDK和匹配工具链，不需要宿主源码。CMake 包版本使用数字基版本 `0.5`；`ZTGUI_API_VERSION` 与插件 JSON 使用完整 API `0.5-alpha`。JSON 使用 `{"apiVersion":"@ZTGUI_API_VERSION@"}`，不硬编码另一份版本。
+独立插件使用 `find_package(ZTGUIPluginApi 0.5 EXACT CONFIG REQUIRED)` 并链接 `ZTGUI::Api`，只需安装后的SDK和匹配工具链，不需要宿主源码。CMake 包版本使用数字基版本 `0.5`；`ZTGUI_API_VERSION` 与插件 JSON 使用完整 API `0.5`。JSON 使用 `{"apiVersion":"@ZTGUI_API_VERSION@"}`，不硬编码另一份版本。
 
-客户端应用版本为 `0.5.1-alpha`，API 由 `VERSION` 前两段数字和同一预发布后缀派生为 `0.5-alpha`。API 0.4 及更早插件须使用 0.5 SDK 重新编译。入口IID为 `vusiif.ztgui.api.PluginInterface/3.0`，生命周期IID为 `vusiif.ztgui.api.PluginLifecycleInterface/3.0`；旧IID不会实例化，API 0.2也不再兼容。本次核心代际升级由开发者明确指定；IID不因版本数字变化而机械调整。
+客户端应用版本为 `0.5.1`，API 由 `VERSION` 前两段数字和同一预发布后缀派生为 `0.5`。API 0.4 及更早插件须使用 0.5 SDK 重新编译。入口IID为 `vusiif.ztgui.api.PluginInterface/3.0`，生命周期IID为 `vusiif.ztgui.api.PluginLifecycleInterface/3.0`；旧IID不会实例化，API 0.2也不再兼容。本次核心代际升级由开发者明确指定；IID不因版本数字变化而机械调整。
 
 统一使用动态Qt，宿主与插件须匹配Qt、编译器、架构、运行库及构建模式。Qt类型和std::function属于进程内C++接口，不承诺跨工具链ABI或跨进程协议。
 
@@ -186,13 +208,13 @@ cmake --install build/cmake-build-api --config Release --prefix build/dist/ZTGUI
 
 ## 插件日志与协议工具
 
-通过 `HostServices::logs()` 获取借用的 `PluginLogger`，调用 `write(LogLevel,message)` 显式双写主程序日志和 `plugins-data/<PluginInfo.name>/logs/YYMMDD-N.log`。级别为 Debug/Info/Warning/Error，UTF-8 记录包含时间、级别和插件 ID；支持后台线程，生命周期与其他宿主工具相同。返回 `LogResult::hostError/pluginError`，一处失败仍尝试另一处；失败不递归写 Qt 日志。普通 `qInfo/qWarning` 仍只写宿主日志。既有日志服务保持原布局；本轮通用服务通过独立 ServiceAccess 扩展查询，未在 HostServices 原虚表上追加入口。
+通过 `HostServices::logs()` 获取借用的 `PluginLogger`，调用 `write(LogLevel,message)` 显式双写主程序日志和 `<活动存储根>/plugins-data/id-<插件ID>/logs/YYMMDD-N.log`。级别为 Debug/Info/Warning/Error，UTF-8 记录包含时间、级别和插件 ID；支持后台线程，生命周期与其他宿主工具相同。返回 `LogResult::hostError/pluginError`，一处失败仍尝试另一处；失败不递归写 Qt 日志。单文件达到 10 MiB 轮转，关闭文件保留 30 天，每个日志归属总量上限 100 MiB；正在写入的日志不删除。轮转由宿主日志层在释放日志互斥锁后通知维护调度器，去抖执行清理。普通 `qInfo/qWarning` 仍只写宿主日志。
 
 SDK 安装 `ztprotocol/` 的共享公开头文件，`ZTGUI::Protocol` 依赖 Qt Core/Network，提供路由编解码、/24 服务器地址推导与网络数据发送工具。协议版本独立于 SDK 版本；服务端 Java 插件使用独立 SDK 与 JAR manifest 的 `apiVersion`（不使用 Qt IID），详见[服务端 API](server-api.md)。
 
 ## 加密包与运行时管理
 
-客户端入口／生命周期 IID 为 `vusiif.ztgui.api.PluginInterface/3.0` 和 `vusiif.ztgui.api.PluginLifecycleInterface/3.0`。API 版本仍从 `VERSION` 前两段数字和同一预发布后缀派生，旧 ABI 必须重编。插件 `id` 匹配 `[A-Za-z0-9_-]{1,128}`，保留字 `builtin` 不可用，ID 冲突不区分大小写；`name` 为可中文的显示名，菜单 ID 独立于插件 ID。显示名对应既有数据目录，因此也禁止冲突，避免两个插件共享文件。
+客户端入口／生命周期 IID 为 `vusiif.ztgui.api.PluginInterface/3.0` 和 `vusiif.ztgui.api.PluginLifecycleInterface/3.0`。API 版本仍从 `VERSION` 前两段数字和同一预发布后缀派生，旧 ABI 必须重编。插件 `id` 匹配 `[A-Za-z0-9_-]{1,128}`，保留字 `builtin` 不可用，ID 冲突不区分大小写；`name` 为可中文的显示名，菜单 ID 独立于插件 ID。数据归属只看经过校验的插件 ID，显示名不参与目录选择，也不限制两个插件使用相同的显示名。
 
 SDK 包含 `bin/ztplugin_pack` 和 `ztgui_package_plugin()` CMake 函数，编译后生成 `.ztplugin`；正式宿主仅扫描该后缀。包基本信息可读，包含宿主类型、版本、IID、平台、架构与 Qt/编译器兼容信息。宿主先检查信息、全包认证、逐文件 SHA-256、路径与运行契约，再按块提取到私有目录。加载后核对插件定义；业务目录在实际卸载成功后清理，旧普通插件的非 Qt 私有运行库兼容路径保持到退出；额外 Qt 模块／后端必须使用 v3 独立 worker，媒体目录不会进入宿主搜索路径。共享格式密钥只用于封装、防随意查看，不能证明发行者身份；不包含用户密钥或授权发行体系。
 

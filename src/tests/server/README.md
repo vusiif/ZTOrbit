@@ -50,4 +50,4 @@ python3 src/tests/server/StartupTests.py
 python3 src/tests/server/InstallerTests.py --script src/server/scripts/zt-installer.sh
 ```
 
-在沙箱路径与假系统命令下执行独立安装脚本，验证 Moon 导出、ztncui 安装/卸载、ZeroTier 身份保留/删除顺序。不会实际安装或卸载系统组件。
+在沙箱路径与假系统命令下执行独立安装脚本，验证 Moon 导出、ztncui 安装/卸载、ZeroTier 身份保留/删除顺序，以及全量和独立 pylon 安装/卸载、菜单选择与卸载确认、容器复用/启动/强制重建、重复卸载、缺少 Docker 与启动/清理失败。pylon 用例还覆盖 ZeroTier 占用 9993/TCP 时的默认 9443 映射、自定义端口与参数校验、端口冲突时保留旧容器，以及失败残留容器的清理与重试。不会实际安装或卸载系统组件。

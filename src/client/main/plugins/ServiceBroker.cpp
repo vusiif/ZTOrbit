@@ -1,4 +1,5 @@
 #include "ServiceBroker.h"
+#include "PluginPackage.h"
 #include <ztprotocol/ServiceWire.h>
 #include <QCoreApplication>
 #include <QDateTime>
@@ -114,10 +115,14 @@ ServiceBroker::ServiceBroker(QObject *parent):QObject(parent) {
         if(count!=1) { fail(QString("Cannot resume worker primary thread (suspend count %1, Win32 %2)").arg(count).arg(GetLastError())); return; }
         qInfo()<<"[worker] Owned process started; pid"<<m_process.processId();
 #endif
+        m_workerPid=m_process.processId();
+        const auto ownershipError=package::registerCacheWorker(m_cacheRoot,m_workerPid);
+        if(!ownershipError.isEmpty()) { fail(QString("Cannot record worker ownership: %1").arg(ownershipError)); return; }
         emit changed();
     });
     connect(&m_process,&QProcess::errorOccurred,this,[this](QProcess::ProcessError) { if(!m_stopping) fail(m_process.errorString()); });
     connect(&m_process,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),this,[this](int code,QProcess::ExitStatus status) {
+        if(m_workerPid>0) { package::unregisterCacheWorker(m_cacheRoot,m_workerPid); m_workerPid=0; }
         m_ready=false;
         if(!m_stopping) fail(QString("Worker exited (%1, %2)").arg(code).arg(int(status)));
         else emit changed();
@@ -154,9 +159,11 @@ ServiceBroker::~ServiceBroker() {
     if(m_job) { CloseHandle(HANDLE(m_job)); m_job=nullptr; }
 #endif
     if(m_process.state()!=QProcess::NotRunning) { m_process.kill(); m_process.waitForFinished(3000); }
+    if(m_workerPid>0) { package::unregisterCacheWorker(m_cacheRoot,m_workerPid); m_workerPid=0; }
     m_server.close(); m_dataServer.close();
 }
 void ServiceBroker::start(const QString &entry,const QString &root,const QJsonObject &manifest) {
+    m_cacheRoot=root;
     m_provides=manifest["provides"].toArray();
     m_credential=QUuid::createUuid().toString(QUuid::Id128)+QUuid::createUuid().toString(QUuid::Id128);
     m_serverName="ztgui-"+QUuid::createUuid().toString(QUuid::Id128);

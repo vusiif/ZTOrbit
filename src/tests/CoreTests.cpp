@@ -10,13 +10,18 @@
 #include "MacPlatform.h"
 #include "plugins/PluginRegistry.h"
 #include "plugins/HostServicesImpl.h"
+#include "storage/StorageContext.h"
+#include "storage/StorageMaintenance.h"
 
 #include <QApplication>
 #include <QClipboard>
 #include <QDir>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcessEnvironment>
 #include <QScopeGuard>
 #include <QSettings>
@@ -26,6 +31,7 @@
 #include <QTextStream>
 #include <QUrl>
 #include <QtTest>
+#include <atomic>
 #include <stdexcept>
 #include <thread>
 #include <QTcpServer>
@@ -33,12 +39,15 @@
 #include <ztprotocol/WireProtocol.h>
 #ifdef Q_OS_WIN
 #include <windows.h>
+#else
+#include <unistd.h>
 #endif
 
 #include "SystemOperations.h"
 using namespace vusiif::ztgui::api;
 using namespace vusiif::ztgui::util;
 using namespace vusiif::ztgui::plugins;
+using namespace vusiif::ztgui::storage;
 using namespace vusiif::ztgui::ui;
 static QString serviceMocks()
 {
@@ -224,17 +233,22 @@ const QString name = "example.ztplugin";
             return true;
         }));
         for (auto &task:tasks) QVERIFY(task.get());
-        const QDir logs(directory.filePath(QStringLiteral("测试插件/logs")));
+        const QDir logs(QDir(host.dataDirectory()).filePath("logs"));
         QCOMPARE(logs.entryList({"*.log"},QDir::Files).size(),1);
         QFile plugin(logs.filePath(logs.entryList({"*.log"},QDir::Files).first()));
         QVERIFY(plugin.open(QIODevice::ReadOnly)); const auto entries = plugin.readAll();
         QCOMPARE(entries.count("[test-logger]"),80);
         QFile main(vusiif::ztgui::util::log::path()); QVERIFY(main.open(QIODevice::ReadOnly));
         QVERIFY(main.readAll().contains("[test-logger] concurrent-3-19"));
-        vusiif::ztgui::util::HostServicesImpl invalid("../invalid",directory.path(),"test-partial");
+        // A display name is UI metadata only, so an unusable data root must be
+        // what makes the plugin log sink fail while the host log still works.
+        const auto blockedDataRoot = directory.filePath("blocked-data-root");
+        { QFile blocker(blockedDataRoot); QVERIFY(blocker.open(QIODevice::WriteOnly)); }
+        vusiif::ztgui::util::HostServicesImpl invalid(QStringLiteral("部分失败"), blockedDataRoot, "test-partial");
+        QVERIFY(!invalid.storageReady());
         const auto result=invalid.logs().write(vusiif::ztgui::util::LogLevel::Warning,"partial-sink-probe");
         QVERIFY(result.hostError.isEmpty()); QVERIFY(!result.pluginError.isEmpty());
-        QVERIFY(!QFileInfo::exists(directory.filePath("../invalid")));
+        QVERIFY(!QFileInfo::exists(QDir(directory.path()).filePath(QStringLiteral("部分失败"))));
     }
 
     void singleInstanceActivatesAndRecoversAfterCrash() {
@@ -321,13 +335,119 @@ const QString name = "example.ztplugin";
             QVERIFY(paths.contains(logs.filePath(date + "-" + QString::number(sequence) + ".log")));
     }
 
+    void logRotationNotifiesCallback()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QString helperName = "app_log_probe";
+#ifdef Q_OS_WIN
+        helperName += ".exe";
+#endif
+        const QString helper = directory.filePath(helperName);
+        QVERIFY(QFile::copy(QDir(QCoreApplication::applicationDirPath()).filePath(helperName), helper));
+        QProcess process;
+        process.start(helper, {QStringLiteral("--rotation")});
+        QVERIFY(process.waitForFinished(15000));
+        QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(process.exitCode(), 0);
+        QCOMPARE(QString::fromUtf8(process.readAllStandardOutput()).trimmed(), QStringLiteral("1"));
+        const QDir logs(directory.filePath("logs"));
+        const QString date = QDateTime::currentDateTime().toString("yyMMdd");
+        const auto files = logs.entryList({"*.log"}, QDir::Files, QDir::Name);
+        QCOMPARE(files, (QStringList{date + "-1.log", date + "-2.log"}));
+        QFile first(logs.filePath(date + "-1.log"));
+        QVERIFY(first.open(QIODevice::ReadOnly));
+        QVERIFY(first.size() >= qint64(10 * 1024 * 1024));
+        QVERIFY(first.size() < qint64(10 * 1024 * 1024 + 8192));
+    }
+
+    void cacheWritesNotifyTheMaintenanceHook()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QStringList notified;
+        HostServicesImpl host("缓存插件", directory.filePath("plugins-data"), "cache-hook",
+                              directory.filePath("meta"), "run", "user",
+                              [&notified](const QString &path) { notified.append(path); });
+        QVERIFY2(host.storageReady(), qPrintable(host.storageError()));
+        QVERIFY(host.files().writeFile("cache/item.bin", "one").ok());
+        QCOMPARE(notified, QStringList{"cache/item.bin"});
+        QVERIFY(host.files().writeFile("config.json", "config").ok());
+        QCOMPARE(notified.size(), 1);
+        auto *storage = dynamic_cast<vusiif::ztgui::util::PluginStorage *>(&host.files());
+        QVERIFY(storage);
+        const auto changed = storage->updateFile("cache/item.bin",
+            [](const vusiif::ztgui::util::PluginFileSnapshot &) {
+                return vusiif::ztgui::util::PluginFileUpdate::replace("two");
+            });
+        QVERIFY(changed.ok);
+        QCOMPARE(notified, (QStringList{"cache/item.bin", "cache/item.bin"}));
+        const auto kept = storage->updateFile("cache/item.bin",
+            [](const vusiif::ztgui::util::PluginFileSnapshot &) {
+                return vusiif::ztgui::util::PluginFileUpdate::keep();
+            });
+        QVERIFY(kept.ok);
+        QCOMPARE(notified.size(), 2);
+    }
+
+    void cacheReadsCoordinateWithBackgroundCleanup()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const auto dataRoot = directory.filePath("plugins-data");
+        const auto metadataRoot = directory.filePath(".ztgui");
+        HostServicesImpl host(QStringLiteral("缓存读取"), dataRoot, "cache-reader", metadataRoot, "run", "user");
+        QVERIFY2(host.storageReady(), qPrintable(host.storageError()));
+        const QByteArray payload(512 * 1024, 'x');
+        QVERIFY(host.files().writeFile("cache/data.bin", payload).ok());
+        const auto path = QDir(host.dataDirectory()).filePath("cache/data.bin");
+        {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::ReadWrite));
+            QVERIFY(file.setFileTime(QDateTime::currentDateTime().addDays(-8), QFileDevice::FileModificationTime));
+        }
+        const auto context = vusiif::ztgui::storage::StorageContext::forTesting(directory.path());
+        vusiif::ztgui::storage::StorageMaintenance maintenance(context);
+        std::atomic<bool> stop{false};
+        std::atomic<int> unexpected{0};
+        std::atomic<int> reads{0};
+        std::thread reader([&] {
+            while (!stop.load()) {
+                const auto result = host.files().readFile("cache/data.bin");
+                if (result.ok()) {
+                    if (result.data.size() != payload.size()) ++unexpected;
+                    else ++reads;
+                } else if (QFileInfo::exists(path)) {
+                    // A missing file after reclamation is expected; any other
+                    // failure while the reader still exists is not.
+                    ++unexpected;
+                }
+                QThread::msleep(1);
+            }
+        });
+        QElapsedTimer timer;
+        timer.start();
+        while (reads.load() < 2 && timer.elapsed() < 5000) QThread::msleep(5);
+        const auto report = maintenance.cleanupCaches();
+        stop.store(true);
+        reader.join();
+        QCOMPARE(unexpected.load(), 0);
+        QVERIFY(reads.load() >= 2);
+        QVERIFY2(report.ok(), qPrintable(report.error));
+        QVERIFY(report.released.contains(path));
+        QVERIFY(!QFileInfo::exists(path));
+        // The directory is removed only after it became empty.
+        QVERIFY(!QFileInfo::exists(QDir(host.dataDirectory()).filePath("cache")));
+    }
+
     void pluginFilesUseDataRootAndRejectEscapes() {
         using namespace vusiif::ztgui::api;
         QTemporaryDir directory; QVERIFY(directory.isValid());
-        HostServicesImpl services("chat", directory.filePath("plugins-data"));
+        HostServicesImpl services("chat", directory.filePath("plugins-data"), "chat");
+        QVERIFY2(services.storageReady(), qPrintable(services.storageError()));
         const QByteArray bytes("binary\0data", 11);
         QVERIFY(services.files().writeFile("example/file1.txt", bytes).ok());
-        QFile actual(directory.filePath("plugins-data/chat/example/file1.txt"));
+        QFile actual(QDir(services.dataDirectory()).filePath("example/file1.txt"));
         QVERIFY(actual.open(QIODevice::ReadOnly)); QCOMPARE(actual.readAll(), bytes); actual.close();
         QVERIFY(services.files().writeFile("example/file1.txt", "replaced").ok());
         QCOMPARE(services.files().readFile("example\\file1.txt").data, QByteArray("replaced"));
@@ -335,7 +455,8 @@ const QString name = "example.ztplugin";
         QVERIFY(services.files().readFile("empty.txt").ok());
         QVERIFY(!services.files().readFile("missing.txt").ok());
         for (const QString &path : {QString("../escape"), QString("/escape"), QString("C:/escape"),
-             QString("example/../../escape"), QString("file:stream"), QString("example/../escape"), QString("example./escape")}) {
+             QString("example/../../escape"), QString("file:stream"), QString("example/../escape"), QString("example./escape"),
+             QString("CON.txt"), QString("example/NUL"), QString("example/file1.txt. ")}) {
             QVERIFY(!services.files().writeFile(path, "bad").ok());
             QVERIFY(!services.files().readFile(path).ok());
         }
@@ -343,39 +464,292 @@ const QString name = "example.ztplugin";
         // A regular file cannot be traversed as a directory.
         QVERIFY(!services.files().writeFile("empty.txt/child", "bad").ok());
         QVERIFY(!services.files().readFile("example").ok());
-        HostServicesImpl other("file-transfer", directory.filePath("plugins-data"));
+        HostServicesImpl other("file-transfer", directory.filePath("plugins-data"), "file-transfer");
         QVERIFY(other.files().writeFile("example/file1.txt", "other plugin").ok());
         QCOMPARE(services.files().readFile("example/file1.txt").data, QByteArray("replaced"));
         QCOMPARE(other.files().readFile("example/file1.txt").data, QByteArray("other plugin"));
         QVERIFY(!services.files().writeFile("../file-transfer/example/file1.txt", "bad").ok());
-        HostServicesImpl chinese(QStringLiteral("语音聊天"), directory.filePath("plugins-data"));
+        // Legacy display-name renames still migrate data, but the file service
+        // only ever addresses the stable ID directory.
+        HostServicesImpl chinese(QStringLiteral("语音聊天"), directory.filePath("plugins-data"), "voice-chat");
+        QVERIFY2(chinese.storageReady(), qPrintable(chinese.storageError()));
         QVERIFY(chinese.files().writeFile("file1.txt", "voice").ok());
-        QVERIFY(QFileInfo::exists(directory.filePath(QStringLiteral("plugins-data/语音聊天/file1.txt"))));
+        QVERIFY(QFileInfo::exists(QDir(chinese.dataDirectory()).filePath("file1.txt")));
+        QCOMPARE(QFileInfo(chinese.dataDirectory()).fileName(), QStringLiteral("id-voice-chat"));
+        QVERIFY(!QFileInfo::exists(QDir(directory.filePath("plugins-data")).filePath(QStringLiteral("语音聊天"))));
         for (const QString &name : {QString("../escape"), QString(".."), QString("chat/other"), QString("chat\\other"),
-             QString("chat:"), QString("CON.txt"), QString("chat."), QString("chat "), QString()}) {
-            HostServicesImpl invalid(name, directory.filePath("plugins-data"));
+             QString("chat:"), QString("CON.txt"), QString("chat."), QString("chat "), QString(), QString("builtin"),
+             QStringLiteral("语音聊天")}) {
+            HostServicesImpl invalid(QStringLiteral("显示名"), directory.filePath("plugins-data"), name);
+            QVERIFY(!invalid.storageReady());
+            QVERIFY(!invalid.storageError().isEmpty());
+            QVERIFY(invalid.dataDirectory().isEmpty());
             QVERIFY(!invalid.files().writeFile("file1.txt", "bad").ok());
             QVERIFY(!invalid.files().readFile("file1.txt").ok());
         }
+        QVERIFY(!QFileInfo::exists(QDir(directory.filePath("plugins-data")).filePath(QStringLiteral("显示名"))));
+        // A legal ID that looks like a reserved device name is still safe
+        // because the data directory always carries the "id-" prefix.
+        HostServicesImpl deviceName(QStringLiteral("设备名"), directory.filePath("plugins-data"), "CON");
+        QVERIFY2(deviceName.storageReady(), qPrintable(deviceName.storageError()));
+        QVERIFY(deviceName.files().writeFile("file1.txt", "device").ok());
+        QCOMPARE(QFileInfo(deviceName.dataDirectory()).fileName(), QStringLiteral("id-con"));
         // On Unix QFile::link creates a symlink (on Windows it creates a .lnk).
 #ifndef Q_OS_WIN
-        QVERIFY(QFile::link(actual.fileName(), directory.filePath("plugins-data/chat/link")));
+        QVERIFY(QFile::link(actual.fileName(), QDir(services.dataDirectory()).filePath("link")));
         QVERIFY(!services.files().readFile("link").ok());
         QVERIFY(!services.files().writeFile("link", "bad").ok());
-        QVERIFY(QFile::link(directory.filePath("plugins-data/file-transfer"), directory.filePath("plugins-data/linked-plugin")));
-        HostServicesImpl linkedPlugin("linked-plugin", directory.filePath("plugins-data"));
+        QVERIFY(QFile::link(QDir(services.dataDirectory()).absolutePath(),
+                            directory.filePath("plugins-data/id-linked-plugin")));
+        HostServicesImpl linkedPlugin("linked-plugin", directory.filePath("plugins-data"), "linked-plugin");
         QVERIFY(!linkedPlugin.files().readFile("example/file1.txt").ok());
         QVERIFY(!linkedPlugin.files().writeFile("example/file1.txt", "bad").ok());
         QVERIFY(QFile::link(directory.filePath("plugins-data"), directory.filePath("linked-data")));
-        HostServicesImpl linkedRoot("chat", directory.filePath("linked-data"));
+        HostServicesImpl linkedRoot("chat", directory.filePath("linked-data"), "chat");
         QVERIFY(!linkedRoot.files().readFile("example/file1.txt").ok());
         QVERIFY(!linkedRoot.files().writeFile("example/file1.txt", "bad").ok());
 #endif
     }
 
+    void pluginStorageUsesStableIdAndCoordinatesTransactions() {
+        using namespace vusiif::ztgui::util;
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        HostServicesImpl host(QStringLiteral("测试插件"), directory.filePath("plugins-data"), "plugin-id");
+        QVERIFY2(host.storageReady(), qPrintable(host.storageError()));
+        QCOMPARE(QFileInfo(host.dataDirectory()).fileName(), QStringLiteral("id-plugin-id"));
+        QVERIFY(QFileInfo::exists(QDir(host.dataDirectory()).absolutePath()));
+        auto *storage = dynamic_cast<PluginStorage *>(&host.files());
+        QVERIFY(storage);
+
+        bool sawMissing = false;
+        auto result = storage->updateFile("state.json", [&](const PluginFileSnapshot &snapshot) {
+            sawMissing = !snapshot.exists && snapshot.data.isEmpty();
+            return PluginFileUpdate::keep();
+        });
+        QVERIFY(result.ok); QVERIFY(!result.changed); QVERIFY(sawMissing);
+        QVERIFY(!host.files().readFile("state.json").ok());
+
+        result = storage->updateFile("state.json", [](const PluginFileSnapshot &snapshot) {
+            return PluginFileUpdate::replace(QByteArray("one:") + snapshot.data);
+        });
+        QVERIFY(result.ok); QVERIFY(result.changed); QCOMPARE(result.data, QByteArray("one:"));
+        QCOMPARE(host.files().readFile("state.json").data, QByteArray("one:"));
+
+        result = storage->updateFile("state.json", [](const PluginFileSnapshot &snapshot) {
+            return PluginFileUpdate::replace(snapshot.data);
+        });
+        QVERIFY(result.ok); QVERIFY(!result.changed); QCOMPARE(result.data, QByteArray("one:"));
+
+        result = storage->updateFile("state.json", [](const PluginFileSnapshot &) {
+            return PluginFileUpdate::failure(QStringLiteral("rejected"));
+        });
+        QVERIFY(!result.ok); QCOMPARE(result.error, QStringLiteral("rejected"));
+        QCOMPARE(host.files().readFile("state.json").data, QByteArray("one:"));
+
+        result = storage->updateFile("state.json", [](const PluginFileSnapshot &) -> PluginFileUpdate {
+            throw std::runtime_error("boom");
+        });
+        QVERIFY(!result.ok); QCOMPARE(host.files().readFile("state.json").data, QByteArray("one:"));
+
+        result = storage->updateFile("state.json", [](const PluginFileSnapshot &) {
+            return PluginFileUpdate::replace({});
+        });
+        QVERIFY(result.ok); QVERIFY(result.changed);
+        const auto empty = host.files().readFile("state.json");
+        QVERIFY(empty.ok()); QVERIFY(empty.data.isEmpty());
+
+        bool escapeCalled = false;
+        result = storage->updateFile("../escape.json", [&](const PluginFileSnapshot &) {
+            escapeCalled = true;
+            return PluginFileUpdate::keep();
+        });
+        QVERIFY(!result.ok); QVERIFY(!escapeCalled);
+        QVERIFY(!QFileInfo::exists(directory.filePath("escape.json")));
+
+        std::vector<std::future<bool>> tasks;
+        for (int thread = 0; thread < 4; ++thread) tasks.push_back(std::async(std::launch::async, [&storage] {
+            for (int index = 0; index < 25; ++index) {
+                const auto update = storage->updateFile("counter.json", [](const PluginFileSnapshot &snapshot) {
+                    const int current = snapshot.exists ? snapshot.data.toInt() : 0;
+                    return PluginFileUpdate::replace(QByteArray::number(current + 1));
+                });
+                if (!update.ok) return false;
+            }
+            return true;
+        }));
+        for (auto &task : tasks) QVERIFY(task.get());
+        QCOMPARE(host.files().readFile("counter.json").data, QByteArray("100"));
+
+        const auto allowed = storage->legacyImportAllowed();
+        QVERIFY2(allowed.ok(), qPrintable(allowed.error)); QVERIFY(allowed.allowed);
+        QVERIFY(storage->completeLegacyImport().ok());
+        QVERIFY(!storage->legacyImportAllowed().allowed);
+        QVERIFY(storage->completeLegacyImport().ok());
+        // Host-owned metadata lives under the root, outside plugin data.
+        QVERIFY(QFileInfo::exists(QDir(directory.path()).filePath(".ztgui/plugins/plugin-id.json")));
+    }
+
+    void pendingMigrationBlocksConsumerInitializationUntilRetry()
+    {
+        using namespace vusiif::ztgui::util;
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const auto shared = directory.filePath("application");
+        const auto personalBase = directory.filePath("user-data");
+        const auto sharedPluginData = QDir(shared).filePath("plugins-data/id-field-probe");
+        QVERIFY(QDir().mkpath(sharedPluginData));
+        const auto sourceConfig = QDir(sharedPluginData).filePath("config.json");
+        {
+            QFile config(sourceConfig);
+            QVERIFY(config.open(QIODevice::WriteOnly));
+            config.write("{\"nickname\":\"original\",\"volume\":123}");
+        }
+        // Pre-record the personal route so the selection is deterministic.
+        const auto routeDirectory = QDir(personalBase).filePath(
+            QStringLiteral("installations/") + StorageContext::installKey(shared));
+        QVERIFY(QDir().mkpath(routeDirectory));
+        {
+            QFile route(QDir(routeDirectory).filePath("route.json"));
+            QVERIFY(route.open(QIODevice::WriteOnly));
+            route.write(QJsonDocument(QJsonObject{{"format", 1}, {"mode", "personal"}}).toJson());
+        }
+        // Block reading the source for the duration of the first prepare, which
+        // forces a deterministic partial migration without touching the target.
+#ifdef Q_OS_WIN
+        const HANDLE sourceHandle = CreateFileW(reinterpret_cast<LPCWSTR>(sourceConfig.utf16()),
+            GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        QVERIFY(sourceHandle != INVALID_HANDLE_VALUE);
+#else
+        if (::geteuid() == 0) QSKIP("root can read the blocked migration source");
+        QVERIFY(QFile::setPermissions(sourceConfig, QFile::Permissions()));
+#endif
+        auto storage = StorageContext::resolveForTesting(shared, personalBase);
+        QCOMPARE(storage.mode(), StorageContext::Mode::Personal);
+        QString error;
+        QVERIFY2(storage.prepare(error), qPrintable(error));
+        QVERIFY(!storage.migrationComplete());
+        QVERIFY(!storage.migrationCorrupt());
+#ifdef Q_OS_WIN
+        CloseHandle(sourceHandle);
+#else
+        QVERIFY(QFile::setPermissions(sourceConfig, QFile::ReadOwner | QFile::WriteOwner
+            | QFile::ReadUser | QFile::WriteUser));
+#endif
+        // A normal consumer starts before the next retry. It must not seed
+        // defaults into the directory that is still waiting for the original.
+        {
+            HostServicesImpl host(QStringLiteral("FieldProbe"), storage.pluginDataDirectory(), "field-probe",
+                                  storage.metadataDirectory(), storage.runId(), storage.userKeyValue());
+            QVERIFY2(host.storageReady(), qPrintable(host.storageError()));
+            QVERIFY(!host.migrationBlock().isEmpty());
+            const auto written = host.files().writeFile("config.json", "{\"nickname\":\"default\"}");
+            QVERIFY(!written.ok());
+            QVERIFY(written.error.contains(QStringLiteral("共享数据尚未恢复")));
+            auto *pluginStorage = dynamic_cast<PluginStorage *>(&host.files());
+            QVERIFY(pluginStorage);
+            bool called = false;
+            const auto updated = pluginStorage->updateFile("config.json", [&](const PluginFileSnapshot &) {
+                called = true;
+                return PluginFileUpdate::replace("{\"nickname\":\"default\"}");
+            });
+            QVERIFY(!updated.ok);
+            QVERIFY(!called);
+            QVERIFY(!host.files().readFile("config.json").ok());
+            // Disposable cache and log paths stay usable during the wait.
+            QVERIFY(host.files().writeFile("cache/entry.bin", "cache").ok());
+            QVERIFY(host.files().writeFile("logs/250101-1.log", "log").ok());
+        }
+        QVERIFY(!QFileInfo::exists(QDir(storage.pluginDataDirectory("field-probe")).filePath("config.json")));
+        // Restart: the failed item is retried, then the consumer reads the
+        // original configuration instead of a default value.
+        auto retry = StorageContext::resolveForTesting(shared, personalBase);
+        QVERIFY2(retry.prepare(error), qPrintable(error));
+        QVERIFY(retry.migrationComplete());
+        HostServicesImpl recovered(QStringLiteral("FieldProbe"), retry.pluginDataDirectory(), "field-probe",
+                                   retry.metadataDirectory(), retry.runId(), retry.userKeyValue());
+        QVERIFY2(recovered.storageReady(), qPrintable(recovered.storageError()));
+        QVERIFY(recovered.migrationBlock().isEmpty());
+        const auto config = recovered.files().readFile("config.json");
+        QVERIFY2(config.ok(), qPrintable(config.error));
+        const auto object = QJsonDocument::fromJson(config.data).object();
+        QCOMPARE(object.value("nickname").toString(), QStringLiteral("original"));
+        QCOMPARE(object.value("volume").toInt(), 123);
+    }
+
+    void pluginStorageUpdatesAreAtomicAcrossProcesses() {
+#ifdef STORAGE_UPDATE_PROBE
+        using namespace vusiif::ztgui::util;
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        const auto dataRoot = directory.filePath("plugins-data");
+        QProcess first, second;
+        first.start(STORAGE_UPDATE_PROBE, {dataRoot, "120"});
+        second.start(STORAGE_UPDATE_PROBE, {dataRoot, "120"});
+        QVERIFY(first.waitForStarted(5000)); QVERIFY(second.waitForStarted(5000));
+        QVERIFY(first.waitForFinished(30000)); QVERIFY(second.waitForFinished(30000));
+        QVERIFY2(first.exitStatus() == QProcess::NormalExit && first.exitCode() == 0,
+                 first.readAllStandardError().constData());
+        QVERIFY2(second.exitStatus() == QProcess::NormalExit && second.exitCode() == 0,
+                 second.readAllStandardError().constData());
+        HostServicesImpl host(QStringLiteral("StorageProbe"), dataRoot, "storage-probe");
+        QVERIFY2(host.storageReady(), qPrintable(host.storageError()));
+        QCOMPARE(host.files().readFile("counter.json").data.toInt(), 240);
+#else
+        QSKIP("Storage update probe not configured");
+#endif
+    }
+
+    void concurrentProcessesMergeDifferentFieldsAndRemarks() {
+#ifdef STORAGE_UPDATE_PROBE
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        const auto dataRoot = directory.filePath("plugins-data");
+        const auto start = [&](QProcess &process, const QStringList &arguments) {
+            process.start(STORAGE_UPDATE_PROBE, arguments);
+            return process.waitForStarted(5000);
+        };
+        const auto finish = [](QProcess &process) {
+            if (!process.waitForFinished(30000)) return false;
+            if (process.exitStatus() != QProcess::NormalExit) return false;
+            if (process.exitCode() != 0) {
+                qWarning().noquote() << process.readAllStandardError();
+                return false;
+            }
+            return true;
+        };
+        // Two processes update different fields of the same file.
+        QProcess nickname, volume;
+        QVERIFY(start(nickname, {"--json-field", dataRoot, "config.json", "nickname", "Alice", "60"}));
+        QVERIFY(start(volume, {"--json-field", dataRoot, "config.json", "volume", "35", "60"}));
+        QVERIFY(finish(nickname));
+        QVERIFY(finish(volume));
+        HostServicesImpl host(QStringLiteral("MergeProbe"), dataRoot, "field-probe");
+        QVERIFY2(host.storageReady(), qPrintable(host.storageError()));
+        const auto configResult = host.files().readFile("config.json");
+        QVERIFY2(configResult.ok(), qPrintable(configResult.error));
+        const auto config = QJsonDocument::fromJson(configResult.data).object();
+        QCOMPARE(config.value("nickname").toString(), QStringLiteral("Alice"));
+        QCOMPARE(config.value("volume").toInt(), 35);
+
+        // Two processes add remarks for different member IDs.
+        QProcess alice, bob;
+        QVERIFY(start(alice, {"--remark", dataRoot, "a1b2c3d4e5", QStringLiteral("本地朋友"), "40"}));
+        QVERIFY(start(bob, {"--remark", dataRoot, "1234567890", "Bob", "40"}));
+        QVERIFY(finish(alice));
+        QVERIFY(finish(bob));
+        HostServicesImpl remarksHost(QStringLiteral("RemarkMergeProbe"), dataRoot, "remark-probe");
+        QVERIFY2(remarksHost.storageReady(), qPrintable(remarksHost.storageError()));
+        const auto remarksResult = remarksHost.files().readFile("member-remarks.json");
+        QVERIFY2(remarksResult.ok(), qPrintable(remarksResult.error));
+        const auto remarks = QJsonDocument::fromJson(remarksResult.data).object();
+        QCOMPARE(remarks.value("a1b2c3d4e5").toString(), QStringLiteral("本地朋友"));
+        QCOMPARE(remarks.value("1234567890").toString(), QStringLiteral("Bob"));
+#else
+        QSKIP("Storage update probe not configured");
+#endif
+    }
+
     void pluginZeroTierQueriesPreserveJsonAndCancelCallbacks() {
         using namespace vusiif::ztgui::api;
-        HostServicesImpl services("query-test", m_settings.filePath("plugin-tools"));
+        HostServicesImpl services("query-test", m_settings.filePath("plugin-tools"), "query-test");
         QObject context;
         int calls = 0;
         JsonResult info, peers, networks, moons;

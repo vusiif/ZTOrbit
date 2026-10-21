@@ -2,12 +2,16 @@
 #include "VideoCodec.h"
 #include "AudioMath.h"
 #include "MediaClock.h"
+#include "ClipAudio.h"
+#include "ClipPlayer.h"
 #include <ztmedia/SharedFrames.h>
 #include <QElapsedTimer>
 #include <QPointer>
+#include <QRegularExpression>
 #include <QUuid>
 #include <QPainter>
 #include <chrono>
+#include <cmath>
 #include <mutex>
 
 namespace vusiif::ztgui::media::engine {
@@ -529,7 +533,126 @@ SessionEngine::Session *SessionEngine::session(const QString &lease) {
     sessions.emplace(lease, std::move(s));
     return result;
 }
-void SessionEngine::call(const QString &lease, const QString &method, const QJsonObject &d, Reply reply) {
+void SessionEngine::callClip(const QString &lease, const QString &method, const QJsonObject &data,
+                             const QByteArray &payload, Reply reply) {
+    if (method == "play") {
+        const double gain = data.value("gain").toDouble(1.0);
+        if (!std::isfinite(gain) || gain < 0 || gain > 2) {
+            reply({}, {}, "Clip gain must be within 0..2");
+            return;
+        }
+        const auto device = data.value("device").toString();
+        static const QRegularExpression hex(QStringLiteral("\\A(?:[0-9a-fA-F]{2})*\\z"));
+        if (!hex.match(device).hasMatch()) {
+            reply({}, {}, "Invalid output device encoding");
+            return;
+        }
+        const auto audio = parseClipWav(payload);
+        if (!audio.ok()) {
+            reply({}, {}, "Invalid clip: " + audio.error);
+            return;
+        }
+        bool available = false;
+        if (QThread::currentThread() == devices.thread())
+            available = devices.outputAvailable(device);
+        else
+            QMetaObject::invokeMethod(&devices, [&] { available = devices.outputAvailable(device); },
+                                      Qt::BlockingQueuedConnection);
+        if (!available) {
+            reply({}, {}, "Audio output unavailable");
+            return;
+        }
+        stopClip(lease);
+        const auto id = QUuid::createUuid().toString(QUuid::Id128);
+        QVector<QVector<float>> chunks;
+        for (qsizetype offset = 0; offset < audio.samples.size(); offset += FrameSamples) {
+            auto chunk = audio.samples.mid(offset, FrameSamples);
+            for (auto &sample : chunk) sample = std::clamp(sample * float(gain), -1.f, 1.f);
+            chunks.append(std::move(chunk));
+        }
+        ClipPlayer::Hooks hooks;
+        hooks.feed = [this, id, device](QVector<float> chunk, std::function<void(bool)> completed) {
+            QMetaObject::invokeMethod(
+                &devices,
+                [this, id, device, chunk = std::move(chunk), completed = std::move(completed)]() mutable {
+                    const bool accepted = devices.play(id, device, std::move(chunk));
+                    QMetaObject::invokeMethod(this, [completed = std::move(completed), accepted]() mutable {
+                        completed(accepted);
+                    });
+                },
+                Qt::QueuedConnection);
+        };
+        hooks.query = [this, id, device](std::function<void(const ClipPlayer::DrainState &)> completed) {
+            QMetaObject::invokeMethod(
+                &devices,
+                [this, id, device, completed = std::move(completed)]() mutable {
+                    const auto raw = devices.playbackState(device, id);
+                    ClipPlayer::DrainState state;
+                    state.queuedFrames = raw.queuedFrames;
+                    state.pendingBytes = raw.pendingBytes;
+                    state.output = raw.output;
+                    state.sinkActive = raw.sinkActive;
+                    QMetaObject::invokeMethod(this, [completed = std::move(completed), state]() mutable {
+                        completed(state);
+                    });
+                },
+                Qt::QueuedConnection);
+        };
+        hooks.finished = [this, id, lease] { finishClip(id, lease, false, {}); };
+        hooks.failed = [this, id, lease](const QString &message) {
+            finishClip(id, lease, true, message);
+        };
+        auto clip = std::make_unique<ClipPlayer>(id, lease, std::move(chunks), std::move(hooks));
+        auto *player = clip.get();
+        clips[id] = std::move(clip);
+        leaseClips[lease] = id;
+        player->start();
+        reply({{"clipId", id}}, {}, {});
+        return;
+    }
+    if (method == "stop") {
+        const auto id = data.value("clipId").toString();
+        if (leaseClips.value(lease) == id) stopClip(lease);
+        reply({{"clipId", id}}, {}, {});
+        return;
+    }
+    reply({}, {}, "Unsupported clip method");
+}
+
+void SessionEngine::finishClip(const QString &clipId, const QString &lease, bool failed,
+                               const QString &message) {
+    const auto found = clips.find(clipId);
+    if (found == clips.end() || found->second->stopped()) return;
+    if (failed)
+        worker.event(lease, {{"event", "failed"}, {"clip", clipId}, {"message", message}});
+    else
+        worker.event(lease, {{"event", "finished"}, {"clip", clipId}});
+    if (leaseClips.value(lease) == clipId) leaseClips.remove(lease);
+    detach(clipId);
+    // Keep the player alive until its terminal hook returned; pending feed or
+    // drain completions are guarded by QPointer and simply do nothing then.
+    QTimer::singleShot(0, this, [this, clipId] {
+        const auto remaining = clips.find(clipId);
+        if (remaining != clips.end() && remaining->second->terminal()) clips.erase(remaining);
+    });
+}
+
+void SessionEngine::stopClip(const QString &lease) {
+    const auto id = leaseClips.take(lease);
+    if (id.isEmpty()) return;
+    const auto found = clips.find(id);
+    if (found == clips.end()) return;
+    found->second->stop();
+    detach(id);
+    clips.erase(found);
+}
+
+void SessionEngine::call(const QString &lease, const QString &service, const QString &method,
+                         const QJsonObject &d, const QByteArray &payload, Reply reply) {
+    if (service == ClipService) {
+        callClip(lease, method, d, payload, reply);
+        return;
+    }
     auto *s = session(lease);
     if (!s || s->closing) {
         reply({}, {}, "Session unavailable");
@@ -759,6 +882,7 @@ void SessionEngine::submit(const QString &lease, const QJsonObject &h, const QBy
     });
 }
 void SessionEngine::release(const QString &lease, Reply reply) {
+    stopClip(lease);
     auto it = sessions.find(lease);
     if (it == sessions.end()) {
         reply({}, {}, {});
@@ -790,6 +914,12 @@ void SessionEngine::release(const QString &lease, Reply reply) {
     });
 }
 void SessionEngine::shutdown() {
+    for (auto &entry : clips) {
+        if (entry.second) entry.second->stop();
+        detach(entry.first);
+    }
+    clips.clear();
+    leaseClips.clear();
     for (auto &s : sessions) {
         s.second->closing = true;
         for (const auto &cancel : s.second->operations)

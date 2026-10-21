@@ -7,12 +7,39 @@
 #include <QFile>
 #include <QWidget>
 #include <QPainter>
+#include <QtEndian>
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <psapi.h>
 #include <tlhelp32.h>
 #endif
 using namespace vusiif::ztgui;
+namespace {
+QByteArray clipWav(int frames)
+{
+    QByteArray body;
+    QByteArray fmt(16, '\0');
+    qToLittleEndian(quint16(1), reinterpret_cast<uchar *>(fmt.data()));
+    qToLittleEndian(quint16(1), reinterpret_cast<uchar *>(fmt.data() + 2));
+    qToLittleEndian(quint32(48000), reinterpret_cast<uchar *>(fmt.data() + 4));
+    qToLittleEndian(quint32(96000), reinterpret_cast<uchar *>(fmt.data() + 8));
+    qToLittleEndian(quint16(2), reinterpret_cast<uchar *>(fmt.data() + 12));
+    qToLittleEndian(quint16(16), reinterpret_cast<uchar *>(fmt.data() + 14));
+    body += "fmt ";
+    QByteArray sizes(4, '\0');
+    qToLittleEndian(quint32(16), reinterpret_cast<uchar *>(sizes.data()));
+    body += sizes + fmt;
+    body += "data";
+    qToLittleEndian(quint32(frames * 2), reinterpret_cast<uchar *>(sizes.data()));
+    body += sizes;
+    body += QByteArray(frames * 2, '\0');
+    QByteArray wav("RIFF");
+    QByteArray riff(4, '\0');
+    qToLittleEndian(quint32(body.size() + 4), reinterpret_cast<uchar *>(riff.data()));
+    wav += riff + "WAVE" + body;
+    return wav;
+}
+}
 class CaptureFixtureWindow final : public QWidget {
     int frames = 0;
     void paintEvent(QPaintEvent *) override {
@@ -25,6 +52,8 @@ class MediaIntegrationTests : public QObject {
     std::unique_ptr<QTemporaryDir> cache;
     std::unique_ptr<QLockFile> lock;
     std::unique_ptr<plugins::ServiceBroker> broker;
+    QTemporaryDir clipFailureDirectory;
+    QString clipFailureFile;
     template <class T, class F> media::Result<T> await(F operation, int timeout = 10000) {
         QObject scope;
         media::Result<T> result;
@@ -65,7 +94,15 @@ class MediaIntegrationTests : public QObject {
         return await<bool>([&](auto *ctx, auto cb) { s.close(ctx, cb); }).ok();
     }
   private slots:
+    void initTestCase() {
+        QVERIFY(clipFailureDirectory.isValid());
+        clipFailureFile = clipFailureDirectory.filePath("clip-failure.txt");
+        // The worker inherits this environment at start; the file is created
+        // only by the failure test. Production never sets this variable.
+        qputenv("ZTGUI_MEDIA_TEST_CLIP_FAILURE", clipFailureFile.toUtf8());
+    }
     void init() {
+        QFile::remove(clipFailureFile);
         auto package = package::inspect(qEnvironmentVariable("ZTGUI_TEST_MEDIA_PACKAGE",QString::fromUtf8(MEDIA_PLUGIN)));
         QVERIFY2(package.ok(), qPrintable(package.error));
         QString entry;
@@ -141,6 +178,102 @@ class MediaIntegrationTests : public QObject {
         CloseHandle(snapshot);
 #endif
     }
+    void clipServiceAcceptsAndFinishesShortAudio() {
+        auto lease = broker->acquire(media::ClipService, media::ClipApi);
+        QVERIFY2(lease, "media.clip lease unavailable");
+        QObject scope;
+        bool done = false;
+        QString error;
+        lease->call("play", {{"device", ""}, {"gain", 1.0}}, QByteArray("not a wav"), &scope,
+                    [&](const util::ServiceResult &result) { done = true; error = result.error; });
+        QTRY_VERIFY(done);
+        QVERIFY(!error.isEmpty()); // Validation happens before playback.
+
+        bool accepted = false, finished = false, failed = false;
+        QString clipId, failure;
+        lease->subscribe(&scope, [&](const util::ServiceResult &result) {
+            const auto event = result.data["event"].toString();
+            if (event == "finished") finished = true;
+            else if (event == "failed") { failed = true; failure = result.data["message"].toString(); }
+        });
+        done = false; error.clear();
+        lease->call("play", {{"device", ""}, {"gain", 0.5}}, clipWav(7680), &scope,
+                    [&](const util::ServiceResult &result) {
+                        done = true; accepted = result.ok(); error = result.error;
+                        clipId = result.data["clipId"].toString();
+                    });
+        QTRY_VERIFY(done);
+        if (!accepted && error.contains("unavailable"))
+            QSKIP("No physical audio output is available for clip playback");
+        QVERIFY2(accepted, qPrintable(error));
+        QVERIFY(!clipId.isEmpty());
+        QTRY_VERIFY_WITH_TIMEOUT(finished || failed, 5000);
+        QVERIFY2(finished, qPrintable(failure));
+        bool stopped = false;
+        done = false;
+        lease->call("stop", {{"clipId", clipId}}, {}, &scope,
+                    [&](const util::ServiceResult &result) { done = true; stopped = result.ok(); });
+        QTRY_VERIFY(done); QVERIFY(stopped);
+        done = false;
+        lease->call("stop", {{"clipId", "unknown-clip"}}, {}, &scope,
+                    [&](const util::ServiceResult &result) { done = true; stopped = result.ok(); });
+        QTRY_VERIFY(done); QVERIFY(stopped);
+        done = false;
+        lease->close(&scope, [&](const util::ServiceResult &result) { done = true; stopped = result.ok(); });
+        QTRY_VERIFY(done); QVERIFY(stopped);
+    }
+
+    void clipServiceReportsFailureAfterAcceptance()
+    {
+        auto lease = broker->acquire(media::ClipService, media::ClipApi);
+        QVERIFY2(lease, "media.clip lease unavailable");
+        QObject scope;
+        bool finished = false, failed = false;
+        QString failure;
+        lease->subscribe(&scope, [&](const util::ServiceResult &result) {
+            const auto event = result.data["event"].toString();
+            if (event == "finished") finished = true;
+            else if (event == "failed") { failed = true; failure = result.data["message"].toString(); }
+        });
+        {
+            QFile injection(clipFailureFile);
+            QVERIFY(injection.open(QIODevice::WriteOnly));
+            // Accept two 20 ms chunks, then reject the third one.
+            injection.write("2 nonce-1");
+        }
+        bool done = false, accepted = false;
+        QString error, clipId;
+        lease->call("play", {{"device", ""}, {"gain", 1.0}}, clipWav(7680), &scope,
+                    [&](const util::ServiceResult &result) {
+                        done = true; accepted = result.ok(); error = result.error;
+                        clipId = result.data["clipId"].toString();
+                    });
+        QTRY_VERIFY(done);
+        if (!accepted && error.contains("unavailable"))
+            QSKIP("No physical audio output is available for clip playback");
+        QVERIFY2(accepted, qPrintable(error));
+        QVERIFY(!clipId.isEmpty());
+        QTRY_VERIFY_WITH_TIMEOUT(finished || failed, 5000);
+        QVERIFY2(failed, "The injected output failure must emit failed");
+        QVERIFY(!finished);
+        QVERIFY(!failure.isEmpty());
+        // The lease stays usable and later clips still reach a terminal event.
+        QVERIFY(QFile::remove(clipFailureFile));
+        finished = failed = false;
+        done = false; accepted = false;
+        lease->call("play", {{"device", ""}, {"gain", 1.0}}, clipWav(7680), &scope,
+                    [&](const util::ServiceResult &result) {
+                        done = true; accepted = result.ok(); error = result.error;
+                    });
+        QTRY_VERIFY(done);
+        QVERIFY2(accepted, qPrintable(error));
+        QTRY_VERIFY_WITH_TIMEOUT(finished || failed, 5000);
+        QVERIFY2(finished, qPrintable(failure));
+        bool closed = false;
+        lease->close(&scope, [&](const util::ServiceResult &result) { closed = result.ok(); });
+        QTRY_VERIFY(closed);
+    }
+
     void closeInsideFrameCallback() {
         auto s = consumer();
         QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->open(ctx, cb); }).ok());
