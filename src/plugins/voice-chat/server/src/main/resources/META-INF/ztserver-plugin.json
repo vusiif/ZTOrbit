@@ -1,9 +1,0 @@
-{
-  "formatVersion": 1,
-  "host": "server",
-  "id": "voice-chat",
-  "name": "语音聊天",
-  "version": "${pluginVersion}",
-  "apiVersion": "${apiVersion}",
-  "mainClass": "vusiif.ztgui.voicechat.VoiceChatPlugin"
-}

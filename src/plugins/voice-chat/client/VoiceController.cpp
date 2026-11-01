@@ -8,7 +8,7 @@
 #include <ztprotocol/NetworkAddress.h>
 #include <algorithm>
 
-namespace vusiif::ztgui::voice_chat {
+namespace vusiif::zto::voice_chat {
 VoiceController::VoiceController(QObject *parent, std::shared_ptr<AudioDeviceCache> cache)
     : QObject(parent), m_session(new VoiceSession(cache,this)), m_cache(std::move(cache))
 {

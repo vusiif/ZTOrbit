@@ -1,10 +1,10 @@
-# ZTServer（旧 C++ 实现，已归档）
+# ZTOrbitHub（旧 C++ 实现，已归档）
 
 本目录归档了 2026-10-17 之前使用的 C++17 / Qt6 服务端实现，仅用于历史构建与对照，不再是仓库的正式服务端。正式服务端已迁移到 [`../server/`](../server/README.md)（Java 25 + Netty，Maven 构建）。
 
 ## 内容
 
-- `api/`：旧公开插件 SDK（`ZTServerPluginApi`，Qt 动态插件 IID `vusiif.ztgui.server.api.PluginInterface/2.0`）。
+- `api/`：旧公开插件 SDK（`ZTOrbitHubPluginApi`，Qt 动态插件 IID `vusiif.ztohub.api.PluginInterface/2.0`）。
 - `main/`：旧宿主（`ServerHost.cpp`、`PluginServices.cpp`、`ZeroTierQueries.cpp`、`AppLog.cpp`、入口 `main.cpp`），内嵌 `resources/zt-installer.sh`。
 - `plugins/voice-chat/server/`：旧 C++ 语音服务端插件（`.ztplugin`，版本 0.1.0）。
 - `tests/`：旧 C++ Package/Query 测试与 Python Integration/Startup/Installer 测试。
@@ -18,21 +18,21 @@
 
 ```bash
 cmake -S . -B build/cmake-build-server-old \
-  -DZTGUI_BUILD_CLIENT=OFF -DZTGUI_BUILD_SERVER_OLD=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build/cmake-build-server-old --target zt-server --parallel
+  -DZTO_BUILD_CLIENT=OFF -DZTO_BUILD_SERVER_OLD=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build/cmake-build-server-old --target ztohub --parallel
 ```
 
 也可以独立配置 `src/server-old`：
 
 ```bash
-cmake -S src/server-old -B /tmp/ztserver-old -DZTSERVER_BUILD_TESTS=ON
+cmake -S src/server-old -B /tmp/ztohub-old -DZTOHUB_BUILD_TESTS=ON
 ```
 
 旧打包入口（输出与正式 Java 包区分）：
 
 ```bash
 bash src/server-old/scripts/build-linux.sh
-# build/dist/linux-x64-cpp/、build/dist/linux-x64-cpp.tar.gz、build/dist/ZTServer-api-cpp-v0.4.zip
+# build/dist/linux-x64-cpp/、build/dist/linux-x64-cpp.tar.gz、build/dist/ZTOrbitHub-api-cpp-v0.4.zip
 # 需要旧语音插件时添加 --build-voice-plugin
 ```
 

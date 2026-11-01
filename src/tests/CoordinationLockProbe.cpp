@@ -26,7 +26,7 @@ int main(int argc, char **argv)
     const auto leaseFile = arguments.at(3);
     const int holdMilliseconds = arguments.at(4).toInt();
 
-    vusiif::ztgui::storage::CoordinationLock lock(metadataRoot);
+    vusiif::zto::storage::CoordinationLock lock(metadataRoot);
     QString error;
     if (!lock.acquire(error, 10000)) return 3;
     if (!QDir().mkpath(QFileInfo(markerPath).absolutePath())) return 4;

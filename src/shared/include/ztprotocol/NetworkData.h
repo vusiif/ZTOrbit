@@ -7,7 +7,7 @@
 #include <QRegularExpression>
 #include <functional>
 
-namespace vusiif::ztgui::util {
+namespace vusiif::zto::util {
 struct SendResult {
     int recipients = 0;
     QString error;

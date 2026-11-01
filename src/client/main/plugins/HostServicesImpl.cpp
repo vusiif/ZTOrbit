@@ -23,7 +23,7 @@
 #include <limits>
 #include <memory>
 
-namespace vusiif::ztgui::util {
+namespace vusiif::zto::util {
 namespace {
 QMutex fileMutex; // Serializes requests, including plugins using the same name.
 bool linked(const QFileInfo &info) { return info.isSymLink() || info.isJunction(); }
@@ -340,7 +340,7 @@ void HostServicesImpl::query(const QString &command, bool object, QObject *conte
     const QPointer<QObject> target(context);
     // Even missing CLI/authorization errors must complete asynchronously.
     QTimer::singleShot(0, request, [request, target, command, object, completed = std::move(completed),lease=m_callbacks] {
-        vusiif::ztgui::zerotier::command(request, {"-j", command},
+        vusiif::zto::zerotier::command(request, {"-j", command},
             [request, target, object, completed,lease](bool success, const QString &text) {
                 JsonResult result;
                 if (!success) result.error = text;

@@ -8,7 +8,7 @@
 
 class QSettings;
 
-namespace vusiif::ztgui::storage {
+namespace vusiif::zto::storage {
 
 class StorageContext;
 
@@ -77,4 +77,4 @@ private:
     mutable QString m_error;
 };
 
-} // namespace vusiif::ztgui::storage
+} // namespace vusiif::zto::storage

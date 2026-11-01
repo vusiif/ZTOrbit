@@ -15,7 +15,7 @@
 
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
-    app.setApplicationName("zt-server"); app.setApplicationVersion(ZEROTIER_GUI_VERSION);
+    app.setApplicationName("ZTOrbitHub"); app.setApplicationVersion(ZTO_VERSION);
     QCommandLineParser parser;
     parser.setApplicationDescription("ZeroTier Linux plugin server (root, Ubuntu/Debian + systemd)");
     parser.addHelpOption(); parser.addVersionOption();
@@ -62,8 +62,8 @@ int main(int argc, char **argv) {
         QObject::connect(&notifier, &QSocketNotifier::activated, &app, [&] {
             signalfd_siginfo info; if (::read(fd, &info, sizeof(info)) == sizeof(info)) app.quit();
         });
-        vusiif::ztgui::util::log::initialize();
-        vusiif::ztgui::server::ServerHost host(QDir::currentPath());
+        vusiif::zto::util::log::initialize();
+        vusiif::ztohub::ServerHost host(QDir::currentPath());
         if (!host.start(address, quint16(port))) { ::close(fd); return 1; }
         const int result = app.exec(); host.stop(); notifier.setEnabled(false); ::close(fd); return result;
     }

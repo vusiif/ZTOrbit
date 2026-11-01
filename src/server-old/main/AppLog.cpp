@@ -65,35 +65,35 @@ void messageHandler(QtMsgType type, const QMessageLogContext &, const QString &m
 {
     const char *level = type == QtDebugMsg ? "DEBUG" : type == QtInfoMsg ? "INFO"
         : type == QtWarningMsg ? "WARN" : type == QtCriticalMsg ? "ERROR" : "FATAL";
-    vusiif::ztgui::util::log::write(QString::fromLatin1(level) + " " + message);
+    vusiif::zto::util::log::write(QString::fromLatin1(level) + " " + message);
     if (type == QtFatalMsg) std::abort();
 }
 }
 
-QString vusiif::ztgui::util::log::path()
+QString vusiif::zto::util::log::path()
 {
     QMutexLocker lock(&mutex);
     return openLog() ? logFile.fileName() : QString();
 }
 
-void vusiif::ztgui::util::log::write(const QString &text)
+void vusiif::zto::util::log::write(const QString &text)
 {
     QMutexLocker lock(&mutex);
     appendEntry(text);
 }
 
-QString vusiif::ztgui::util::log::writeChecked(const QString &text)
+QString vusiif::zto::util::log::writeChecked(const QString &text)
 {
     QMutexLocker lock(&mutex);
     return appendEntry(text);
 }
 
-void vusiif::ztgui::util::log::initialize()
+void vusiif::zto::util::log::initialize()
 {
     QMutexLocker lock(&mutex);
     if (initialized) return;
     initialized = true;
     openLog();
     qInstallMessageHandler(messageHandler);
-    appendEntry(QStringLiteral("服务启动 zt-server v%1").arg(QStringLiteral(ZEROTIER_GUI_VERSION)));
+    appendEntry(QStringLiteral("服务启动 ztohub v%1").arg(QStringLiteral(ZTO_VERSION)));
 }

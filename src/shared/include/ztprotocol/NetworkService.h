@@ -4,7 +4,7 @@
 #include <QList>
 #include <memory>
 
-namespace vusiif::ztgui::util {
+namespace vusiif::zto::util {
 struct RelayInfo {
     QString nodeId, moonId, virtualIp;
     quint16 port = protocol::NetworkPort;

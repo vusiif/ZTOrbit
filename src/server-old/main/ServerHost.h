@@ -7,7 +7,7 @@
 #include <QSet>
 #include <QTimer>
 #include <QPluginLoader>
-#include <ztserver/PluginInterface.h>
+#include <ztohub/PluginInterface.h>
 #include "ZeroTierQueries.h"
 #include <memory>
 #include <vector>
@@ -15,7 +15,7 @@
 #include "NetworkTransport.h"
 #include "PluginPackage.h"
 #include <QLockFile>
-namespace vusiif::ztgui::server {
+namespace vusiif::ztohub {
 class PluginServices;
 class ServerHost final : public QObject {
 public:
@@ -23,7 +23,7 @@ public:
     ~ServerHost() override;
     bool start(const QHostAddress &, quint16);
     void stop();
-    network::NetworkTransport &transport() { return m_transport; }
+    vusiif::zto::network::NetworkTransport &transport() { return m_transport; }
     quint16 port() const { return m_tcp.serverPort(); }
     QHostAddress peerAddress(api::ConnectionId) const;
     bool sendTcp(const QString &, api::ConnectionId, const QByteArray &);
@@ -37,7 +37,7 @@ private:
         api::PluginInterface *entry = nullptr;
         std::unique_ptr<PluginServices> services;
         api::PluginInfo info;
-        util::CancellationSource cancellation;
+        vusiif::zto::util::CancellationSource cancellation;
         std::future<api::StartResult> task;
         bool ready = false;
         std::unique_ptr<QTemporaryDir> cache;
@@ -50,7 +50,7 @@ private:
     std::vector<Plugin> m_plugins;
     api::ConnectionId m_next = 1;
     ZeroTierQueries m_queries;
-    network::NetworkTransport m_transport{true};
+    vusiif::zto::network::NetworkTransport m_transport{true};
     QString m_node;
     bool m_networkPollPending = false;
     qint64 m_networkPolledAt = 0;

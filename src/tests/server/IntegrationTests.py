@@ -1,12 +1,12 @@
-"""Black-box tests for the Java ZTServer host, plugins and ZTS1 wire protocol.
+"""Black-box tests for the Java ZTOrbitHub host, plugins and ZTS1 wire protocol.
 
 The tests never touch real ZeroTier: an in-process mock HTTP service provides read-only query
 responses and the server is started in a temporary working directory with fixture plugin jars.
 
 Example:
-  python3 src/tests/server/build-fixtures.py --api src/server/api/target/ztserver-api-0.2.jar \
+  python3 src/tests/server/build-fixtures.py --api src/server/api/target/ztohub-api-0.2.jar \
       --output /tmp/zt-fixtures
-  python3 src/tests/server/IntegrationTests.py --binary src/server/main/target/zt-server.jar \
+  python3 src/tests/server/IntegrationTests.py --binary src/server/main/target/Z2Hub.jar \
       --fixtures /tmp/zt-fixtures
 """
 import argparse
@@ -130,7 +130,7 @@ class IntegrationTests(unittest.TestCase):
         (self.root / "plugins").mkdir()
         for source in sorted(Path(OPTIONS.fixtures).glob("*.jar")):
             shutil.copyfile(source, self.root / "plugins" / source.name)
-        (self.root / "plugins" / "unsupported.ztplugin").write_bytes(b"old package")
+        (self.root / "plugins" / "unsupported.z2plugin").write_bytes(b"old package")
         self.process = None
         if OPTIONS.host is None:
             with socket.socket() as probe:
@@ -142,8 +142,8 @@ class IntegrationTests(unittest.TestCase):
                 self.command + ["--server", "--listen", self.host, "--port", str(self.port)],
                 cwd=self.root,
                 env=dict(os.environ,
-                         ZTSERVER_ZT_API=f"http://127.0.0.1:{self.mock.server_port}",
-                         ZTSERVER_ZT_TOKEN=TOKEN),
+                         ZTOHUB_ZT_API=f"http://127.0.0.1:{self.mock.server_port}",
+                         ZTOHUB_ZT_TOKEN=TOKEN),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 **spawn_options(),
@@ -174,7 +174,7 @@ class IntegrationTests(unittest.TestCase):
                 self.fail("--jar is required when --binary is a launcher script")
             launcher = self.root / "start-server.sh"
             shutil.copyfile(binary, launcher)
-            shutil.copyfile(Path(OPTIONS.jar).resolve(), self.root / "zt-server.jar")
+            shutil.copyfile(Path(OPTIONS.jar).resolve(), self.root / "Z2Hub.jar")
             return ["/bin/bash", str(launcher)]
         return [str(binary)]
 
@@ -319,7 +319,7 @@ class IntegrationTests(unittest.TestCase):
         for arguments in (("--install", "zerotier"), ("-u", "all"), ("--moon",)):
             result = self.run_cli(*arguments)
             self.assertEqual(result.returncode, 2)
-            self.assertIn("Install/uninstall is handled by ./zt-installer.sh; see DEPLOYMENT.md",
+            self.assertIn("Install/uninstall is handled by ./z2-installer.sh; see DEPLOYMENT.md",
                           result.stderr)
         for arguments in (("--port", "0", "--server"),
                           ("--listen", "::1", "--server"),
@@ -349,8 +349,8 @@ def java():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--binary", help="zt-server.jar, start-server.sh or native binary")
-    parser.add_argument("--jar", help="zt-server.jar used when --binary is a launcher script")
+    parser.add_argument("--binary", help="Z2Hub.jar, start-server.sh or native binary")
+    parser.add_argument("--jar", help="Z2Hub.jar used when --binary is a launcher script")
     parser.add_argument("--fixtures", required=True, help="directory with fixture plugin jars")
     parser.add_argument("--host", help="test an already deployed server instead of starting one")
     parser.add_argument("--port", type=int, default=18100)

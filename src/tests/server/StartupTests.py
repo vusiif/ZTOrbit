@@ -14,14 +14,14 @@ import unittest
 
 class StartupTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="zt-server startup ")
+        self.temporary = tempfile.TemporaryDirectory(prefix="ztohub startup ")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.launcher = self.root / "start-server.sh"
         source = Path(__file__).resolve().parents[2] / "server/scripts/start-server.sh"
         shutil.copyfile(source, self.launcher)
         self.launcher.chmod(0o755)
-        self.jar = self.root / "zt-server.jar"
+        self.jar = self.root / "Z2Hub.jar"
         self.jar.write_bytes(b"fake jar")
         self.bin = self.root / "bin"
         self.bin.mkdir()
@@ -87,7 +87,7 @@ class StartupTests(unittest.TestCase):
         self.jar.unlink()
         result = self.run_launcher()
         self.assertEqual(result.returncode, 78)
-        self.assertIn("zt-server.jar", result.stderr)
+        self.assertIn("Z2Hub.jar", result.stderr)
 
     def test_missing_java_blocks_start(self):
         self.fake_java.unlink()

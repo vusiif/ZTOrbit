@@ -6,7 +6,7 @@
 #include <QTextStream>
 #include <QFile>
 int main(int argc,char **argv) {
-    using namespace vusiif::ztgui::package;
+    using namespace vusiif::zto::package;
     QCoreApplication app(argc,argv); QCommandLineParser parser; parser.addHelpOption();
     for(const auto &key:{"library","output","host","id","name","version","apiVersion","iid","bundle-manifest"})
         parser.addOption(QCommandLineOption(key,key,"value"));

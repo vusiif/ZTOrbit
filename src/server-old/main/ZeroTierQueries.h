@@ -1,8 +1,8 @@
 #pragma once
-#include <ztserver/HostServices.h>
+#include <ztohub/HostServices.h>
 #include <QNetworkAccessManager>
 #include <QUrl>
-namespace vusiif::ztgui::server {
+namespace vusiif::ztohub {
 class ZeroTierQueries final : public QObject, public api::ZeroTierQueries {
 public:
     explicit ZeroTierQueries(QObject *parent = nullptr,

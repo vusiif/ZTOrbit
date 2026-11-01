@@ -39,7 +39,7 @@ int main(int argc, char **argv)
     QJsonDocument document;
     if (arguments.contains("info")) {
         document = QJsonDocument(QJsonObject{{"address", "0123456789"}, {"version", "1.16.0"},
-            {"online", true}, {"tcpFallbackActive", false}, {"extraField", "preserved"}});
+            {"online", true}, {"tcpFallbackActive", mode == "tcp-fallback"}, {"extraField", "preserved"}});
     } else if (arguments.contains("listnetworks")) {
         QJsonArray networks;
         if (mode == "members") {

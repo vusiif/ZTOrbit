@@ -3,7 +3,7 @@
 #include <QByteArray>
 #include <QString>
 
-namespace vusiif::ztgui::util {
+namespace vusiif::zto::util {
 struct FileResult {
     QByteArray data;
     QString error;

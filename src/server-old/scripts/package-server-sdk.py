@@ -12,7 +12,7 @@ import zipfile
 root = Path(sys.argv[1]).resolve()
 version = '.'.join((root / 'src/server-old/VERSION').read_text().strip().split('.')[:2])
 build = root / 'build' / 'cmake-build-server-old-api'
-sdk = root / 'build' / 'dist' / f'ZTServer-api-cpp-v{version}'
+sdk = root / 'build' / 'dist' / f'ZTOrbitHub-api-cpp-v{version}'
 archive = sdk.with_suffix(sdk.suffix + '.zip')
 state_file = build / 'package-state.json'
 
@@ -38,7 +38,7 @@ try:
 except (OSError, ValueError):
     state = {}
 changed = (not sdk.is_dir()
-           or not (sdk / 'lib/cmake/ZTServerPluginApi/ZTServerPluginApiTargets.cmake').is_file()
+           or not (sdk / 'lib/cmake/ZTOrbitHubPluginApi/ZTOrbitHubPluginApiTargets.cmake').is_file()
            or state.get('inputs') != inputs or state.get('sdk') != fingerprint(sdk))
 if changed:
     cache = build / 'CMakeCache.txt'
@@ -51,14 +51,14 @@ if changed:
                     '-DCMAKE_INSTALL_LIBDIR:STRING=lib'], check=True)
     subprocess.run(['cmake', '--build', str(build), '--target', 'ztplugin_pack', '--parallel'], check=True)
     (root / 'build' / 'dist').mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix='.ztserver-api-cpp-', dir=root / 'build' / 'dist'))
+    staging = Path(tempfile.mkdtemp(prefix='.ztohub-api-cpp-', dir=root / 'build' / 'dist'))
     subprocess.run(['cmake', '--install', str(build), '--prefix', str(staging)], check=True)
     if sdk.exists():
         sdk.rename(sdk.with_name(sdk.name + f'.previous-{time.time_ns()}'))
     staging.rename(sdk)
-    for leftover in (root / 'build' / 'dist').glob('.ztserver-api-cpp-*'):
+    for leftover in (root / 'build' / 'dist').glob('.ztohub-api-cpp-*'):
         shutil.rmtree(leftover, ignore_errors=True)
-    for previous in (root / 'build' / 'dist').glob('ZTServer-api-cpp-v*.previous-*'):
+    for previous in (root / 'build' / 'dist').glob('ZTOrbitHub-api-cpp-v*.previous-*'):
         shutil.rmtree(previous, ignore_errors=True)
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministically synthesizes the two ZTGUI voice-chat cues.
+"""Deterministically synthesizes the two ZTOrbit voice-chat cues.
 
 The output is 48 kHz, mono, PCM16 RIFF/WAVE, 160 ms per cue. Each cue is
 two 80 ms tones with a 5 ms fade at every boundary to avoid clicks.

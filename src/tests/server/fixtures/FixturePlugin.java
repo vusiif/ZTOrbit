@@ -4,17 +4,17 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import vusiif.ztgui.server.api.CancellationToken;
-import vusiif.ztgui.server.api.HostServices;
-import vusiif.ztgui.server.api.LogLevel;
-import vusiif.ztgui.server.api.PluginInfo;
-import vusiif.ztgui.server.api.ServerPlugin;
-import vusiif.ztgui.server.api.StartResult;
-import vusiif.ztgui.server.api.StartTask;
+import vusiif.ztohub.api.CancellationToken;
+import vusiif.ztohub.api.HostServices;
+import vusiif.ztohub.api.LogLevel;
+import vusiif.ztohub.api.PluginInfo;
+import vusiif.ztohub.api.ServerPlugin;
+import vusiif.ztohub.api.StartResult;
+import vusiif.ztohub.api.StartTask;
 
 /**
  * Black-box fixture plugin. Behaviour is selected by the ID declared in its own
- * {@code META-INF/ztserver-plugin.json}, so a single class backs every fixture jar:
+ * {@code META-INF/ztohub-plugin.json}, so a single class backs every fixture jar:
  *
  * <ul>
  *   <li>{@code test-echo}, {@code test-other}: echo TCP and UDP payloads</li>
@@ -38,7 +38,7 @@ public final class FixturePlugin implements ServerPlugin {
 
     private static String readManifest() {
         try (InputStream input = FixturePlugin.class.getClassLoader()
-                .getResourceAsStream("META-INF/ztserver-plugin.json")) {
+                .getResourceAsStream("META-INF/ztohub-plugin.json")) {
             if (input == null) {
                 return "";
             }

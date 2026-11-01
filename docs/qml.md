@@ -16,7 +16,7 @@
 
 主程序使用 `qt_add_qml_module` 编译并嵌入QML；Qt 6.8/MSBuild的测试目标引用外部源目录会生成含 `_..` 的缓存路径，因此测试资源使用 `NO_CACHEGEN`，生产目标仍生成QML缓存。Widgets仅作为Qt.labs.platform原生托盘／菜单后备库，公开SDK和语音页面不依赖它。
 
-宿主显式导入 `QtQuick.Controls.Basic`，并继续为通用Controls插件设置Basic。弹窗、行菜单和编辑器按需构造；已打开的弹窗保持缓存，以保留再次打开时的状态。成员子模型在首次拿到成员时创建。隐藏窗口允许释放场景图／图形设备资源，恢复后重建；业务模型、备注、导航和语音会话保留。设置中的“禁止GPU加速”及 `--disable-gpu-acceleration` 在创建QML引擎前选择Qt的software场景图；设置默认开启，首次切换时提示完全退出并重启后生效，启动参数仅覆盖本次启动。该设置与历史实测见 [资源占用分析](validation/resources-2026-10-13/README.md)（0.3.2）。
+宿主显式导入 `QtQuick.Controls.Basic`，并继续为通用Controls插件设置Basic。弹窗、行菜单和编辑器按需构造；已打开的弹窗保持缓存，以保留再次打开时的状态。成员子模型在首次拿到成员时创建。隐藏窗口允许释放场景图／图形设备资源，恢复后重建；业务模型、备注、导航和语音会话保留。设置中的“禁止GPU加速”及 `--disable-gpu-acceleration` 在创建QML引擎前选择Qt的software场景图；设置默认开启，首次切换时提示完全退出并重启后生效，启动参数仅覆盖本次启动。
 
 Windows的 `windeployqt --qmldir src/client/main/qml` 和macOS的 `macdeployqt -qmldir=...` 必须部署QML模块及其插件；仅扫描EXE的DLL导入表不足以部署QML。插件的额外导入模块也需要打包；当前语音页使用宿主已有的 Qt Quick Controls，音频通过媒体 API 访问 `media.session`，实现位于媒体工作进程，语音插件不导入 Multimedia 或 FFmpeg。
 
@@ -24,4 +24,4 @@ Windows的 `windeployqt --qmldir src/client/main/qml` 和macOS的 `macdeployqt -
 
 回归分为QML窗口交互、核心业务、动态插件、网络协议、Windows端口、语音页面及音频。QML测试使用真实Quick窗口／鼠标／键盘事件，并保存主题、尺寸和指南截图。Windows托盘与原生焦点另用windows平台验证。测试使用模拟CLI与临时配置目录，不执行真实安装、卸载或修改ZeroTier配置。
 
-macOS代码与部署参数更新不能替代实机验证；真实多人麦克风／耳机听感同样需要人工验收。实际验证结果记录在维护文档中。
+macOS代码与部署参数更新不能替代实机验证；真实多人麦克风／耳机听感同样需要人工验收。交付时列明实际验证平台、范围和未验证项。

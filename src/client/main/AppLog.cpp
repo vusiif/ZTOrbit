@@ -103,73 +103,73 @@ void messageHandler(QtMsgType type, const QMessageLogContext &, const QString &m
 {
     const char *level = type == QtDebugMsg ? "DEBUG" : type == QtInfoMsg ? "INFO"
         : type == QtWarningMsg ? "WARN" : type == QtCriticalMsg ? "ERROR" : "FATAL";
-    vusiif::ztgui::util::log::write(QString::fromLatin1(level) + " " + message);
+    vusiif::zto::util::log::write(QString::fromLatin1(level) + " " + message);
     if (type == QtFatalMsg) std::abort();
 }
 }
 
-QString vusiif::ztgui::util::log::path()
+QString vusiif::zto::util::log::path()
 {
     QMutexLocker lock(&mutex);
     return openLog() ? logFile.fileName() : QString();
 }
 
-void vusiif::ztgui::util::log::setDirectory(const QString &directory)
+void vusiif::zto::util::log::setDirectory(const QString &directory)
 {
     QMutexLocker lock(&mutex);
     if (openAttempted) return;
     selectedDirectory = directory;
 }
 
-QString vusiif::ztgui::util::log::directory()
+QString vusiif::zto::util::log::directory()
 {
     QMutexLocker lock(&mutex);
     if (!selectedDirectory.isEmpty()) return QDir(selectedDirectory).absolutePath();
     return QDir(QCoreApplication::applicationDirPath()).filePath("logs");
 }
 
-void vusiif::ztgui::util::log::write(const QString &text)
+void vusiif::zto::util::log::write(const QString &text)
 {
     writeEntry(text);
 }
 
-QString vusiif::ztgui::util::log::writeChecked(const QString &text)
+QString vusiif::zto::util::log::writeChecked(const QString &text)
 {
     return writeEntry(text);
 }
 
-void vusiif::ztgui::util::log::setRotationCallback(std::function<void()> callback)
+void vusiif::zto::util::log::setRotationCallback(std::function<void()> callback)
 {
     QMutexLocker lock(&mutex);
     rotationCallback = std::move(callback);
 }
 
-void vusiif::ztgui::util::log::initialize()
+void vusiif::zto::util::log::initialize()
 {
     QMutexLocker lock(&mutex);
     if (initialized) return;
     initialized = true;
     openLog();
     qInstallMessageHandler(messageHandler);
-    appendEntry(QStringLiteral("应用启动 ZTGUI v%1").arg(QStringLiteral(ZEROTIER_GUI_VERSION)));
+    appendEntry(QStringLiteral("应用启动 ZTOrbit v%1").arg(QStringLiteral(ZTO_VERSION)));
 }
 
-void vusiif::ztgui::util::log::registerActiveFile(const QString &path)
+void vusiif::zto::util::log::registerActiveFile(const QString &path)
 {
     QMutexLocker lock(&mutex);
     activeFiles.insert(normalizedActivePath(path));
 }
 
-void vusiif::ztgui::util::log::unregisterActiveFile(const QString &path)
+void vusiif::zto::util::log::unregisterActiveFile(const QString &path)
 {
     QMutexLocker lock(&mutex);
     activeFiles.remove(normalizedActivePath(path));
 }
 
-bool vusiif::ztgui::util::log::isActiveFile(const QString &path)
+bool vusiif::zto::util::log::isActiveFile(const QString &path)
 {
     QMutexLocker lock(&mutex);
     return activeFiles.contains(normalizedActivePath(path));
 }
 
-qint64 vusiif::ztgui::util::log::maximumFileBytes() { return MaxFileBytes; }
+qint64 vusiif::zto::util::log::maximumFileBytes() { return MaxFileBytes; }

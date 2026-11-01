@@ -3,8 +3,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QtEndian>
-namespace vusiif::ztgui::protocol::service {
-inline constexpr auto Protocol = "ztgui-service/1";
+namespace vusiif::zto::protocol::service {
+inline constexpr auto Protocol = "zto-service/1";
 inline constexpr qsizetype MaxEnvelope = 64 * 1024, MaxPayload = 256 * 1024;
 inline constexpr qsizetype MaxFrame = MaxEnvelope + MaxPayload + 8;
 struct Message { QJsonObject header; QByteArray payload; };

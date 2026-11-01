@@ -6,25 +6,25 @@
 
 | 命名空间 | 职责 | 位置 |
 | --- | --- | --- |
-| `vusiif::ztgui::api` | 插件信息、菜单、结果、入口及生命周期接口 | `src/client/api/include/ztgui/` |
-| `vusiif::ztgui::util` | 文件、ZeroTier 查询、宿主服务和取消工具 | 公开定义在 `src/client/api/`，实现位于 `src/client/main/` |
-| `vusiif::ztgui::plugins` | 动态加载器、注册表、准备状态及清理 | `src/client/main/plugins/` |
-| `vusiif::ztgui::ui` | QML控制器、增量数据模型与主题组件 | `src/client/main/` |
-| `vusiif::ztgui::zerotier` | ZeroTier 客户端访问、轮询及配置包 | `src/client/main/` |
-| `vusiif::ztgui::platform` | 平台脚本与授权辅助 | `src/client/main/` |
-| `vusiif::ztgui::voice_chat` | 语音客户端与 C++ 共享协议（Java 服务端使用 `vusiif.ztgui.voicechat`） | `src/plugins/voice-chat/` |
+| `vusiif::zto::api` | 插件信息、菜单、结果、入口及生命周期接口 | `src/client/api/include/zto/` |
+| `vusiif::zto::util` | 文件、ZeroTier 查询、宿主服务和取消工具 | 公开定义在 `src/client/api/`，实现位于 `src/client/main/` |
+| `vusiif::zto::plugins` | 动态加载器、注册表、准备状态及清理 | `src/client/main/plugins/` |
+| `vusiif::zto::ui` | QML控制器、增量数据模型与主题组件 | `src/client/main/` |
+| `vusiif::zto::zerotier` | ZeroTier 客户端访问、轮询及配置包 | `src/client/main/` |
+| `vusiif::zto::platform` | 平台脚本与授权辅助 | `src/client/main/` |
+| `vusiif::zto::voice_chat` | 语音客户端与 C++ 共享协议（Java 服务端使用 `vusiif.ztohub.voicechat`） | `src/plugins/voice-chat/` |
 
-头文件路径仍使用 `<ztgui/...>`，CMake 目标仍为 `ZTGUI::Api`。不提供旧命名空间别名。宿主的 `PluginRegistry`、`PluginLoader` 和 `HostServicesImpl` 不属于公开 SDK，插件不能包含其实现头文件。
+头文件路径仍使用 `<zto/...>`，CMake 目标仍为 `ZTO::Api`。不提供旧命名空间别名。宿主的 `PluginRegistry`、`PluginLoader` 和 `HostServicesImpl` 不属于公开 SDK，插件不能包含其实现头文件。
 
 ## QML页面与二进制边界
 
-页面可通过 `<ztgui/PluginPage.h>` 的 `createQmlPage(engine,parent,source,initialProperties)` 从插件自己的资源创建。C++控制器通过required属性注入，由页面持有；页面先于工厂和DLL销毁，宿主清理引擎组件缓存后才卸载库。插件不能注册DLL所有的全局QML类型或单例，也不能依赖宿主内部QML模块。可使用Qt Quick Controls并继承应用窗口palette。
+页面可通过 `<zto/PluginPage.h>` 的 `createQmlPage(engine,parent,source,initialProperties)` 从插件自己的资源创建。C++控制器通过required属性注入，由页面持有；页面先于工厂和DLL销毁，宿主清理引擎组件缓存后才卸载库。插件不能注册DLL所有的全局QML类型或单例，也不能依赖宿主内部QML模块。可使用Qt Quick Controls并继承应用窗口palette。
 
-客户端应用与 API 均由根 `VERSION` 派生（当前 `0.5.1` → API `0.5`），由新入口／生命周期IID `/3.0` 区分页面ABI。旧 `/1.0`、`/2.0` DLL在实例化前拒绝，必须迁移页面工厂并重编。SDK依赖Qt Quick/Qml，已移除Widgets依赖；应用保留Widgets仅供Windows原生托盘菜单后备实现。
+客户端应用与 API 均由根 `VERSION` 派生（当前 `0.5.2` → API `0.5`），由新入口／生命周期IID `/3.0` 区分页面ABI。旧 `/1.0`、`/2.0` DLL在实例化前拒绝，必须迁移页面工厂并重编。SDK依赖Qt Quick/Qml，已移除Widgets依赖；应用保留Widgets仅供Windows原生托盘菜单后备实现。
 
 ## 当前入口与生命周期
 
-`PluginInterface.h` 的入口位于 `vusiif::ztgui::api`：
+`PluginInterface.h` 的入口位于 `vusiif::zto::api`：
 
 ```cpp
 class PluginInterface {
@@ -61,7 +61,7 @@ using CreateTask = std::function<CreateResult()>;
 
 ## 取消与关闭
 
-`vusiif::ztgui::util::CancellationToken` 可复制且线程安全。入口参数的令牌必须按值捕获到返回任务，不能保存参数引用。宿主关闭或内部卸载时请求取消，任务在步骤之间检查 `isCancellationRequested()`，清理部分资源后返回。`CancellationSource` 提供 `token()` 和幂等的 `requestCancellation()`，由宿主持有。
+`vusiif::zto::util::CancellationToken` 可复制且线程安全。入口参数的令牌必须按值捕获到返回任务，不能保存参数引用。宿主关闭或内部卸载时请求取消，任务在步骤之间检查 `isCancellationRequested()`，清理部分资源后返回。`CancellationSource` 提供 `token()` 和幂等的 `requestCancellation()`，由宿主持有。
 
 ```cpp
 api::CreateTask onCreate(util::HostServices &services,
@@ -105,7 +105,7 @@ api::CreateTask onCreate(util::HostServices &services,
 
 ## 宿主工具
 
-工具定义都位于 `vusiif::ztgui::util`，由 `onCreate` 注入 `HostServices`。服务为借用引用，可保存指针并交给页面使用，有效至 `onDestroy()` 返回，不能delete。公开SDK只有抽象定义，宿主提供实现。
+工具定义都位于 `vusiif::zto::util`，由 `onCreate` 注入 `HostServices`。服务为借用引用，可保存指针并交给页面使用，有效至 `onDestroy()` 返回，不能delete。公开SDK只有抽象定义，宿主提供实现。
 
 ### 文件
 
@@ -136,11 +136,11 @@ StorageResult completeLegacyImport();
 
 `updateFile` 在跨进程锁内读取最新文件，把 `PluginFileSnapshot{exists,data}` 交给同步回调，再按回调结果处理：`Keep` 保留原文件，`Replace` 允许写空字节，`Fail` 返回错误。读取失败、回调抛异常或提交失败时原文件保持不变；只有提交成功才返回 `changed=true`。回调只做内存转换，不能重入文件服务、访问界面或网络，也不能被宿主留存。多个用户同时修改同一文件的不同字段时，应只更新自己负责的字段；普通 `writeFile` 仍是整文件替换，不具备字段合并语义。
 
-`legacyImportAllowed` 返回是否仍允许一次性导入历史宿主设置，并带独立错误状态；元信息不可读时不允许导入，不会默认为允许。`completeLegacyImport` 单向、幂等，记录当前来源用户；标记保存在宿主管理的 `.ztgui/plugins/<id>.json` 中，删除插件数据不会删除该标记。语音插件用这两项能力迁移旧 `voice-chat/*` 配置：目标提交并重新读取校验成功后，只删除实际补缺的当前／历史来源键并再次 `sync()` 校验；冲突、未知和未迁移的键保留。清除失败会报告警告并保持导入资格开放，下次加载重试。
+`legacyImportAllowed` 返回是否仍允许一次性导入历史宿主设置，并带独立错误状态；元信息不可读时不允许导入，不会默认为允许。`completeLegacyImport` 单向、幂等，记录当前来源用户；标记保存在宿主管理的 `.zto/plugins/<id>.json` 中，删除插件数据不会删除该标记。语音插件用这两项能力迁移旧 `voice-chat/*` 配置：目标提交并重新读取校验成功后，只删除实际补缺的当前／历史来源键并再次 `sync()` 校验；冲突、未知和未迁移的键保留。清除失败会报告警告并保持导入资格开放，下次加载重试。
 
-每个使用插件的宿主进程还在 `.ztgui/leases/` 下持有该插件 ID 的租约；删除插件数据前宿主检查其他进程租约，存活不明或权限不足都按正在使用处理，不按文件年龄猜测进程已退出。插件业务 `cache/` 明确可丢弃：宿主按 7 天闲置和每插件 256 MiB 淘汰，插件必须处理缓存未命中；配置、备注等业务文件不做年龄或容量驱动的自动清理。`readFile` 读取 `cache/` 路径时会在短时数据根协调锁内取得该文件的活动锁，随后释放协调锁再读取；其他路径不受影响。清理在协调锁内尝试同一活动锁，仍被读取或其他程序占用而无法删除的文件按“在用跳过”报告，不强制删除；大文件读取不会长时间阻塞其他事务。解压缓存会话记录宿主进程创建标识和 worker 身份，正常退出的清理入口只接受用户缓存索引登记的运行 ID 与所有权令牌，索引、令牌、结构或残留 worker 任一无法验证就保留索引并跳过。
+每个使用插件的宿主进程还在 `.zto/leases/` 下持有该插件 ID 的租约；删除插件数据前宿主检查其他进程租约，存活不明或权限不足都按正在使用处理，不按文件年龄猜测进程已退出。插件业务 `cache/` 明确可丢弃：宿主按 7 天闲置和每插件 256 MiB 淘汰，插件必须处理缓存未命中；配置、备注等业务文件不做年龄或容量驱动的自动清理。`readFile` 读取 `cache/` 路径时会在短时数据根协调锁内取得该文件的活动锁，随后释放协调锁再读取；其他路径不受影响。清理在协调锁内尝试同一活动锁，仍被读取或其他程序占用而无法删除的文件按“在用跳过”报告，不强制删除；大文件读取不会长时间阻塞其他事务。解压缓存会话记录宿主进程创建标识和 worker 身份，正常退出的清理入口只接受用户缓存索引登记的运行 ID 与所有权令牌，索引、令牌、结构或残留 worker 任一无法验证就保留索引并跳过。
 
-包导入与删除共用安装目录级 `.import.lock`，跨 profile 串行；同时需要数据根协调锁时固定先包锁、后协调锁。完整删除只接受通过认证的包：在锁内重新校验包、认证元信息、ID、数据所有权记录、路径边界和剩余安装引用；所有权记录不可读或 ID 不匹配时取消删除，记录缺失时先写墓碑再继续。认证失败的包不会删除数据或报告安全删除，只提供显式的“仅删除包文件、保留数据”入口并在结果中说明。确认删除先原子写入 `.ztgui/pending-deletions/<id>.json`（阶段 `recorded`／`moved`／`dataDeleted`，并记录真实插件数据根和授权时包文件的 SHA-256），再关闭旧配置导入、移入同卷受控待删区、删除当前活动根数据、删除待删包，全部成功后才移除记录。下次启动在插件扫描前、持有同一安装目录包锁的情况下恢复未完成记录，并重新认证当前安装清单（重装同 ID 包会保留其数据）、所有权和租约；原包与待删包同时存在、路径越界或为链接、租约不明、记录属于另一存储根、包无法重新认证或包内容与授权时不一致时保守保留，并在设置页“存储与清理”显示待处理事务与原因。
+包导入与删除共用安装目录级 `.import.lock`，跨 profile 串行；同时需要数据根协调锁时固定先包锁、后协调锁。完整删除只接受通过认证的包：在锁内重新校验包、认证元信息、ID、数据所有权记录、路径边界和剩余安装引用；所有权记录不可读或 ID 不匹配时取消删除，记录缺失时先写墓碑再继续。认证失败的包不会删除数据或报告安全删除，只提供显式的“仅删除包文件、保留数据”入口并在结果中说明。确认删除先原子写入 `.zto/pending-deletions/<id>.json`（阶段 `recorded`／`moved`／`dataDeleted`，并记录真实插件数据根和授权时包文件的 SHA-256），再关闭旧配置导入、移入同卷受控待删区、删除当前活动根数据、删除待删包，全部成功后才移除记录。下次启动在插件扫描前、持有同一安装目录包锁的情况下恢复未完成记录，并重新认证当前安装清单（重装同 ID 包会保留其数据）、所有权和租约；原包与待删包同时存在、路径越界或为链接、租约不明、记录属于另一存储根、包无法重新认证或包内容与授权时不一致时保守保留，并在设置页“存储与清理”显示待处理事务与原因。
 
 日志与业务缓存的保留策略除设置页手动清理外，还由宿主调度器在启动完成后、每日维护、日志轮转后和 `cache/` 文件成功写入后去抖执行；同一时间只运行一个清理任务。设置页的占用统计、保留策略预览和无主数据分类在后台线程扫描，GUI 只接收完成后信号；扫描与清理互斥，确认前显示待清理数量与字节数。自动任务只处理历史日志和可丢弃缓存，不自动删除无主插件数据。存在无法解析或未通过认证的已安装包时，所有稳定 ID 数据目录都标记为归属不确定、不可删除，只有移除该包后才恢复可判定。
 
@@ -173,34 +173,34 @@ void getNetworkRelays(const QString &networkId, QObject *context, RelayCallback 
 NetworkSubscription *subscribeNetworkData(const QString &networkId, QObject *context, NetworkCallback received);
 ```
 
-`broadcastDataTo` 固定走指定网络 `.1:18100` 的 ZTServer；`broadcastDataBalancedTo` 在控制端登记的多中转间低延迟优先、按目标成员稳定分配。两者目标 ID 列表去重，空列表零发送；`sendDataTo` 复用单中转路径。中转不可用时按有效已授权成员地址直发，不能解析地址则返回错误，不假定数据已送达。
+`broadcastDataTo` 固定走指定网络 `.1:18100` 的 ZTOrbitHub；`broadcastDataBalancedTo` 在控制端登记的多中转间低延迟优先、按目标成员稳定分配。两者目标 ID 列表去重，空列表零发送；`sendDataTo` 复用单中转路径。中转不可用时按有效已授权成员地址直发，不能解析地址则返回错误，不假定数据已送达。
 
 `RelayResult` 包含中转节点 ID、Moon ID、虚拟 IP、服务端口、最近 10 次成功 RTT 的平均、上次 RTT、采样时间、可用状态与负载；延迟未知为 -1。`SendResult` 包含排入队列的成员数、失败成员 ID 和错误，不代表远端交付确认。`NetworkMessage` 提供网络 ID、发送成员 ID、二进制数据。订阅句柄由上下文持有，调用 `cancel()` 停止接收；上下文销毁或卸载自动取消，回调均在宿主事件线程执行。
 
-共享交付包仍封装 ZTS1，总长上限 1232，负载上限由 `<ztprotocol/NetworkDelivery.h>` 的 `maxNetworkDataBytes(pluginId)` 返回，即 `1232-52-插件 ID ASCII 字节数`。本次不支持分片、重传或顺序保证。客户端宿主在本机 ZeroTier IPv4 的 UDP 18101 接收，服务端使用 18100；网络、发送与目标成员及消息 ID 由宿主校验，同一消息 30 秒内去重。部署与中转配置见[多中转通信](network-relays.md)。
+共享交付包仍封装 ZTS1，总长上限 1232，负载上限由 `<ztprotocol/NetworkDelivery.h>` 的 `maxNetworkDataBytes(pluginId)` 返回，即 `1232-52-插件 ID ASCII 字节数`。本次不支持分片、重传或顺序保证。客户端宿主在本机 ZeroTier IPv4 的 UDP 18101 接收，服务端使用 18100；网络、发送与目标成员及消息 ID 由宿主校验，同一消息 30 秒内去重。部署与支持范围见[网络约定](network-conventions.md)，中转配置见[多中转通信](network-relays.md)。
 
 插件自行连接服务器时使用 `<ztprotocol/NetworkAddress.h>` 的 `protocol::serverEndpoint(address)`：接受域名、IPv4、裸IPv6及 `host:port`／`[IPv6]:port`，未指定端口统一使用 `protocol::NetworkPort`（18100），非法地址／端口的结果 `valid()` 为false。独立端口偏好不能覆盖省略端口的默认值；UDP端口仍可由服务器协议协商。
 
 
 ## 独立构建与兼容边界
 
-`ZTGUI::Api` 是头文件SDK，提供C++17、Qt Quick/Qml 与 Network 依赖，没有API DLL。独立安装：
+`ZTO::Api` 是头文件SDK，提供C++17、Qt Quick/Qml 与 Network 依赖，没有API DLL。独立安装：
 
 ```powershell
 cmake -S src/client/api -B build/cmake-build-api -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64"
 cmake --build build/cmake-build-api --config Release --target ztplugin_pack
-cmake --install build/cmake-build-api --config Release --prefix build/dist/ZTGUI-api-v0.5
+cmake --install build/cmake-build-api --config Release --prefix build/dist/Z2-api-v0.5
 ```
 
-独立插件使用 `find_package(ZTGUIPluginApi 0.5 EXACT CONFIG REQUIRED)` 并链接 `ZTGUI::Api`，只需安装后的SDK和匹配工具链，不需要宿主源码。CMake 包版本使用数字基版本 `0.5`；`ZTGUI_API_VERSION` 与插件 JSON 使用完整 API `0.5`。JSON 使用 `{"apiVersion":"@ZTGUI_API_VERSION@"}`，不硬编码另一份版本。
+独立插件使用 `find_package(ZTOrbitPluginApi 0.5 EXACT CONFIG REQUIRED)` 并链接 `ZTO::Api`，只需安装后的SDK和匹配工具链，不需要宿主源码。CMake 包版本使用数字基版本 `0.5`；`ZTO_API_VERSION` 与插件 JSON 使用完整 API `0.5`。JSON 使用 `{"apiVersion":"@ZTO_API_VERSION@"}`，不硬编码另一份版本。
 
-客户端应用版本为 `0.5.1`，API 由 `VERSION` 前两段数字和同一预发布后缀派生为 `0.5`。API 0.4 及更早插件须使用 0.5 SDK 重新编译。入口IID为 `vusiif.ztgui.api.PluginInterface/3.0`，生命周期IID为 `vusiif.ztgui.api.PluginLifecycleInterface/3.0`；旧IID不会实例化，API 0.2也不再兼容。本次核心代际升级由开发者明确指定；IID不因版本数字变化而机械调整。
+客户端应用版本为 `0.5.2`，API 由 `VERSION` 前两段数字和同一预发布后缀派生为 `0.5`。旧名称的插件均须使用新 ZTOrbit SDK 重新编译。入口IID为 `vusiif.zto.api.PluginInterface/3.0`，生命周期IID为 `vusiif.zto.api.PluginLifecycleInterface/3.0`；旧IID不会实例化，API 0.2也不再兼容。0.4→0.5 的核心代际升级由开发者明确指定；本次更名并移除 qualifier，核心代际仍为 5；接口命名随品牌更新，IID 代际仍为 `/3.0`。
 
 统一使用动态Qt，宿主与插件须匹配Qt、编译器、架构、运行库及构建模式。Qt类型和std::function属于进程内C++接口，不承诺跨工具链ABI或跨进程协议。
 
-启动后台扫描程序旁 `plugins/` 的直接子文件，先完整认证、校验 ID／API／运行契约及全部传递依赖，再按依赖顺序执行入口；工作进程在握手就绪后才发布服务。Windows为 `ZTGUI.exe` 同级plugins；macOS为 `ZTGUI.app/Contents/MacOS/plugins/`。缺失目录正常启动，其他库忽略，失败记日志并继续。客户端可在完成异步卸载后替换业务包并重载；同名不兼容的运行依赖需要重启。
+启动后台扫描程序旁 `plugins/` 的直接子文件，先完整认证、校验 ID／API／运行契约及全部传递依赖，再按依赖顺序执行入口；工作进程在握手就绪后才发布服务。Windows为 `Z2.exe` 同级plugins；macOS为 `Z2.app/Contents/MacOS/plugins/`。缺失目录正常启动，其他库忽略，失败记日志并继续。客户端可在完成异步卸载后替换业务包并重载；同名不兼容的运行依赖需要重启。
 
-最小独立插件、完整构建及部署流程见[插件开发技能](../.agents/skills/ztgui-plugin-dev/SKILL.md)。插件自身文档由其项目的docs目录维护。
+最小独立插件、完整构建及部署流程见[插件开发技能](../.agents/skills/zto-plugin-dev/SKILL.md)。插件自身文档由其项目的docs目录维护。
 
 ## 验证
 
@@ -210,13 +210,13 @@ cmake --install build/cmake-build-api --config Release --prefix build/dist/ZTGUI
 
 通过 `HostServices::logs()` 获取借用的 `PluginLogger`，调用 `write(LogLevel,message)` 显式双写主程序日志和 `<活动存储根>/plugins-data/id-<插件ID>/logs/YYMMDD-N.log`。级别为 Debug/Info/Warning/Error，UTF-8 记录包含时间、级别和插件 ID；支持后台线程，生命周期与其他宿主工具相同。返回 `LogResult::hostError/pluginError`，一处失败仍尝试另一处；失败不递归写 Qt 日志。单文件达到 10 MiB 轮转，关闭文件保留 30 天，每个日志归属总量上限 100 MiB；正在写入的日志不删除。轮转由宿主日志层在释放日志互斥锁后通知维护调度器，去抖执行清理。普通 `qInfo/qWarning` 仍只写宿主日志。
 
-SDK 安装 `ztprotocol/` 的共享公开头文件，`ZTGUI::Protocol` 依赖 Qt Core/Network，提供路由编解码、/24 服务器地址推导与网络数据发送工具。协议版本独立于 SDK 版本；服务端 Java 插件使用独立 SDK 与 JAR manifest 的 `apiVersion`（不使用 Qt IID），详见[服务端 API](server-api.md)。
+SDK 安装 `ztprotocol/` 的共享公开头文件，`ZTO::Protocol` 依赖 Qt Core/Network，提供路由编解码、/24 服务器地址推导与网络数据发送工具。协议版本独立于 SDK 版本；服务端 Java 插件使用独立 SDK 与 JAR manifest 的 `apiVersion`（不使用 Qt IID），详见[服务端 API](server-api.md)。
 
 ## 加密包与运行时管理
 
-客户端入口／生命周期 IID 为 `vusiif.ztgui.api.PluginInterface/3.0` 和 `vusiif.ztgui.api.PluginLifecycleInterface/3.0`。API 版本仍从 `VERSION` 前两段数字和同一预发布后缀派生，旧 ABI 必须重编。插件 `id` 匹配 `[A-Za-z0-9_-]{1,128}`，保留字 `builtin` 不可用，ID 冲突不区分大小写；`name` 为可中文的显示名，菜单 ID 独立于插件 ID。数据归属只看经过校验的插件 ID，显示名不参与目录选择，也不限制两个插件使用相同的显示名。
+客户端入口／生命周期 IID 为 `vusiif.zto.api.PluginInterface/3.0` 和 `vusiif.zto.api.PluginLifecycleInterface/3.0`。API 版本仍从 `VERSION` 前两段数字和同一预发布后缀派生，旧 ABI 必须重编。插件 `id` 匹配 `[A-Za-z0-9_-]{1,128}`，保留字 `builtin` 不可用，ID 冲突不区分大小写；`name` 为可中文的显示名，菜单 ID 独立于插件 ID。数据归属只看经过校验的插件 ID，显示名不参与目录选择，也不限制两个插件使用相同的显示名。
 
-SDK 包含 `bin/ztplugin_pack` 和 `ztgui_package_plugin()` CMake 函数，编译后生成 `.ztplugin`；正式宿主仅扫描该后缀。包基本信息可读，包含宿主类型、版本、IID、平台、架构与 Qt/编译器兼容信息。宿主先检查信息、全包认证、逐文件 SHA-256、路径与运行契约，再按块提取到私有目录。加载后核对插件定义；业务目录在实际卸载成功后清理，旧普通插件的非 Qt 私有运行库兼容路径保持到退出；额外 Qt 模块／后端必须使用 v3 独立 worker，媒体目录不会进入宿主搜索路径。共享格式密钥只用于封装、防随意查看，不能证明发行者身份；不包含用户密钥或授权发行体系。
+SDK 包含 `bin/z2plugin_pack` 和 `zto_package_plugin()` CMake 函数，编译后生成 `.z2plugin`；正式宿主仅扫描该后缀。包基本信息可读，包含宿主类型、版本、IID、平台、架构与 Qt/编译器兼容信息。宿主先检查信息、全包认证、逐文件 SHA-256、路径与运行契约，再按块提取到私有目录。加载后核对插件定义；业务目录在实际卸载成功后清理，旧普通插件的非 Qt 私有运行库兼容路径保持到退出；额外 Qt 模块／后端必须使用 v3 独立 worker，媒体目录不会进入宿主搜索路径。共享格式密钥只用于封装、防随意查看，不能证明发行者身份；不包含用户密钥或授权发行体系。
 
 启动和运行时加载共用 onCreate；初始化准备期间菜单禁用，失败也配对清理。运行时卸载先切回 ZeroTier、调用 onExitedTo，再取消任务和请求，异步等待初始化结束，释放页面／工厂／回调后调用 onDestroy，最后卸载动态库。卸载失败保留句柄与临时库，不报告成功。卸载保留包和数据，按 ID 持久化禁用；手动加载成功恢复启动自动加载。
 
@@ -228,13 +228,13 @@ SDK helper 新增 RUNTIME_QT_MODULES、RUNTIME_FILES、LICENSE_FILES 及显式 `
 
 使用 `SERVICE_MANIFEST` 生成 ZTPK3，认证清单声明执行方式、前置插件版本范围和所需／提供的服务。普通旧包仍使用原入口；有服务声明的新包不能降级为 v2。原入口／生命周期 `/3.0` 不变；`PluginInfo` 和 `PluginDefinition` 布局不变，允许没有菜单。
 
-`<ztgui/PluginServices.h>` 定义 `ServiceAccess`、`PluginServices`、`ServiceLease`、`ServiceResult`。在 onCreate 中通过 `dynamic_cast<util::ServiceAccess *>(&host)` 查询扩展，再 acquire 清单已声明的 provider/service/api。结果携带 JSON DTO、独立二进制 payload 和 error；call/subscribe/close 在 GUI 事件线程调用，回调绑定 QObject。租约绑定实例，不能长期缓存提供者裸指针；close 完成前不能释放仍执行中的消费者代码。
+`<zto/PluginServices.h>` 定义 `ServiceAccess`、`PluginServices`、`ServiceLease`、`ServiceResult`。在 onCreate 中通过 `dynamic_cast<util::ServiceAccess *>(&host)` 查询扩展，再 acquire 清单已声明的 provider/service/api。结果携带 JSON DTO、独立二进制 payload 和 error；call/subscribe/close 在 GUI 事件线程调用，回调绑定 QObject。租约绑定实例，不能长期缓存提供者裸指针；close 完成前不能释放仍执行中的消费者代码。
 
-`<ztgui/PluginStop.h>` 定义独立 `PluginStopInterface/1.0`：`void requestStop(QObject *context, std::function<void(CreateResult)> completed)`。插件在 GUI 线程快速发起停止，异步结束会话与线程后完成回调；宿主再释放页面、工厂、回调和 DLL。失败时保留 DLL 及提供者并显示错误，最终 onDestroy 只做已停止状态的清理。加载器的 unload/shutdown 是受理请求，完成信号只在真实资源与模块检查结束后发出。
+`<zto/PluginStop.h>` 定义独立 `PluginStopInterface/1.0`：`void requestStop(QObject *context, std::function<void(CreateResult)> completed)`。插件在 GUI 线程快速发起停止，异步结束会话与线程后完成回调；宿主再释放页面、工厂、回调和 DLL。失败时保留 DLL 及提供者并显示错误，最终 onDestroy 只做已停止状态的清理。加载器的 unload/shutdown 是受理请求，完成信号只在真实资源与模块检查结束后发出。
 
 完整包语义、版本范围、事务、所有权、超时、进程 Job 和双通道 IPC 规范见[服务契约](plugin-services.md)；独立媒体 API 不属于宿主 SDK，宿主代码不包含媒体 API 或媒体实现。
 
 
 ## 无界面服务消费者
 
-使用 `find_package(ZTGUIPluginApi 0.5 EXACT CONFIG REQUIRED COMPONENTS Services)` 与 `ZTGUI::Services` 取得仅 Core/Network 的服务契约，避免传递 Quick/QML。界面插件仍显式链接 `ZTGUI::Api`。协商的直接数据回调须持有 `ServiceLease::callbackGuard()` 返回的守卫，使宿主在回调结束前保留消费者 DLL。详见[媒体 API 与 Engine SDK](../src/plugins/media/client/docs/media.md)。
+使用 `find_package(ZTOrbitPluginApi 0.5 EXACT CONFIG REQUIRED COMPONENTS Services)` 与 `ZTO::Services` 取得仅 Core/Network 的服务契约，避免传递 Quick/QML。界面插件仍显式链接 `ZTO::Api`。协商的直接数据回调须持有 `ServiceLease::callbackGuard()` 返回的守卫，使宿主在回调结束前保留消费者 DLL。详见[媒体 API 与 Engine SDK](../src/plugins/media/client/docs/media.md)。

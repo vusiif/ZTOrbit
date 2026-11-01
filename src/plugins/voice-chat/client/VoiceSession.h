@@ -7,7 +7,7 @@
 #include <QMap>
 #include <set>
 #include <limits>
-namespace vusiif::ztgui::voice_chat {
+namespace vusiif::zto::voice_chat {
 class VoiceSession final : public QObject {
     Q_OBJECT
 public:

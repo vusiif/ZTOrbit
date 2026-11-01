@@ -14,7 +14,7 @@ VoicePage.qml 展示房间、成员和音频配置，页面持有 VoiceControlle
 
 房间事件在会话协议层产生，不根据 `roomChanged` 次数或人数差播放：自己成功 join/create 后播放一次上行双音；首份成员快照只建立基线，之后仅对同一连接世代、同一房间内非自己 session ID 的成员集合做差分，远端成员进入播放上行音、离开播放下行音。昵称、静音、排序和重复快照不触发；同人数一进一出分别识别。离房、断线、重连和停止清空基线与待播队列，旧回调失效；本轮不增加自己退房提示。仓库 `voice_ui_tests` 通过真实控制协议夹具覆盖 create/join 成功、失败响应、挂起时断开取消、同 session ID 重连后的基线重建，以及 `roomReset`／停止后旧 `finished` 不再启动播放。
 
-两段约 160 ms 的提示音随 DLL 资源交付：`qrc:/ztgui/voice-chat/sounds/join.wav`（660→880 Hz）与 `leave.wav`（880→660 Hz），48 kHz/PCM16/单声道，带短淡入淡出。生成脚本和 CC0 授权说明见 [sounds](../sounds/README.md)；不读取源码树、当前目录、系统音效或网络。插件在内存中读取资源，经 `media.clip / 1` 交给媒体工作进程，语音 DLL 不链接 Qt Multimedia／FFmpeg／Opus。
+两段约 160 ms 的提示音随 DLL 资源交付：`qrc:/zto/voice-chat/sounds/join.wav`（660→880 Hz）与 `leave.wav`（880→660 Hz），48 kHz/PCM16/单声道，带短淡入淡出。生成脚本和 CC0 授权说明见 [sounds](../sounds/README.md)；不读取源码树、当前目录、系统音效或网络。插件在内存中读取资源，经 `media.clip / 1` 交给媒体工作进程，语音 DLL 不链接 Qt Multimedia／FFmpeg／Opus。
 
 播放队列最多 8 项（含正在播放的 1 项）：突发时只合并等待队列中相邻同类事件，不跨加入／离开合并；等待用单调时钟计龄，超过 2 秒丢弃；满队列先丢最旧待播项，保留当前与最新状态。正常逐次播放，`finished`／`failed` 事件都推进队列；失败事件即使携带空或未知 clip ID，也会结束当前待播请求并继续下一项，不会把状态卡在“starting”。每次播放前使用最新输出设备和主音量；麦克风静音不影响提示音，禁听会停止当前 clip 并清空队列；换设备时停止旧输出上的 clip，后续项使用新设备。插件停止时先停止提示音，再等待 session 与 clip 两个租约都排空后才报告完成。
 
@@ -38,7 +38,7 @@ VoicePage.qml 展示房间、成员和音频配置，页面持有 VoiceControlle
 
 ```powershell
 cmake -S client -B build-client "-DCMAKE_PREFIX_PATH=$hostSdk;$mediaSdk;$qtSdk"
-cmake --build build-client --config Release --target ztgui_voice_chat ztgui_voice_chat_package
+cmake --build build-client --config Release --target zto_voice_chat zto_voice_chat_package
 ```
 
 在 `voice-chat/` 项目根或仓库外完整副本执行，只需 client/、shared/ 和安装后的 SDK。Qt 6.8+ 的 Quick/Qml/Network 与 MSVC／架构／构建模式须匹配宿主；语音项目不再下载或编译 Opus。
@@ -48,9 +48,9 @@ cmake --build build-client --config Release --target ztgui_voice_chat ztgui_voic
 仓库通用入口：
 
 ```powershell
-& ./.agents/skills/ztgui-build/scripts/build-plugin-windows.ps1 -PluginDirectory src/plugins/voice-chat/client -Target ztgui_voice_chat -QtRoot $qtSdk -ApiSdk $hostSdk -AdditionalSdk $mediaSdk
+& ./.agents/skills/zto-build/scripts/build-plugin-windows.ps1 -PluginDirectory src/plugins/voice-chat/client -Target zto_voice_chat -QtRoot $qtSdk -ApiSdk $hostSdk -AdditionalSdk $mediaSdk
 ```
 
-正式产物为 `build/dist/plugins/ztgui_voice_chat-v0.3.0.ztplugin`（版本从包声明读取；中间构建文件保留固定名），同时安装独立媒体包；缺少或明确禁用媒体时不会执行语音入口。卸载语音保留包和用户数据，自动媒体无其他占用时退出；用户单独加载的媒体保持至用户卸载。旧 0.1.0 进程内媒体包必须迁移，不能用旧常驻路径回退。
+正式产物为 `build/dist/plugins/z2_voice_chat-v0.3.0.z2plugin`（版本从包声明读取；中间构建文件保留固定名），同时安装独立媒体包；缺少或明确禁用媒体时不会执行语音入口。卸载语音保留包和用户数据，自动媒体无其他占用时退出；用户单独加载的媒体保持至用户卸载。旧 0.1.0 进程内媒体包必须迁移，不能用旧常驻路径回退。
 
-Windows 原生 UI、真实设备的本机零增益回送及 2 轮暖机／20 轮模块检查见[本轮验证](../../../../../docs/validation/plugin-services-2026-10-15/README.md)。未在本轮重新连接生产服务器或进行多人听感验收；Linux 客户端和 macOS 的 worker 部署／权限未验证。
+多人语音听感、Linux 客户端和 macOS 的 worker 部署／权限仍需验证。

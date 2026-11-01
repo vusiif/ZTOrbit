@@ -4,10 +4,10 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QSaveFile>
-namespace vusiif::ztgui::plugins {
+namespace vusiif::zto::plugins {
 QString importPlugin(const QString &source, const QString &directory) {
     const QFileInfo input(source), targetDirectory(directory);
-    const QString extension = "ztplugin";
+    const QString extension = "z2plugin";
     if (!input.isFile() || input.suffix().compare(extension, Qt::CaseInsensitive) != 0)
         return QStringLiteral("请选择有效的插件文件。");
     if (targetDirectory.isSymLink() || targetDirectory.isJunction() || (targetDirectory.exists() && !targetDirectory.isDir()))

@@ -4,7 +4,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
-using namespace vusiif::ztgui::zerotier;
+using namespace vusiif::zto::zerotier;
 class MemberPingTests : public QObject {
     Q_OBJECT
 private slots:
@@ -52,7 +52,7 @@ private slots:
         int calls = 0; PingResult result;
         pingMember(this, {}, [&](auto value) { result=value; ++calls; }, FAKE_PING);
         QTRY_COMPARE(calls, 1); QCOMPARE(result.text, QStringLiteral("—"));
-        pingMember(this, QHostAddress::LocalHost, [&](auto value) { result=value; ++calls; }, "missing-ztgui-ping-command");
+        pingMember(this, QHostAddress::LocalHost, [&](auto value) { result=value; ++calls; }, "missing-zto-ping-command");
         QTRY_COMPARE(calls, 2); QCOMPARE(result.text, QStringLiteral("检测失败"));
     }
     void systemPingLoopback() {

@@ -6,7 +6,7 @@
 #include <functional>
 class QWindow;
 
-namespace vusiif::ztgui::platform {
+namespace vusiif::zto::platform {
 class SingleInstance final : public QObject {
 public:
     enum class Result { Primary, Activated, Failed };

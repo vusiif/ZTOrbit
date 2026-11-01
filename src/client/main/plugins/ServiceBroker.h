@@ -1,5 +1,5 @@
 #pragma once
-#include <ztgui/PluginServices.h>
+#include <zto/PluginServices.h>
 #include <QObject>
 #include <QProcess>
 #include <QLocalServer>
@@ -10,7 +10,7 @@
 #include <QMap>
 #include <QSet>
 #include <vector>
-namespace vusiif::ztgui::plugins {
+namespace vusiif::zto::plugins {
 class BrokerLease;
 class ServiceBroker final : public QObject {
     Q_OBJECT

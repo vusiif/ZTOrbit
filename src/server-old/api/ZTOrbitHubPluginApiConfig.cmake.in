@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+set(_ztohub_sdk_prefix "${PACKAGE_PREFIX_DIR}")
+set(ZTOHUB_API_VERSION "@ZTO_API_VERSION@")
+include(CMakeFindDependencyMacro)
+find_dependency(Qt6 6.4 COMPONENTS Core Network)
+include("${CMAKE_CURRENT_LIST_DIR}/ZTOrbitHubPluginApiTargets.cmake")
+check_required_components(ZTOrbitHubPluginApi)
+
+set(ZTO_PACKAGE_TOOL "${_ztohub_sdk_prefix}/bin/ztplugin_pack@CMAKE_EXECUTABLE_SUFFIX@")
+set(ZTO_HOST_CONTRACT_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/contracts")
+set(ZTO_PACKAGE_FORMATS 1 2)
+include("${CMAKE_CURRENT_LIST_DIR}/PackagePlugin.cmake")

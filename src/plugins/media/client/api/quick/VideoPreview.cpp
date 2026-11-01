@@ -1,6 +1,6 @@
 #include <ztmedia/VideoPreview.h>
 #include <QPainter>
-namespace vusiif::ztgui::media {
+namespace vusiif::zto::media {
 void VideoPreview::present(const FrameView &frame) {
     if (!frame.data || frame.planes.isEmpty() || frame.video.pixelFormat != "bgra")
         return;
@@ -18,4 +18,4 @@ void VideoPreview::paint(QPainter *painter) {
         QRectF((width() - size.width()) / 2, (height() - size.height()) / 2, size.width(), size.height()),
         image);
 }
-} // namespace vusiif::ztgui::media
+} // namespace vusiif::zto::media

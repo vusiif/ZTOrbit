@@ -2,14 +2,14 @@
 #include <QDir>
 #include <QFileInfo>
 
-QString vusiif::ztgui::platform::quote(const QString &value)
+QString vusiif::zto::platform::quote(const QString &value)
 {
     QString escaped = value;
     escaped.replace("'", "'\\''");
     return "'" + escaped + "'";
 }
 
-QString vusiif::ztgui::platform::appleScriptString(const QString &value)
+QString vusiif::zto::platform::appleScriptString(const QString &value)
 {
     QString escaped = value;
     escaped.replace('\\', "\\\\");
@@ -19,7 +19,7 @@ QString vusiif::ztgui::platform::appleScriptString(const QString &value)
     return '"' + escaped + '"';
 }
 
-QString vusiif::ztgui::platform::serviceCommands(const QString &action, const QString &cli)
+QString vusiif::zto::platform::serviceCommands(const QString &action, const QString &cli)
 {
     const QString stop = "launchctl bootout system/com.zerotier.one >/dev/null 2>&1 || true\n";
     const QString probe = quote(cli) + (QFileInfo(cli).fileName().startsWith("zerotier-one") ? " -q" : "") + " -j info";
@@ -36,12 +36,12 @@ QString vusiif::ztgui::platform::serviceCommands(const QString &action, const QS
     return {};
 }
 
-QString vusiif::ztgui::platform::packageScript(bool uninstall, const QString &dataDirectory)
+QString vusiif::zto::platform::packageScript(bool uninstall, const QString &dataDirectory)
 {
     if (!uninstall) return QStringLiteral(R"SH(set -eu
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
-temporary=$(mktemp -d /private/tmp/ztgui-install.XXXXXX)
+temporary=$(mktemp -d /private/tmp/zto-install.XXXXXX)
 trap '/bin/rm -rf -- "$temporary"' EXIT HUP INT TERM
 /usr/bin/curl --fail --location --proto '=https' --tlsv1.2 'https://download.zerotier.com/dist/ZeroTier%20One.pkg' --output "$temporary/ZeroTier.pkg"
 /usr/sbin/pkgutil --check-signature "$temporary/ZeroTier.pkg"
@@ -59,7 +59,7 @@ trap '/bin/rm -rf -- "$temporary"' EXIT HUP INT TERM
         "  /bin/rm -rf -- \"$target\"\nfi\n";
 }
 
-QString vusiif::ztgui::platform::copyMoons(const QList<QPair<QString, QString>> &files, const QString &directory)
+QString vusiif::zto::platform::copyMoons(const QList<QPair<QString, QString>> &files, const QString &directory)
 {
     QString commands = "/bin/mkdir -p " + quote(directory) + "\n";
     for (const auto &file : files) {
@@ -70,7 +70,7 @@ QString vusiif::ztgui::platform::copyMoons(const QList<QPair<QString, QString>> 
     return commands;
 }
 
-QString vusiif::ztgui::platform::deleteMoon(const QString &path, const QString &directory)
+QString vusiif::zto::platform::deleteMoon(const QString &path, const QString &directory)
 {
     if (QFileInfo(path).absolutePath() != QDir(directory).absolutePath()
         || QFileInfo(path).suffix().compare("moon", Qt::CaseInsensitive) != 0) return "exit 1\n";
@@ -80,7 +80,7 @@ QString vusiif::ztgui::platform::deleteMoon(const QString &path, const QString &
         "/bin/rm -f -- " + quote(path) + "\n";
 }
 
-QString vusiif::ztgui::platform::synchronizeSession(const QString &systemHome, const QString &sessionHome, unsigned int userId)
+QString vusiif::zto::platform::synchronizeSession(const QString &systemHome, const QString &sessionHome, unsigned int userId)
 {
     // The session contains only local API credentials and public signed Moon files.
     // Never copy identity.secret or print authentication contents to the log.

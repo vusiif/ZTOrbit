@@ -14,7 +14,7 @@
 #include <QUuid>
 #include <algorithm>
 
-namespace vusiif::ztgui::storage {
+namespace vusiif::zto::storage {
 namespace {
 bool linked(const QFileInfo &info)
 {
@@ -97,7 +97,7 @@ PluginDataStore::PluginDataStore(QString pluginsDataRoot, QString metadataRoot, 
           ? QDir(QCoreApplication::applicationDirPath()).filePath("plugins-data")
           : pluginsDataRoot).absoluteFilePath())),
       m_metadataRoot(QDir::cleanPath(QFileInfo(metadataRoot.isEmpty()
-          ? QDir(QFileInfo(m_pluginsDataRoot).absolutePath()).filePath(".ztgui")
+          ? QDir(QFileInfo(m_pluginsDataRoot).absolutePath()).filePath(".zto")
           : metadataRoot).absoluteFilePath())),
       m_runId(runId.isEmpty() ? QUuid::createUuid().toString(QUuid::Id128) : std::move(runId)),
       m_userKey(std::move(userKey))
@@ -547,4 +547,4 @@ bool PluginDataStore::deleteDataDirectory(const QString &pluginId, QString &erro
     return true;
 }
 
-} // namespace vusiif::ztgui::storage
+} // namespace vusiif::zto::storage

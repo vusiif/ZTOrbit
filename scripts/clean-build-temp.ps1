@@ -9,7 +9,7 @@ empties .tmp while keeping requested exclusions. The .tmp directory itself is
 preserved. Defaults to the repository containing this script.
 
 .PARAMETER ProjectDirectory
-ZTGUI repository root. Defaults to the repository containing this script.
+ZTOrbit repository root. Defaults to the repository containing this script.
 
 .PARAMETER Exclude
 Paths below .tmp to keep, relative to .tmp. A leading .tmp/ prefix is
@@ -34,4 +34,4 @@ $arguments = @{
 }
 if (!$PSBoundParameters.ContainsKey('ProjectDirectory')) { $arguments['ProjectDirectory'] = $projectRoot }
 if ($WhatIfPreference) { $arguments['WhatIf'] = $true }
-& (Join-Path $projectRoot '.agents/skills/ztgui-build/scripts/clean-build-temp.ps1') @arguments
+& (Join-Path $projectRoot '.agents/skills/zto-build/scripts/clean-build-temp.ps1') @arguments

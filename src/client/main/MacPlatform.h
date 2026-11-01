@@ -4,7 +4,7 @@
 #include <QPair>
 
 // Shell generators are platform-independent so their quoting can be checked on Windows.
-namespace vusiif::ztgui::platform {
+namespace vusiif::zto::platform {
 QString quote(const QString &value);
 QString appleScriptString(const QString &value);
 QString serviceCommands(const QString &action, const QString &cli);

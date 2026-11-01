@@ -1,0 +1,17 @@
+[Unit]
+Description=Z2Hub plugin server
+After=network-online.target zerotier-one.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Server/Z2Hub
+ExecStart=/root/Server/Z2Hub/start-server.sh --server --listen 0.0.0.0 --port 18100
+Restart=on-failure
+RestartPreventExitStatus=78
+RestartSec=5
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

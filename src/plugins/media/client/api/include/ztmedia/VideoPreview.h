@@ -2,7 +2,7 @@
 #include <ztmedia/MediaTypes.h>
 #include <QQuickPaintedItem>
 #include <QImage>
-namespace vusiif::ztgui::media {
+namespace vusiif::zto::media {
 // Instantiate from a page factory; no global QML registration is necessary.
 class VideoPreview final : public QQuickPaintedItem {
   public:
@@ -17,4 +17,4 @@ class VideoPreview final : public QQuickPaintedItem {
   private:
     QImage image;
 };
-} // namespace vusiif::ztgui::media
+} // namespace vusiif::zto::media

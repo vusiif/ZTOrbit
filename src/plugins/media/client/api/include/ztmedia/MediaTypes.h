@@ -8,7 +8,7 @@
 #include <functional>
 #include <optional>
 
-namespace vusiif::ztgui::media {
+namespace vusiif::zto::media {
 inline constexpr auto SessionService = "media.session";
 inline constexpr auto SessionApi = "1";
 inline constexpr auto ClipService = "media.clip";
@@ -100,6 +100,15 @@ struct Capabilities {
 };
 struct Statistics {
     QJsonObject values;
+    // Returns an owning JSON snapshot, or an empty object for an unknown track.
+    QJsonObject track(const QString &id) const {
+        for (const auto &entry : values.value("tracks").toArray()) {
+            const auto snapshot = entry.toObject();
+            if (snapshot.value("id").toString() == id)
+                return snapshot;
+        }
+        return {};
+    }
 };
 inline QJsonObject toJson(const TrackConfig &c) {
     QJsonArray processors;
@@ -193,4 +202,4 @@ inline EncodedPacket encodedPacket(const QJsonObject &o, const QByteArray &data)
     p.data = data;
     return p;
 }
-} // namespace vusiif::ztgui::media
+} // namespace vusiif::zto::media

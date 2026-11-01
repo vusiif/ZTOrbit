@@ -7,7 +7,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 #include <libavutil/imgutils.h>
 }
-namespace vusiif::ztgui::media::engine {
+namespace vusiif::zto::media::engine {
 class VideoCodec {
   public:
     ~VideoCodec() { close(); }
@@ -27,4 +27,4 @@ class VideoCodec {
     qint64 firstPts = -1, nextPts = 0;
     quint64 sequence = 0;
 };
-} // namespace vusiif::ztgui::media::engine
+} // namespace vusiif::zto::media::engine

@@ -1,6 +1,6 @@
 # 语音服务端插件（Java）
 
-`ztserver_voice_chat.jar` 是 ZTServer 的 Java 插件，路由 ID `voice-chat`、显示名“语音聊天”、版本 0.1.0、API 0.2。成员房间与 `ZTV1` 音频协议与旧 C++ 插件完全一致；客户端无需修改。
+`z2hub_voice_chat.jar` 是 ZTOrbitHub 的 Java 插件，路由 ID `voice-chat`、显示名“语音聊天”、版本 0.1.0、API 0.2。成员房间与 `ZTV1` 音频协议与旧 C++ 插件完全一致；客户端无需修改。
 
 ## 构建与部署
 
@@ -11,17 +11,17 @@ revision="$(tr -d '\r\n' < SERVER_VERSION)"
 api_version="$(printf '%s' "$revision" | sed -E 's/^0\.([0-9]+)\.[0-9]+(-[0-9A-Za-z.-]+)?$/0.\1\2/')"
 mvn -f src/server/pom.xml -Drevision="$revision" -DapiVersion="$api_version" -pl api -am -DskipTests install
 mvn -f src/plugins/voice-chat/server/pom.xml -DapiVersion="$api_version" clean package
-# 产物：src/plugins/voice-chat/server/target/ztserver_voice_chat.jar
+# 产物：src/plugins/voice-chat/server/target/z2hub_voice_chat.jar
 ```
 
-或使用发行脚本一次性构建：`bash scripts/build-linux.sh --build-voice-plugin`，结果在 `build/dist/server-plugins/ztserver_voice_chat-v0.1.0.jar`，不进入宿主包。
+或使用发行脚本一次性构建：`bash scripts/build-linux.sh --build-voice-plugin`，结果在 `build/dist/server-plugins/z2hub_voice_chat-v0.1.0.jar`，不进入宿主包。
 
 把 JAR 放入宿主工作目录的 `plugins/` 后重启：
 
 ```bash
-cd /root/Server/ZTServer
-install -m644 /path/ztserver_voice_chat.jar plugins/
-systemctl restart zt-server.service
+cd /root/Server/Z2Hub
+install -m644 /path/z2hub_voice_chat.jar plugins/
+systemctl restart z2hub.service
 ```
 
 插件加载要求 manifest `apiVersion` 与宿主完全一致；构建脚本使用根 `SERVER_VERSION` 的前两段数字和同一预发布后缀（当前 0.2）。
@@ -42,16 +42,16 @@ systemctl restart zt-server.service
 ```bash
 python3 src/tests/voice-chat/ServerTests.py \
   --binary src/server/scripts/start-server.sh \
-  --jar src/server/main/target/zt-server.jar \
-  --plugin src/plugins/voice-chat/server/target/ztserver_voice_chat.jar
+  --jar src/server/main/target/Z2Hub.jar \
+  --plugin src/plugins/voice-chat/server/target/z2hub_voice_chat.jar
 ```
 
 也可以直接使用 fat jar：
 
 ```bash
 python3 src/tests/voice-chat/ServerTests.py \
-  --binary src/server/main/target/zt-server.jar \
-  --plugin src/plugins/voice-chat/server/target/ztserver_voice_chat.jar
+  --binary src/server/main/target/Z2Hub.jar \
+  --plugin src/plugins/voice-chat/server/target/z2hub_voice_chat.jar
 ```
 
 已部署服务（不创建隔离服务器，容量/超时测试自动跳过）：

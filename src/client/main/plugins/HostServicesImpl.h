@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ztgui/HostServices.h>
-#include <ztgui/PluginStorage.h>
+#include <zto/HostServices.h>
+#include <zto/PluginStorage.h>
 #include "ServiceBroker.h"
 #include "storage/PluginDataStore.h"
 #include <QObject>
@@ -9,7 +9,7 @@
 #include <QLockFile>
 #include <memory>
 
-namespace vusiif::ztgui::util {
+namespace vusiif::zto::util {
 // Host implementation of the borrowed service objects. The stable plugin ID
 // selects plugins-data/id-<normalized-id>; the display name is only metadata.
 class HostServicesImpl final : public QObject, public HostServices,

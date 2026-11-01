@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Resolve paths before checking libraries so invocation from another directory works.
 server_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-server="$server_dir/zt-server"
+server="$server_dir/ztohub"
 check_only=false
 if [[ "${1:-}" == --check-deps ]]; then
     if (( $# != 1 )); then

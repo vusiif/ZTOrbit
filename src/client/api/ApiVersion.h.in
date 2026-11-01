@@ -1,13 +1,13 @@
 #pragma once
 
-namespace vusiif::ztgui::api {
+namespace vusiif::zto::api {
 inline constexpr int ApiMajor = @PROJECT_VERSION_MAJOR@;
 inline constexpr int ApiMinor = @PROJECT_VERSION_MINOR@;
-inline constexpr char ApiVersion[] = "@ZTGUI_API_VERSION@";
+inline constexpr char ApiVersion[] = "@ZTO_API_VERSION@";
 
 // Pre-release API generations may change incompatibly; require an exact match.
 inline constexpr bool isApiCompatible(int major, int minor)
 {
     return major == ApiMajor && minor == ApiMinor;
 }
-} // namespace vusiif::ztgui::api
+} // namespace vusiif::zto::api

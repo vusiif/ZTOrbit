@@ -9,7 +9,7 @@
 #include <QSet>
 #include <algorithm>
 
-namespace vusiif::ztgui::voice_chat {
+namespace vusiif::zto::voice_chat {
 namespace {
 QSettings::Format legacyFormat()
 {
@@ -68,12 +68,12 @@ struct LegacyEntry {
 // keys actually used for the one-time import are cleared afterwards.
 QMap<QString, LegacyEntry> legacySettings()
 {
-    QSettings current(legacyFormat(), QSettings::UserScope, QStringLiteral("ZeroTierGUI"),
-                      QStringLiteral("ZTGUI"));
-    QSettings previous(legacyFormat(), QSettings::UserScope, QStringLiteral("ZeroTierGUI"),
-                       QStringLiteral("ZeroTier GUI"));
+    QSettings current(legacyFormat(), QSettings::UserScope, QStringLiteral("ZTOrbit"),
+                      QStringLiteral("ZTOrbit"));
+    QSettings previous(legacyFormat(), QSettings::UserScope, QStringLiteral("ZTOrbit"),
+                       QStringLiteral("ZTOrbit"));
     const QSettings *sources[]{&current, &previous};
-    const QStringList applications{QStringLiteral("ZTGUI"), QStringLiteral("ZeroTier GUI")};
+    const QStringList applications{QStringLiteral("ZTOrbit"), QStringLiteral("ZTOrbit")};
     QMap<QString, LegacyEntry> result;
     for (const auto &key : legacyKeys()) {
         const auto path = QStringLiteral("voice-chat/") + key;
@@ -108,7 +108,7 @@ QStringList clearImportedLegacyKeys(const QMap<QString, LegacyEntry> &legacy,
             && normalizedTargetValue(key, committed.value(key)) == it->value;
         if (!used.contains(key) && !redundant) continue;
         const auto path = QStringLiteral("voice-chat/") + key;
-        QSettings source(legacyFormat(), QSettings::UserScope, QStringLiteral("ZeroTierGUI"),
+        QSettings source(legacyFormat(), QSettings::UserScope, QStringLiteral("ZTOrbit"),
                          it->application);
         if (!source.contains(path)) continue;
         source.remove(path);
@@ -117,7 +117,7 @@ QStringList clearImportedLegacyKeys(const QMap<QString, LegacyEntry> &legacy,
             failures.append(QStringLiteral("无法清除旧语音配置 %1：设置文件写入失败").arg(path));
             continue;
         }
-        QSettings verify(legacyFormat(), QSettings::UserScope, QStringLiteral("ZeroTierGUI"),
+        QSettings verify(legacyFormat(), QSettings::UserScope, QStringLiteral("ZTOrbit"),
                          it->application);
         if (verify.contains(path))
             failures.append(QStringLiteral("旧语音配置 %1 删除后仍存在").arg(path));
@@ -283,4 +283,4 @@ bool updateMemberRemark(util::PluginStorage &storage, const QString &ztid, const
     return true;
 }
 
-} // namespace vusiif::ztgui::voice_chat
+} // namespace vusiif::zto::voice_chat

@@ -2,7 +2,7 @@
 #include <QGuiApplication>
 #include <QDebug>
 #include <QThread>
-using namespace vusiif::ztgui;
+using namespace vusiif::zto;
 int main(int argc, char **argv) {
     qputenv("QT_MEDIA_BACKEND", "ffmpeg");
     QGuiApplication app(argc, argv);

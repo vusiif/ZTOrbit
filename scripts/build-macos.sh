@@ -8,7 +8,7 @@ fi
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 build_directory="$project_root/build/cmake-build-macos-arm64"
-output_directory="$project_root/build/dist/macos-arm64"
+output_directory="$project_root/build/dist/Z2-macos-arm64"
 
 if [[ -z "${QT_ROOT:-}" ]] && command -v brew >/dev/null 2>&1; then
     QT_ROOT="$(brew --prefix qt)"
@@ -21,11 +21,14 @@ command -v cmake >/dev/null
 xcrun --find clang++ >/dev/null
 cmake -S "$project_root" -B "$build_directory" \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_ROOT" \
-    -DCMAKE_OSX_ARCHITECTURES=arm64 -DZEROTIER_BUILD_TESTS=ON
+    -DCMAKE_OSX_ARCHITECTURES=arm64 -DZTO_BUILD_TESTS=ON
 cmake --build "$build_directory" --parallel "$(sysctl -n hw.logicalcpu)"
 ctest --test-dir "$build_directory" --output-on-failure
 
-api_sdk="$project_root/build/dist/ZTGUI-api"
+version="$(tr -d '\r\n' < "$project_root/VERSION")"
+[[ "$version" =~ ^0\.([0-9]+)\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || {
+    echo 'VERSION must be 0.<core>.<patch>[-qualifier]' >&2; exit 1; }
+api_sdk="$project_root/build/dist/Z2-api-v0.${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
 cmake --install "$build_directory" --prefix "$api_sdk"
 
 # Application plugins are not built for macOS in this generation: the voice
@@ -33,10 +36,10 @@ cmake --install "$build_directory" --prefix "$api_sdk"
 # implemented or verified. Ship the host application only; see docs/macos.md.
 staging="$(mktemp -d "$build_directory/package.XXXXXX")"
 trap '/bin/rm -rf -- "$staging"' EXIT
-/usr/bin/ditto "$build_directory/ZTGUI.app" "$staging/ZTGUI.app"
+/usr/bin/ditto "$build_directory/Z2.app" "$staging/Z2.app"
 
 iconset="$staging/app-icon.iconset"
-/bin/mkdir -p "$iconset" "$staging/ZTGUI.app/Contents/Resources"
+/bin/mkdir -p "$iconset" "$staging/Z2.app/Contents/Resources"
 for size in 16 32 128 256 512; do
     /usr/bin/sips -z "$size" "$size" "$project_root/src/client/assets/app-icon.png" \
         --out "$iconset/icon_${size}x${size}.png" >/dev/null
@@ -44,20 +47,20 @@ for size in 16 32 128 256 512; do
     /usr/bin/sips -z "$retina" "$retina" "$project_root/src/client/assets/app-icon.png" \
         --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
-/usr/bin/iconutil -c icns "$iconset" -o "$staging/ZTGUI.app/Contents/Resources/app-icon.icns"
-plist="$staging/ZTGUI.app/Contents/Info.plist"
+/usr/bin/iconutil -c icns "$iconset" -o "$staging/Z2.app/Contents/Resources/app-icon.icns"
+plist="$staging/Z2.app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIconFile app-icon.icns' "$plist" || \
     /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string app-icon.icns' "$plist"
 (
     cd "$staging"
-    "$QT_ROOT/bin/macdeployqt" ZTGUI.app -qmldir="$project_root/src/client/main/qml" \
+    "$QT_ROOT/bin/macdeployqt" Z2.app -qmldir="$project_root/src/client/main/qml" \
         -always-overwrite -codesign=- -dmg
 )
-/usr/bin/lipo -verify_arch arm64 "$staging/ZTGUI.app/Contents/MacOS/ZTGUI"
-/usr/bin/codesign --verify --deep --strict "$staging/ZTGUI.app"
+/usr/bin/lipo -verify_arch arm64 "$staging/Z2.app/Contents/MacOS/Z2"
+/usr/bin/codesign --verify --deep --strict "$staging/Z2.app"
 /bin/mkdir -p "$output_directory"
-/bin/cp "$staging/ZTGUI.dmg" "$output_directory/ZTGUI-arm64.dmg"
+/bin/cp "$staging/Z2.dmg" "$output_directory/Z2-arm64.dmg"
 # Preserve the bundle in a ZIP as well; ditto keeps executable permissions and symlinks.
-/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$staging/ZTGUI.app" "$output_directory/ZTGUI-arm64.app.zip"
-echo "Created $output_directory/ZTGUI-arm64.dmg"
-echo "Created $output_directory/ZTGUI-arm64.app.zip"
+/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$staging/Z2.app" "$output_directory/Z2-arm64.app.zip"
+echo "Created $output_directory/Z2-arm64.dmg"
+echo "Created $output_directory/Z2-arm64.app.zip"

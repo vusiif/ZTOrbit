@@ -15,7 +15,7 @@
 #include <QSaveFile>
 #include <QSettings>
 #include <QUuid>
-#include <ztgui/PluginInterface.h>
+#include <zto/PluginInterface.h>
 #include <QDir>
 #include <QJsonObject>
 #include <QLibrary>
@@ -34,10 +34,10 @@
 #include <algorithm>
 #include <exception>
 
-namespace vusiif::ztgui::plugins {
-using namespace vusiif::ztgui::api;
+namespace vusiif::zto::plugins {
+using namespace vusiif::zto::api;
 namespace {
-constexpr auto PendingDeletionDirectory = ".ztgui-pending-deletions";
+constexpr auto PendingDeletionDirectory = ".zto-pending-deletions";
 
 QString pendingDeletionsDirectory(const QString &pluginDirectory)
 {
@@ -96,7 +96,7 @@ QString metadataRootFor(const storage::StorageContext &storage, const QString &d
 {
     if (storage.isValid()) return storage.metadataDirectory();
     return QDir(QFileInfo(QDir::cleanPath(QFileInfo(dataRoot).absoluteFilePath())).absolutePath())
-        .filePath(QStringLiteral(".ztgui"));
+        .filePath(QStringLiteral(".zto"));
 }
 
 bool sameVolume(const QString &first, const QString &second)
@@ -200,7 +200,7 @@ QStringList PluginLoader::scan(const QString &directory, PluginRegistry &registr
     QStringList messages;
     if(m_busy || m_stopping || QThread::currentThread()!=thread()) return messages;
     QStringList paths;
-    for(const auto &file:QDir(directory).entryInfoList({"*.ztplugin"},QDir::Files|QDir::NoSymLinks,QDir::Name)) paths.append(file.absoluteFilePath());
+    for(const auto &file:QDir(directory).entryInfoList({"*.z2plugin"},QDir::Files|QDir::NoSymLinks,QDir::Name)) paths.append(file.absoluteFilePath());
     if(!paths.isEmpty()) { const auto result=discover(paths,paths,registry,false); messages.append(result.ok()?"[plugin] catalog verification queued":result.message); }
     return messages;
 }
@@ -224,7 +224,7 @@ bool PluginLoader::hasUncertainPackages() const {
 Result PluginLoader::loadFile(const QString &path,PluginRegistry &registry,bool enable) {
     QStringList paths;
     const auto absolute=QFileInfo(path).absoluteFilePath();
-    for(const auto &file:QDir(QFileInfo(absolute).absolutePath()).entryInfoList({"*.ztplugin"},QDir::Files|QDir::NoSymLinks,QDir::Name)) paths.append(file.absoluteFilePath());
+    for(const auto &file:QDir(QFileInfo(absolute).absolutePath()).entryInfoList({"*.z2plugin"},QDir::Files|QDir::NoSymLinks,QDir::Name)) paths.append(file.absoluteFilePath());
     if(!paths.contains(absolute)) paths.append(absolute);
     return discover(paths,{absolute},registry,enable);
 }
@@ -266,7 +266,7 @@ Result PluginLoader::discover(const QStringList &paths,const QStringList &roots,
                 p.error=package::authenticate(p);
                 p.authenticated=p.error.isEmpty();
             }
-            if(p.ok()) p.error=package::validate(p.info,"client",ApiVersion,ZTGUI_PLUGIN_IID);
+            if(p.ok()) p.error=package::validate(p.info,"client",ApiVersion,ZTO_PLUGIN_IID);
             if(p.ok()) p.error=package::validateRuntime(p);
             packages.append(std::move(p));
         }
@@ -392,8 +392,8 @@ Result PluginLoader::removeFile(const QString &path, const QString &pluginDirect
     const QFileInfo directory(pluginDirectory), file(absolute);
     const auto linked=[](const QFileInfo &info) { return info.isSymLink() || info.isJunction(); };
     if(linked(directory) || !directory.isDir() || linked(file) || (file.exists() && !file.isFile()) ||
-       file.absolutePath()!=directory.absoluteFilePath() || file.suffix().compare("ztplugin",Qt::CaseInsensitive)!=0)
-        return {Error::InvalidPlugin,QStringLiteral("只能删除插件目录中的普通 .ztplugin 文件。")};
+       file.absolutePath()!=directory.absoluteFilePath() || file.suffix().compare("z2plugin",Qt::CaseInsensitive)!=0)
+        return {Error::InvalidPlugin,QStringLiteral("只能删除插件目录中的普通 .z2plugin 文件。")};
     // Import and delete of one install directory are serialized across profiles.
     PackageChangeLock packageLock(directory.absoluteFilePath());
     QString lockError;
@@ -402,7 +402,7 @@ Result PluginLoader::removeFile(const QString &path, const QString &pluginDirect
     // process may have replaced or removed it while we waited.
     if(linked(QFileInfo(absolute)) || !QFileInfo(absolute).isFile()
        || QFileInfo(absolute).absolutePath()!=directory.absoluteFilePath())
-        return {Error::InvalidPlugin,QStringLiteral("只能删除插件目录中的普通 .ztplugin 文件。")};
+        return {Error::InvalidPlugin,QStringLiteral("只能删除插件目录中的普通 .z2plugin 文件。")};
     // Only authenticated metadata may select a plugin data directory. The
     // explicit package-only path deliberately ignores the declared identity.
     auto verified=package::inspect(absolute);
@@ -600,7 +600,7 @@ int PluginLoader::recoverPendingDeletions(const QString &pluginDirectory, const 
     // written owns the same ID's data and must keep it alive.
     struct InstalledPackage { QString path; QString id; };
     QList<InstalledPackage> installed;
-    for(const auto &file:QDir(pluginPath).entryInfoList({"*.ztplugin"},QDir::Files|QDir::NoSymLinks,QDir::Name)) {
+    for(const auto &file:QDir(pluginPath).entryInfoList({"*.z2plugin"},QDir::Files|QDir::NoSymLinks,QDir::Name)) {
         const auto verified=package::inspect(file.absoluteFilePath());
         if(!verified.ok() || !package::authenticate(verified).isEmpty()) continue;
         installed.append({file.absoluteFilePath(),verified.info.value("id").toString().toCaseFolded()});
@@ -841,7 +841,7 @@ Result PluginLoader::startFile(const package::PackageResult &selected,PluginRegi
             if(cancelled()) return staged;
             pkg=package::inspect(absolutePath); error=pkg.error;
             if(error.isEmpty() && pkg.info!=expected) error="Package changed after dependency planning";
-            if(error.isEmpty()) error=package::validate(pkg.info,"client",ApiVersion,ZTGUI_PLUGIN_IID);
+            if(error.isEmpty()) error=package::validate(pkg.info,"client",ApiVersion,ZTO_PLUGIN_IID);
             if(error.isEmpty()) error=package::validateRuntime(pkg);
             if(!error.isEmpty() || cancelled()) return staged;
             staged->loadable=true;
@@ -857,7 +857,7 @@ Result PluginLoader::startFile(const package::PackageResult &selected,PluginRegi
             // Clear hints before association; instance() must still run on the GUI thread.
             loaded.library->setLoadHints(QLibrary::LoadHints{}); loaded.library->setFileName(library);
             const auto metadata=loaded.library->metaData();
-            if(metadata["IID"].toString()!=QLatin1String(ZTGUI_PLUGIN_IID) || metadata["MetaData"].toObject()["apiVersion"].toString()!=QLatin1String(ApiVersion))
+            if(metadata["IID"].toString()!=QLatin1String(ZTO_PLUGIN_IID) || metadata["MetaData"].toObject()["apiVersion"].toString()!=QLatin1String(ApiVersion))
                 error="Inner plugin metadata mismatch";
             if(pkg.info.value("formatVersion").toInt()==3) for(const auto &field:{"dependencies","provides"})
                 if(metadata["MetaData"].toObject()[field]!=pkg.info[field]) error="Inner plugin service metadata mismatch";

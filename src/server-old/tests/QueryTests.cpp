@@ -7,23 +7,23 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QNetworkProxy>
-using namespace vusiif::ztgui;
+using namespace vusiif::zto;
 class QueryTests : public QObject {
     Q_OBJECT
 private slots:
     void wireLimitsAndFragmentation() {
-        auto bytes=protocol::frame("test-echo",QByteArray("a\0b",3));
-        QByteArray input=bytes.left(5); protocol::Packet packet;
-        QCOMPARE(protocol::takeFrame(input,packet),protocol::ReadResult::Incomplete);
+        auto bytes=vusiif::zto::protocol::frame("test-echo",QByteArray("a\0b",3));
+        QByteArray input=bytes.left(5); vusiif::zto::protocol::Packet packet;
+        QCOMPARE(vusiif::zto::protocol::takeFrame(input,packet),vusiif::zto::protocol::ReadResult::Incomplete);
         input += bytes.mid(5)+bytes;
-        QCOMPARE(protocol::takeFrame(input,packet),protocol::ReadResult::Packet);
+        QCOMPARE(vusiif::zto::protocol::takeFrame(input,packet),vusiif::zto::protocol::ReadResult::Packet);
         QCOMPARE(packet.payload,QByteArray("a\0b",3));
-        QCOMPARE(protocol::takeFrame(input,packet),protocol::ReadResult::Packet); QVERIFY(input.isEmpty());
-        QVERIFY(protocol::encode("../bad",{}).isEmpty());
-        QVERIFY(protocol::encode("test-echo",QByteArray(protocol::MaxTcpBytes,'x')).isEmpty());
+        QCOMPARE(vusiif::zto::protocol::takeFrame(input,packet),vusiif::zto::protocol::ReadResult::Packet); QVERIFY(input.isEmpty());
+        QVERIFY(vusiif::zto::protocol::encode("../bad",{}).isEmpty());
+        QVERIFY(vusiif::zto::protocol::encode("test-echo",QByteArray(vusiif::zto::protocol::MaxTcpBytes,'x')).isEmpty());
         input=QByteArray::fromHex("00100001");
-        QCOMPARE(protocol::takeFrame(input,packet),protocol::ReadResult::Invalid);
-        QVERIFY(!protocol::decode("ZTS1\1\0",packet));
+        QCOMPARE(vusiif::zto::protocol::takeFrame(input,packet),vusiif::zto::protocol::ReadResult::Invalid);
+        QVERIFY(!vusiif::zto::protocol::decode("ZTS1\1\0",packet));
     }
     void controllerAggregationAndCancellation() {
         QTemporaryDir directory; QFile token(directory.filePath("token"));
@@ -60,8 +60,8 @@ private slots:
             }
         });
         QNetworkProxy::setApplicationProxy(QNetworkProxy(QNetworkProxy::HttpProxy,"127.0.0.1",1));
-        server::ZeroTierQueries queries(nullptr,QUrl(QString("http://127.0.0.1:%1").arg(http.serverPort())),token.fileName());
-        bool complete=false; server::api::JsonResult result;
+        vusiif::ztohub::ZeroTierQueries queries(nullptr,QUrl(QString("http://127.0.0.1:%1").arg(http.serverPort())),token.fileName());
+        bool complete=false; vusiif::ztohub::api::JsonResult result;
         queries.query("controller.members",{{"networkId","0123456789000000"}},this,[&](const auto &value){result=value;complete=true;});
         QTRY_VERIFY(complete); QVERIFY(result.ok()); QCOMPARE(result.document.array().size(),2); QVERIFY(sawToken);
         QCOMPARE(result.document.array()[0].toObject().value("ipAssignments").toArray().size(),1);

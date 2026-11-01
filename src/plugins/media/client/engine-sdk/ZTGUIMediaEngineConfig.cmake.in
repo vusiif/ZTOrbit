@@ -1,8 +1,0 @@
-@PACKAGE_INIT@
-set(MEDIA_FFMPEG_ROOT "${PACKAGE_PREFIX_DIR}/ffmpeg")
-include("${CMAKE_CURRENT_LIST_DIR}/FFmpeg.cmake")
-if(NOT MEDIA_FFMPEG_FINGERPRINT STREQUAL "@MEDIA_FFMPEG_FINGERPRINT@")
-    message(FATAL_ERROR "Engine SDK FFmpeg binaries do not match its build fingerprint")
-endif()
-include("${CMAKE_CURRENT_LIST_DIR}/ZTGUIMediaEngineTargets.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/ExtensionBundle.cmake")

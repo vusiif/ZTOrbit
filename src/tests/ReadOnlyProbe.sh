@@ -16,7 +16,7 @@ if [ "$(id -u)" = "0" ]; then
     echo "SKIP: running as root bypasses permission bits" >&2
     exit 77
 fi
-root=$(mktemp -d "${TMPDIR:-/tmp}/ztgui-readonly-XXXXXX")
+root=$(mktemp -d "${TMPDIR:-/tmp}/zto-readonly-XXXXXX")
 shared="$root/application"
 personal="$root/user-data"
 mkdir -p "$shared"

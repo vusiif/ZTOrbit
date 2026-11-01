@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Resolve paths before any check so invocation from another directory works.
 server_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-jar="$server_dir/zt-server.jar"
+jar="$server_dir/Z2Hub.jar"
 check_only=false
 if [[ "${1:-}" == --check-deps ]]; then
     if (( $# != 1 )); then

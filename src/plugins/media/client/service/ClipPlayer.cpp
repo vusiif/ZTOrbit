@@ -4,7 +4,7 @@
 
 #include <utility>
 
-namespace vusiif::ztgui::media::engine {
+namespace vusiif::zto::media::engine {
 
 ClipPlayer::ClipPlayer(QString id, QString lease, QVector<QVector<float>> chunks, Hooks hooks,
                        QObject *parent)
@@ -128,4 +128,4 @@ void ClipPlayer::fail(const QString &message)
     if (m_hooks.failed) m_hooks.failed(message);
 }
 
-} // namespace vusiif::ztgui::media::engine
+} // namespace vusiif::zto::media::engine

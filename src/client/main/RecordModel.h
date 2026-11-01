@@ -3,7 +3,7 @@
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
-namespace vusiif::ztgui::ui {
+namespace vusiif::zto::ui {
 // Stable row IDs retain delegates, focus, selection and expanded members across
 // polling updates. UI state belongs to this model rather than recycled delegates.
 class RecordModel : public QAbstractListModel {

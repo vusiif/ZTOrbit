@@ -33,7 +33,7 @@
 #endif
 #endif
 #include <QJsonArray>
-namespace vusiif::ztgui::package {
+namespace vusiif::zto::package {
 QString readBundle(const PackageResult &,const QString &,bool);
 static constexpr qint64 MaxLibraryBytes=256*1024*1024;
 // Public format key: packaging/obfuscation, deliberately not publisher authorization.
@@ -66,8 +66,8 @@ QJsonObject buildInfo() {
 PackageResult inspect(const QString &path) {
     PackageResult result; result.path=QFileInfo(path).absoluteFilePath();
     QFile file(path);
-    if(!QFileInfo(path).isFile() || QFileInfo(path).isSymLink() || QFileInfo(path).suffix().compare("ztplugin",Qt::CaseInsensitive)) {
-        result.error="Expected a regular .ztplugin file"; return result;
+    if(!QFileInfo(path).isFile() || QFileInfo(path).isSymLink() || QFileInfo(path).suffix().compare("z2plugin",Qt::CaseInsensitive)) {
+        result.error="Expected a regular .z2plugin file"; return result;
     }
     if(!file.open(QIODevice::ReadOnly)) { result.error=file.errorString(); return result; }
     const auto magic=file.read(6);
@@ -136,7 +136,7 @@ QString writeLegacy(const QString &library,const QString &output,QJsonObject inf
 }
 static QString legacyCacheRoot() {
     const auto identity=QString::number(qHash(QCoreApplication::applicationDirPath()),16);
-    return QDir::temp().filePath("ztgui-plugin-cache-"+identity);
+    return QDir::temp().filePath("zto-plugin-cache-"+identity);
 }
 CacheContext CacheContext::temporary() {
     CacheContext context; context.root=legacyCacheRoot(); context.legacy=true; return context;

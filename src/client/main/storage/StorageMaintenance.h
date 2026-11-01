@@ -10,7 +10,7 @@
 #include <QVariantMap>
 #include <algorithm>
 
-namespace vusiif::ztgui::storage {
+namespace vusiif::zto::storage {
 struct StorageUsage {
     QString root;
     QString settings;
@@ -74,4 +74,4 @@ private:
     StorageContext m_context;
 };
 
-} // namespace vusiif::ztgui::storage
+} // namespace vusiif::zto::storage

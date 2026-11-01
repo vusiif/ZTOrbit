@@ -5,7 +5,7 @@
 #include <QThread>
 #include <QPointer>
 
-namespace vusiif::ztgui::network {
+namespace vusiif::zto::network {
 // Host implementation shared by both applications; never exported as SDK API.
 class TransportWorker;
 class NetworkTransport final : public QObject {
@@ -24,7 +24,7 @@ public:
                  std::function<void(const QJsonObject &)> callback);
     void datagram(const QHostAddress &source, quint16 port, const QByteArray &payload);
 signals:
-    void received(const QString &plugin, const vusiif::ztgui::util::NetworkMessage &message);
+    void received(const QString &plugin, const vusiif::zto::util::NetworkMessage &message);
 private:
     QThread m_thread;
     TransportWorker *m_worker;

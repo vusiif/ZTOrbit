@@ -3,8 +3,8 @@
 #include "VoiceConfig.h"
 #include "VoiceSession.h"
 #include <Protocol.h>
-#include <ztgui/PluginPage.h>
-#include <ztgui/PluginStorage.h>
+#include <zto/PluginPage.h>
+#include <zto/PluginStorage.h>
 #include <ztprotocol/NetworkAddress.h>
 #include <ztprotocol/WireProtocol.h>
 #include <QGuiApplication>
@@ -22,7 +22,7 @@
 #include <QPointer>
 #include <QtTest>
 #include <algorithm>
-using namespace vusiif::ztgui;
+using namespace vusiif::zto;
 
 class RecordingLease final : public util::ServiceLease {
 public:
@@ -305,11 +305,11 @@ private slots:
         QVERIFY(std::none_of(lease->calls.cbegin(),lease->calls.cend(),[](const auto &call){return call.method=="track.create"||call.method=="track.start"||call.method=="track.remove";}));controller.stopForUnload();
     }
     void devicePreferencesSurviveAsynchronousDiscovery() {
-        QTemporaryDir directory; QCoreApplication::setOrganizationName("ZTGUI-Voice-UI"); QCoreApplication::setApplicationName("VoiceUI");
+        QTemporaryDir directory; QCoreApplication::setOrganizationName("ZTOrbit-Voice-UI"); QCoreApplication::setApplicationName("VoiceUI");
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
         const QByteArray device("saved-device-id");
         {
-            QSettings legacy(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZTGUI");
+            QSettings legacy(QSettings::IniFormat,QSettings::UserScope,"ZTOrbit","ZTOrbit");
             legacy.setValue("voice-chat/input",device); legacy.setValue("voice-chat/output",device);
             legacy.sync();
         }
@@ -323,7 +323,7 @@ private slots:
         QCOMPARE(saved.value("input").toString(),QString::fromLatin1(device.toHex()));
         {
             // Imported legacy keys are cleared from the current source.
-            QSettings legacy(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZTGUI");
+            QSettings legacy(QSettings::IniFormat,QSettings::UserScope,"ZTOrbit","ZTOrbit");
             QVERIFY(!legacy.contains("voice-chat/input"));
             QVERIFY(!legacy.contains("voice-chat/output"));
         }
@@ -333,12 +333,12 @@ private slots:
     {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
-        QCoreApplication::setOrganizationName("ZTGUI-Voice-UI");
+        QCoreApplication::setOrganizationName("ZTOrbit-Voice-UI");
         QCoreApplication::setApplicationName("VoiceUI");
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
         {
-            QSettings current(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZTGUI");
+            QSettings current(QSettings::IniFormat,QSettings::UserScope,"ZTOrbit","ZTOrbit");
             current.setValue("voice-chat/address","  example.com:18100 ");
             current.setValue("voice-chat/nickname","Alice");
             current.setValue("voice-chat/volume",500); // Target already has a different value.
@@ -346,7 +346,7 @@ private slots:
             current.setValue("voice-chat/input",QByteArray::fromHex("AABBCC"));
             current.setValue("voice-chat/port",9999); // Unknown key must survive.
             current.sync();
-            QSettings previous(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZeroTier GUI");
+            QSettings previous(QSettings::IniFormat,QSettings::UserScope,"ZTOrbit","ZTOrbit");
             previous.setValue("voice-chat/inputVolume",150);
             previous.setValue("voice-chat/deafened",true);
             previous.setValue("voice-chat/output",QByteArray::fromHex("DDEEFF"));
@@ -366,7 +366,7 @@ private slots:
         QCOMPARE(loaded.config.input,QByteArray::fromHex("aabbcc"));
         QCOMPARE(loaded.config.output,QByteArray::fromHex("ddeeff"));
         {
-            QSettings current(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZTGUI");
+            QSettings current(QSettings::IniFormat,QSettings::UserScope,"ZTOrbit","ZTOrbit");
             QVERIFY(!current.contains("voice-chat/address"));
             QVERIFY(!current.contains("voice-chat/nickname"));
             QVERIFY(!current.contains("voice-chat/muted"));
@@ -374,7 +374,7 @@ private slots:
             // Conflicting and unknown keys are never removed.
             QCOMPARE(current.value("voice-chat/volume").toInt(),500);
             QCOMPARE(current.value("voice-chat/port").toInt(),9999);
-            QSettings previous(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZeroTier GUI");
+            QSettings previous(QSettings::IniFormat,QSettings::UserScope,"ZTOrbit","ZTOrbit");
             QVERIFY(!previous.contains("voice-chat/inputVolume"));
             QVERIFY(!previous.contains("voice-chat/deafened"));
             QVERIFY(!previous.contains("voice-chat/output"));
@@ -393,12 +393,12 @@ private slots:
     {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
-        QCoreApplication::setOrganizationName("ZTGUI-Voice-UI");
+        QCoreApplication::setOrganizationName("ZTOrbit-Voice-UI");
         QCoreApplication::setApplicationName("VoiceUI");
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
         {
-            QSettings current(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZTGUI");
+            QSettings current(QSettings::IniFormat,QSettings::UserScope,"ZTOrbit","ZTOrbit");
             current.setValue("voice-chat/address","example.com");
             current.setValue("voice-chat/muted",true);
             current.sync();
@@ -409,14 +409,14 @@ private slots:
         QVERIFY(!loaded.error.isEmpty());
         QVERIFY(!storage.files.contains("config.json"));
         QVERIFY(storage.legacyAllowed); // The one-way marker was not committed.
-        QSettings current(QSettings::IniFormat,QSettings::UserScope,"ZeroTierGUI","ZTGUI");
+        QSettings current(QSettings::IniFormat,QSettings::UserScope,"ZTOrbit","ZTOrbit");
         QVERIFY(current.contains("voice-chat/address"));
         QVERIFY(current.contains("voice-chat/muted"));
     }
 
     void independentInputAndOutputPreferences() {
         QTemporaryDir directory;
-        QCoreApplication::setOrganizationName("ZTGUI-Voice-UI"); QCoreApplication::setApplicationName("VoiceUI");
+        QCoreApplication::setOrganizationName("ZTOrbit-Voice-UI"); QCoreApplication::setApplicationName("VoiceUI");
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
         MemoryStorage storage;
         const auto makeCache=[&storage] {
@@ -759,7 +759,7 @@ private slots:
     void pageAndAudioPopup() {
         QFETCH(bool,dark);
         QTemporaryDir directory; QVERIFY(directory.isValid());
-        QCoreApplication::setOrganizationName("ZTGUI-Voice-UI"); QCoreApplication::setApplicationName("VoiceUI");
+        QCoreApplication::setOrganizationName("ZTOrbit-Voice-UI"); QCoreApplication::setApplicationName("VoiceUI");
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
         MemoryStorage storage;
         auto lease=std::make_shared<RecordingLease>(); auto cache=std::make_shared<voice_chat::AudioDeviceCache>(); cache->audio=std::make_shared<media::MediaSession>(lease);

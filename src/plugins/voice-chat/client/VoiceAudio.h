@@ -4,7 +4,7 @@
 #include <QPointer>
 #include <QQueue>
 #include <set>
-namespace vusiif::ztgui::voice_chat {
+namespace vusiif::zto::voice_chat {
 // Voice owns its room-to-track mapping. The media SDK has no member/room model.
 class VoiceAudio final : public QObject {
   public:
@@ -216,4 +216,4 @@ class VoiceAudio final : public QObject {
             session->setGain(i.value(), volume * volumes.value(i.key(), 1), deafened, this);
     }
 };
-} // namespace vusiif::ztgui::voice_chat
+} // namespace vusiif::zto::voice_chat

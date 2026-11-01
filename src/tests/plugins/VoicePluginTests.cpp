@@ -29,8 +29,8 @@
 #include <tlhelp32.h>
 #include <psapi.h>
 #endif
-using namespace vusiif::ztgui::api;
-using namespace vusiif::ztgui::plugins;
+using namespace vusiif::zto::api;
+using namespace vusiif::zto::plugins;
 class VoicePluginTests : public QObject {
     Q_OBJECT
     QTemporaryDir installed;
@@ -42,11 +42,11 @@ class VoicePluginTests : public QObject {
     }
     static QJsonObject control(QTcpSocket &socket,QByteArray &buffer,int &serial,const QString &op,const QJsonObject &data={}) {
         const int id=++serial;
-        socket.write(vusiif::ztgui::protocol::frame("voice-chat",QJsonDocument(QJsonObject{{"v",1},{"id",id},{"op",op},{"data",data}}).toJson(QJsonDocument::Compact)));
+        socket.write(vusiif::zto::protocol::frame("voice-chat",QJsonDocument(QJsonObject{{"v",1},{"id",id},{"op",op},{"data",data}}).toJson(QJsonDocument::Compact)));
         socket.flush(); QElapsedTimer timer; timer.start();
         while(timer.elapsed()<5000) {
-            buffer+=socket.readAll(); vusiif::ztgui::protocol::Packet packet;
-            while(vusiif::ztgui::protocol::takeFrame(buffer,packet)==vusiif::ztgui::protocol::ReadResult::Packet) {
+            buffer+=socket.readAll(); vusiif::zto::protocol::Packet packet;
+            while(vusiif::zto::protocol::takeFrame(buffer,packet)==vusiif::zto::protocol::ReadResult::Packet) {
                 const auto reply=QJsonDocument::fromJson(packet.payload).object();
                 if(reply["id"].toInt()==id) return reply;
             }
@@ -61,7 +61,7 @@ class VoicePluginTests : public QObject {
     }
 private slots:
     void oldMediaPackageWithoutClipServiceIsRejected() {
-        using namespace vusiif::ztgui;
+        using namespace vusiif::zto;
         const auto media = package::inspect(MEDIA_PLUGIN);
         QVERIFY2(media.ok(), qPrintable(media.error));
         QVERIFY(media.info["provides"].toArray().size() > 0);
@@ -88,14 +88,14 @@ private slots:
             {"provides", provides}};
         QTemporaryDir install;
         QVERIFY(install.isValid());
-        const auto oldMedia = install.filePath("media.ztplugin");
+        const auto oldMedia = install.filePath("media.z2plugin");
         const auto error = package::writeBundle(manifest, oldMedia, media.info);
         QVERIFY2(error.isEmpty(), qPrintable(error));
-        QVERIFY(QFile::copy(VOICE_PLUGIN, install.filePath("voice.ztplugin")));
+        QVERIFY(QFile::copy(VOICE_PLUGIN, install.filePath("voice.z2plugin")));
         PluginRegistry registry;
         PluginLoader loader;
         QSignalSpy finished(&loader, &PluginLoader::loadFinished);
-        QVERIFY(loader.loadFile(install.filePath("voice.ztplugin"), registry).ok());
+        QVERIFY(loader.loadFile(install.filePath("voice.z2plugin"), registry).ok());
         QTRY_VERIFY_WITH_TIMEOUT(!finished.isEmpty(), 15000);
         QVERIFY(!finished.first()[1].toBool());
         const auto message = finished.first()[2].toString();
@@ -108,7 +108,7 @@ private slots:
     }
     void mediaWorkerUsesPackagedCoreAndCrt() {
 #ifdef Q_OS_WIN
-        using namespace vusiif::ztgui;
+        using namespace vusiif::zto;
         const auto pkg=package::inspect(MEDIA_PLUGIN); QVERIFY2(pkg.ok(),qPrintable(pkg.error));
         QCOMPARE(QFileInfo(pkg.info["entry"].toString()).path(),QString("runtime/bin"));
         std::unique_ptr<QTemporaryDir> cache; std::unique_ptr<QLockFile> lock; QString entry;
@@ -138,9 +138,9 @@ private slots:
 #endif
     }
     void liveDeviceCaptureAndLoopback() {
-        const auto endpoint=vusiif::ztgui::protocol::serverEndpoint(qEnvironmentVariable("ZTGUI_LIVE_VOICE_HOST"));
-        if(!endpoint.valid()) QSKIP("Set ZTGUI_LIVE_VOICE_HOST to an isolated server reachable over TCP and UDP");
-        const int rounds=qBound(1,qEnvironmentVariableIntValue("ZTGUI_LIVE_AUDIO_ROUNDS"),100);
+        const auto endpoint=vusiif::zto::protocol::serverEndpoint(qEnvironmentVariable("ZTO_LIVE_VOICE_HOST"));
+        if(!endpoint.valid()) QSKIP("Set ZTO_LIVE_VOICE_HOST to an isolated server reachable over TCP and UDP");
+        const int rounds=qBound(1,qEnvironmentVariableIntValue("ZTO_LIVE_AUDIO_ROUNDS"),100);
         QFile measurements(QCoreApplication::applicationDirPath()+"/live-audio-memory.csv"); QVERIFY(measurements.open(QIODevice::WriteOnly));
         QTextStream csv(&measurements); csv<<"round,privateBytes,workingSet,runtimeDirectories,runtimeHandles\n";
         for(int round=0;round<rounds;++round) {
@@ -156,7 +156,7 @@ private slots:
         while((model->property("inputs").toList().size()<2 || model->property("outputs").toList().size()<2)&&deviceWait.elapsed()<3000)QTest::qWait(10);
         if(model->property("inputs").toList().size()<2 || model->property("outputs").toList().size()<2)
             QSKIP("Physical capture/playback devices are unavailable");
-        model->setProperty("address",qEnvironmentVariable("ZTGUI_LIVE_VOICE_HOST")); model->setProperty("nickname","Physical audio test");
+        model->setProperty("address",qEnvironmentVariable("ZTO_LIVE_VOICE_HOST")); model->setProperty("nickname","Physical audio test");
         model->setProperty("volume",0); model->setProperty("inputVolume",100);
         QVERIFY(QMetaObject::invokeMethod(model,"toggleConnection")); QTRY_VERIFY(model->property("connected").toBool());
         QVERIFY(QMetaObject::invokeMethod(model,"createRoom",Q_ARG(QString,"Physical device "+QString::number(QDateTime::currentMSecsSinceEpoch()))));
@@ -172,7 +172,7 @@ private slots:
         QUdpSocket udp; udp.setProxy(QNetworkProxy::NoProxy); QVERIFY(udp.bind(QHostAddress::AnyIPv4,0));
         QByteArray registration(30,'\0'); registration.replace(0,4,"ZTV1"); registration[4]=1; registration[5]=1; registration.replace(6,16,token);
         qToBigEndian(session,reinterpret_cast<uchar *>(registration.data()+22));
-        QVERIFY(udp.writeDatagram(vusiif::ztgui::protocol::encode("voice-chat",registration),observer.peerAddress(),port)>0);
+        QVERIFY(udp.writeDatagram(vusiif::zto::protocol::encode("voice-chat",registration),observer.peerAddress(),port)>0);
         QTRY_VERIFY_WITH_TIMEOUT(udp.hasPendingDatagrams(),3000);
         while(udp.hasPendingDatagrams()) udp.receiveDatagram();
         QTRY_COMPARE(model->property("members").toList().size(),2);
@@ -186,13 +186,13 @@ private slots:
         while(timer.elapsed()<4000 && captured<10) {
             QTest::qWait(20);
             while(udp.hasPendingDatagrams()) {
-                vusiif::ztgui::protocol::Packet packet;
-                if(!vusiif::ztgui::protocol::decode(udp.receiveDatagram().data(),packet) || packet.payload.size()<=30 || quint8(packet.payload[5])!=3) continue;
+                vusiif::zto::protocol::Packet packet;
+                if(!vusiif::zto::protocol::decode(udp.receiveDatagram().data(),packet) || packet.payload.size()<=30 || quint8(packet.payload[5])!=3) continue;
                 ++captured;
                 // Send captured Opus back through the real peer path at zero total gain.
                 // This starts/writes the physical sink without audible feedback.
                 auto reply=registration; reply[5]=3; qToBigEndian(sequence++,reinterpret_cast<uchar *>(reply.data()+26));
-                reply+=packet.payload.mid(30); udp.writeDatagram(vusiif::ztgui::protocol::encode("voice-chat",reply),observer.peerAddress(),port);
+                reply+=packet.payload.mid(30); udp.writeDatagram(vusiif::zto::protocol::encode("voice-chat",reply),observer.peerAddress(),port);
             }
         }
         model->setProperty("muted",true); QTest::qWait(100);
@@ -203,15 +203,15 @@ private slots:
         QVERIFY(loader.unload("voice-chat",registry).ok()); QTRY_VERIFY(registry.plugins().isEmpty());
 #ifdef Q_OS_WIN
         PROCESS_MEMORY_COUNTERS_EX memory{}; memory.cb=sizeof(memory); QVERIFY(K32GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&memory),sizeof(memory)));
-        const auto stats=vusiif::ztgui::package::runtimeStatistics(); QCOMPARE(stats["directories"].toInt(),0); QCOMPARE(stats["handles"].toInt(),0);
+        const auto stats=vusiif::zto::package::runtimeStatistics(); QCOMPARE(stats["directories"].toInt(),0); QCOMPARE(stats["handles"].toInt(),0);
         csv<<round<<','<<qulonglong(memory.PrivateUsage)<<','<<qulonglong(memory.WorkingSetSize)<<','<<stats["directories"].toInt()<<','<<stats["handles"].toInt()<<'\n'; csv.flush();
 #endif
         }
     }
     void initTestCase() {
-        voicePath=installed.filePath("voice.ztplugin");
+        voicePath=installed.filePath("voice.z2plugin");
         QVERIFY(QFile::copy(QString::fromUtf8(VOICE_PLUGIN),voicePath));
-        QVERIFY(QFile::copy(MEDIA_PLUGIN,installed.filePath("media.ztplugin")));
+        QVERIFY(QFile::copy(MEDIA_PLUGIN,installed.filePath("media.z2plugin")));
         // The production plugin uses its real per-user data root. Give these
         // integration checks a deterministic empty config and one-way import
         // marker so earlier runs cannot leak address/volume into the panel.
@@ -224,7 +224,7 @@ private slots:
             {"volume",80},{"inputVolume",100},{"muted",false},{"deafened",false},
             {"input",""},{"output",""}}).toJson(QJsonDocument::Indented));
         config.close();
-        const auto metadata=QDir(QCoreApplication::applicationDirPath()).filePath(".ztgui/plugins");
+        const auto metadata=QDir(QCoreApplication::applicationDirPath()).filePath(".zto/plugins");
         QVERIFY(QDir().mkpath(metadata));
         QFile ownership(QDir(metadata).filePath("voice-chat.json"));
         QVERIFY(ownership.open(QIODevice::WriteOnly));
@@ -238,7 +238,7 @@ private slots:
 #endif
     }
     void repeatedLoadsLeaveNoMediaModulesOrWorker() {
-        using namespace vusiif::ztgui::package;
+        using namespace vusiif::zto::package;
         QTemporaryDir settings; QVERIFY(settings.isValid());
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings.path());
         const auto media=inspect(MEDIA_PLUGIN); QVERIFY2(media.ok(),qPrintable(media.error));
@@ -294,11 +294,11 @@ private slots:
     }
     void panelOnlyConnectsOnClick() {
         QTemporaryDir directory; QVERIFY(directory.isValid());
-        QCoreApplication::setOrganizationName("ZTGUI-Test"); QCoreApplication::setApplicationName("VoicePlugin");
+        QCoreApplication::setOrganizationName("ZTOrbit-Test"); QCoreApplication::setApplicationName("VoicePlugin");
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
         const auto library=voicePath;
         QVERIFY(QFile::copy(library,directory.filePath(QFileInfo(library).fileName())));
-        QVERIFY(QFile::copy(MEDIA_PLUGIN,directory.filePath("media.ztplugin")));
+        QVERIFY(QFile::copy(MEDIA_PLUGIN,directory.filePath("media.z2plugin")));
         QQmlEngine engine; QQuickWindow window; window.resize(920,780); window.show();
         auto registry=std::make_unique<PluginRegistry>(); auto loader=std::make_unique<PluginLoader>();
         QCOMPARE(loader->scan(directory.path(),*registry).size(),1);
@@ -324,12 +324,12 @@ private slots:
         auto *socket=server.nextPendingConnection(); QTRY_VERIFY(socket->bytesAvailable()>=4);
         const auto prefix=socket->peek(4); const auto size=qFromBigEndian<quint32>(reinterpret_cast<const uchar *>(prefix.constData()));
         QTRY_VERIFY(socket->bytesAvailable()>=4+size);
-        QByteArray input=socket->readAll(); vusiif::ztgui::protocol::Packet packet;
-        QCOMPARE(vusiif::ztgui::protocol::takeFrame(input,packet),vusiif::ztgui::protocol::ReadResult::Packet);
+        QByteArray input=socket->readAll(); vusiif::zto::protocol::Packet packet;
+        QCOMPARE(vusiif::zto::protocol::takeFrame(input,packet),vusiif::zto::protocol::ReadResult::Packet);
         QCOMPARE(packet.plugin,QByteArray("voice-chat"));
         const auto hello=QJsonDocument::fromJson(packet.payload).object(); QCOMPARE(hello["op"].toString(),QString("hello"));
         const QJsonObject response{{"v",1},{"id",hello["id"]},{"ok",true},{"data",QJsonObject{{"session",1},{"udpPort",18100},{"rooms",QJsonArray{}}}}};
-        socket->write(vusiif::ztgui::protocol::frame("voice-chat",QJsonDocument(response).toJson(QJsonDocument::Compact)));
+        socket->write(vusiif::zto::protocol::frame("voice-chat",QJsonDocument(response).toJson(QJsonDocument::Compact)));
         QTRY_VERIFY(model->property("connected").toBool());
         QTRY_VERIFY(item->findChild<QQuickItem *>("voiceCreateRoom")->isEnabled());
         model->setProperty("muted",true); model->setProperty("deafened",true); model->setProperty("volume",35);
@@ -345,13 +345,13 @@ private slots:
         loader->requestShutdown(); QTRY_VERIFY(loader->shutdownComplete()); loader.reset(); registry.reset();
     }
     void liveRoomLifecycle() {
-        const auto host=qEnvironmentVariable("ZTGUI_LIVE_VOICE_HOST");
-        if (host.isEmpty()) QSKIP("Set ZTGUI_LIVE_VOICE_HOST to test the deployed server");
+        const auto host=qEnvironmentVariable("ZTO_LIVE_VOICE_HOST");
+        if (host.isEmpty()) QSKIP("Set ZTO_LIVE_VOICE_HOST to test the deployed server");
         QTemporaryDir directory; QVERIFY(directory.isValid()); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
         QSettings().setValue("voice-chat/muted",true);
         QNetworkProxy::setApplicationProxy(QNetworkProxy(QNetworkProxy::HttpProxy,"127.0.0.1",1));
         const auto library=voicePath; QVERIFY(QFile::copy(library,directory.filePath(QFileInfo(library).fileName())));
-        QVERIFY(QFile::copy(MEDIA_PLUGIN,directory.filePath("media.ztplugin")));
+        QVERIFY(QFile::copy(MEDIA_PLUGIN,directory.filePath("media.z2plugin")));
         QQmlEngine firstEngine,secondEngine; QQuickItem firstParent,secondParent;
         auto firstRegistry=std::make_unique<PluginRegistry>(),secondRegistry=std::make_unique<PluginRegistry>();
         auto loader=std::make_unique<PluginLoader>(),secondLoader=std::make_unique<PluginLoader>();
@@ -381,8 +381,8 @@ private slots:
     // the media worker package) mapped in the host, which would confuse the
     // module-isolation check above if this test ran first.
     void previewSdkConsumerRendersVideo() {
-        const auto probe=qEnvironmentVariable("ZTGUI_PREVIEW_PLUGIN");if(probe.isEmpty())QSKIP("Set ZTGUI_PREVIEW_PLUGIN to the independently built SDK preview package");
-        QTemporaryDir directory;QVERIFY(directory.isValid());QVERIFY(QFile::copy(probe,directory.filePath("preview.ztplugin")));QVERIFY(QFile::copy(MEDIA_PLUGIN,directory.filePath("media.ztplugin")));
+        const auto probe=qEnvironmentVariable("ZTO_PREVIEW_PLUGIN");if(probe.isEmpty())QSKIP("Set ZTO_PREVIEW_PLUGIN to the independently built SDK preview package");
+        QTemporaryDir directory;QVERIFY(directory.isValid());QVERIFY(QFile::copy(probe,directory.filePath("preview.z2plugin")));QVERIFY(QFile::copy(MEDIA_PLUGIN,directory.filePath("media.z2plugin")));
         QQmlEngine engine;QQuickWindow window;window.resize(1000,640);window.show();QTest::qWait(100);window.hide();window.show();QTRY_VERIFY(window.isExposed());
         PluginRegistry registry;PluginLoader loader;loader.scan(directory.path(),registry);QTRY_COMPARE_WITH_TIMEOUT(registry.plugins().size(),2,80000);QTRY_COMPARE_WITH_TIMEOUT(registry.preparationState("media-preview-probe"),PreparationState::Ready,15000);
         auto page=registry.page("media-preview-probe/preview",&engine,window.contentItem());QVERIFY2(page.result.ok(),qPrintable(page.result.message));page.page->setSize(QSizeF(1000,640));auto *model=controller(page.page);QVERIFY(model);QVERIFY(QMetaObject::invokeMethod(model,"start",Q_ARG(QString,"synthetic")));

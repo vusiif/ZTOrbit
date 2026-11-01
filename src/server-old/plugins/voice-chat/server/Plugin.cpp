@@ -1,5 +1,5 @@
 #include <Protocol.h>
-#include <ztserver/PluginInterface.h>
+#include <ztohub/PluginInterface.h>
 #include <QDateTime>
 #include <QJsonArray>
 #include <QMap>
@@ -10,9 +10,9 @@
 #include <limits>
 #include <stdexcept>
 
-using namespace vusiif::ztgui::voice_chat;
-namespace vusiif::ztgui::voice_chat {
-namespace api = vusiif::ztgui::server::api;
+using namespace vusiif::zto::voice_chat;
+namespace vusiif::zto::voice_chat {
+namespace api = vusiif::ztohub::api;
 struct Session {
     api::ConnectionId connection = 0;
     quint32 id = 0, room = 0;
@@ -28,11 +28,11 @@ struct Room { QString name; };
 
 class VoiceServerPlugin final : public QObject, public api::PluginInterface {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID ZTSERVER_PLUGIN_IID FILE "plugin.json")
-    Q_INTERFACES(vusiif::ztgui::server::api::PluginInterface)
+    Q_PLUGIN_METADATA(IID ZTOHUB_PLUGIN_IID FILE "plugin.json")
+    Q_INTERFACES(vusiif::ztohub::api::PluginInterface)
 public:
     api::PluginInfo info() const override { return {"voice-chat", QStringLiteral("语音聊天"), "0.1.0"}; }
-    api::StartTask onStart(api::HostServices &host, const util::CancellationToken &) override {
+    api::StartTask onStart(api::HostServices &host, const vusiif::zto::util::CancellationToken &) override {
         services = &host;
         const auto config = host.files().readFile("settings.json");
         if (config.ok()) {
@@ -50,12 +50,12 @@ public:
             for (const auto connection : sessions.keys()) if (now - sessions[connection].lastSeen > 15000) services->disconnect(connection);
         });
         timer.start(1000);
-        host.logs().write(util::LogLevel::Info, "Voice plugin started");
+        host.logs().write(vusiif::zto::util::LogLevel::Info, "Voice plugin started");
         return {};
     }
     void onStop() override {
         timer.stop(); sessions.clear(); rooms.clear();
-        if (services) services->logs().write(util::LogLevel::Info,"Voice plugin stopped");
+        if (services) services->logs().write(vusiif::zto::util::LogLevel::Info,"Voice plugin stopped");
         services = nullptr;
     }
     void onConnectionClosed(api::ConnectionId connection) override {
@@ -125,7 +125,7 @@ private:
         s.room = 0; s.token.clear(); s.udpPort = 0; s.udpAddress.clear(); s.muted = false;
         if (oldRoom) {
             if (!population(oldRoom)) rooms.remove(oldRoom);
-            services->logs().write(util::LogLevel::Info, QString("Session %1 left room %2").arg(s.id).arg(oldRoom));
+            services->logs().write(vusiif::zto::util::LogLevel::Info, QString("Session %1 left room %2").arg(s.id).arg(oldRoom));
             changed(oldRoom);
         }
     }
@@ -178,7 +178,7 @@ private:
                 qToBigEndian(random, reinterpret_cast<uchar *>(s.token.data() + i));
             }
             result = QJsonObject{{"room", roomState(id)}, {"token", QString::fromLatin1(s.token.toHex())}};
-            services->logs().write(util::LogLevel::Info, QString("Session %1 joined room %2").arg(s.id).arg(id));
+            services->logs().write(vusiif::zto::util::LogLevel::Info, QString("Session %1 joined room %2").arg(s.id).arg(id));
         } else { fail("unknown_operation"); return; }
         response["ok"] = true; response["data"] = result; send(s.connection, response);
         if (op == "join" || op == "create") changed(s.room);
@@ -205,6 +205,6 @@ private:
     }
 };
 
-} // namespace vusiif::ztgui::voice_chat
+} // namespace vusiif::zto::voice_chat
 
 #include "Plugin.moc"

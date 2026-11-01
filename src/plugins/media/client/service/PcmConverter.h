@@ -5,7 +5,7 @@ extern "C" {
 #include <libswresample/swresample.h>
 #include <libavutil/channel_layout.h>
 }
-namespace vusiif::ztgui::media::engine {
+namespace vusiif::zto::media::engine {
 class PcmConverter {
   public:
     ~PcmConverter() { swr_free(&context); }
@@ -66,4 +66,4 @@ class PcmConverter {
         }
     }
 };
-} // namespace vusiif::ztgui::media::engine
+} // namespace vusiif::zto::media::engine

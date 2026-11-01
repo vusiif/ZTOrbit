@@ -4,7 +4,7 @@
 #include "PluginRuntime.h"
 #include "storage/SettingsStore.h"
 #include "storage/StorageContext.h"
-#include <ztgui/PluginPage.h>
+#include <zto/PluginPage.h>
 #include <QApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -21,14 +21,15 @@
 #include <ztprotocol/WireProtocol.h>
 #include <QSignalSpy>
 #include <QtTest>
+#include <algorithm>
 #include <memory>
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <psapi.h>
 #include <tlhelp32.h>
 #endif
-using namespace vusiif::ztgui::ui;
-using namespace vusiif::ztgui::api;
+using namespace vusiif::zto::ui;
+using namespace vusiif::zto::api;
 
 class DeferredOperations : public SystemOperations {
 public:
@@ -38,21 +39,78 @@ public:
     void runElevatedScript(const QString &, const QString &value, std::function<void(bool)> finished) override { script = value; completion = std::move(finished); }
     void complete(bool ok) { auto done = std::move(completion); if (done) done(ok); }
 };
+class RecordingOperations : public SystemOperations {
+public:
+    int operations = 0;
+    QStringList scripts;
+    void runElevatedScript(const QString &, const QString &script, std::function<void(bool)> finished) override
+    {
+        ++operations;
+        scripts.append(script);
+        if (finished) finished(false);
+    }
+};
+class RevealOperations : public SystemOperations {
+public:
+    int calls = 0;
+    QString path;
+    bool revealFile(const QString &value, QString &error) override
+    {
+        ++calls;
+        path = value;
+        error.clear();
+        return true;
+    }
+};
+class ScriptExecutingOperations : public SystemOperations {
+public:
+    int operations = 0;
+    QString lastScript;
+    QString output;
+    void runElevatedScript(const QString &, const QString &script, std::function<void(bool)> finished) override
+    {
+        ++operations;
+        lastScript = script;
+#ifdef Q_OS_WIN
+        const auto invocation = vusiif::zto::zerotier::preparePowerShell(
+            "function Stop-Service { }\n"
+            "function Start-Service { }\n"
+            "function netsh { $global:LASTEXITCODE = 0 }\n"
+            "function Get-Content { [CmdletBinding()] param([string]$LiteralPath,[switch]$Raw); "
+            "if ($LiteralPath -like '*zerotier-one.port') { return '9993' }; "
+            "if ($LiteralPath -like '*authtoken.secret') { return 'mock-token' }; "
+            "Microsoft.PowerShell.Management\\Get-Content @PSBoundParameters }\n"
+            "function Invoke-RestMethod { return @{address='0123456789'} }\n"
+            "function Get-Service { $s = New-Object PSObject; Add-Member -InputObject $s -MemberType ScriptMethod "
+            "-Name WaitForStatus -Value {}; return $s }\n" + script);
+        QProcess process;
+        process.start("powershell.exe", invocation.arguments);
+        const bool completed = process.waitForFinished(30000);
+        const bool ok = completed && process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+        QFile log(invocation.logPath);
+        if (log.open(QIODevice::ReadOnly)) output = QString::fromUtf8(log.readAll());
+        if (finished) finished(ok);
+#else
+        Q_UNUSED(script)
+        if (finished) finished(false);
+#endif
+    }
+};
 class QmlTests : public QObject {
     Q_OBJECT
     QTemporaryDir m_directory;
-    vusiif::ztgui::storage::StorageContext m_storage;
+    vusiif::zto::storage::StorageContext m_storage;
     QByteArray m_path, m_programData;
     QStringList m_errors;
     std::unique_ptr<AppController> m_controller;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QQuickWindow *m_window = nullptr;
     QVariant setting(const QString &key, const QVariant &fallback = {}) const {
-        vusiif::ztgui::storage::SettingsStore store(m_storage.settingsFile());
+        vusiif::zto::storage::SettingsStore store(m_storage.settingsFile());
         return store.value(key, fallback);
     }
     bool hasSetting(const QString &key) const {
-        vusiif::ztgui::storage::SettingsStore store(m_storage.settingsFile());
+        vusiif::zto::storage::SettingsStore store(m_storage.settingsFile());
         return store.contains(key);
     }
     QObject *object(const char *name) const {
@@ -73,17 +131,56 @@ class QmlTests : public QObject {
         };
         return find(m_window->contentItem());
     }
-    void openWindow(const QString &pluginDirectory = {}) {
-        m_controller = std::make_unique<AppController>(nullptr,pluginDirectory,nullptr,m_storage);
+    QString localConfigPath() const { return vusiif::zto::zerotier::localConfigPath(); }
+    void prepareLocalConfigDirectory() const
+    {
+        QDir().mkpath(vusiif::zto::zerotier::systemHomeDirectory());
+        QDir().mkpath(vusiif::zto::zerotier::moonDirectory());
+    }
+    QByteArray readLocalConfig() const
+    {
+        QFile file(localConfigPath());
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    }
+    void writeLocalConfig(const QByteArray &bytes) const
+    {
+        prepareLocalConfigDirectory();
+        QFile file(localConfigPath());
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(bytes), bytes.size());
+    }
+    void writeMoonFile(const QString &name = QStringLiteral("0000000123456789.moon"),
+                       const QByteArray &bytes = QByteArray("signed-moon")) const
+    {
+        prepareLocalConfigDirectory();
+        QFile file(QDir(vusiif::zto::zerotier::moonDirectory()).filePath(name));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(bytes), bytes.size());
+    }
+    void openWindow(const QString &pluginDirectory = {}, SystemOperations *operations = nullptr) {
+        m_controller = std::make_unique<AppController>(nullptr,pluginDirectory,operations,m_storage);
         m_engine = std::make_unique<QQmlApplicationEngine>();
         connect(m_engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) { for (const auto &error : errors) m_errors.append(error.toString()); });
         m_engine->setInitialProperties({{"backend", QVariant::fromValue(m_controller.get())}});
-        m_engine->load(QUrl("qrc:/qt/qml/ZTGUI/qml/Main.qml"));
+        m_engine->load(QUrl("qrc:/qt/qml/ZTOrbit/qml/Main.qml"));
         QVERIFY2(!m_engine->rootObjects().isEmpty(), qPrintable(m_errors.join('\n')));
         m_window = qobject_cast<QQuickWindow *>(m_engine->rootObjects().first());
         QVERIFY(m_window); m_controller->setWindow(m_window);
         QTest::qWait(100);
         QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void scrollSettingsTo(const char *name) {
+        auto *scroll = qobject_cast<QQuickItem *>(object("settingsScroll"));
+        QVERIFY(scroll);
+        auto *flick = qobject_cast<QQuickItem *>(scroll->property("contentItem").value<QObject *>());
+        QVERIFY(flick);
+        auto *target = qobject_cast<QQuickItem *>(object(name));
+        QVERIFY(target);
+        const auto point = target->mapToItem(flick, QPointF(0, 0));
+        const auto maximum = std::max(0.0, flick->property("contentHeight").toDouble() - flick->height());
+        flick->setProperty("contentY", qBound(0.0,
+            flick->property("contentY").toDouble() + point.y() - 80, maximum));
+        QTest::qWait(120);
     }
     void click(const char *name) {
         auto *item = qobject_cast<QQuickItem *>(object(name)); QVERIFY(item);
@@ -92,17 +189,27 @@ class QmlTests : public QObject {
 private slots:
     void initTestCase() {
         QVERIFY(m_directory.isValid());
-        QCoreApplication::setOrganizationName("ZTGUI-QML-Tests"); QCoreApplication::setApplicationName("QmlTests");
-        QCoreApplication::setApplicationVersion(ZEROTIER_GUI_VERSION);
+        QCoreApplication::setOrganizationName("ZTOrbit-QML-Tests"); QCoreApplication::setApplicationName("QmlTests");
+        QCoreApplication::setApplicationVersion(ZTO_VERSION);
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_directory.path());
-        m_storage = vusiif::ztgui::storage::StorageContext::forTesting(m_directory.filePath("storage"));
+        m_storage = vusiif::zto::storage::StorageContext::forTesting(m_directory.filePath("storage"));
         m_path = qgetenv("PATH"); m_programData = qgetenv("ProgramData");
-        qputenv("PATH", QByteArray(ZTGUI_FAKE_PING_DIRECTORY) + QDir::listSeparator().toLatin1() + QCoreApplication::applicationDirPath().toLocal8Bit() + QDir::listSeparator().toLatin1() + m_path);
+        qputenv("PATH", QByteArray(ZTO_FAKE_PING_DIRECTORY) + QDir::listSeparator().toLatin1() + QCoreApplication::applicationDirPath().toLocal8Bit() + QDir::listSeparator().toLatin1() + m_path);
         qputenv("ProgramData", m_directory.path().toLocal8Bit());
         qputenv("ZT_TEST_DATA_DIRECTORY", (m_directory.path()+"/ZeroTier").toLocal8Bit());
         QDir().mkpath(".tmp/screenshots");
     }
-    void init() { qputenv("ZT_TEST_MODE", "compact-lists"); m_errors.clear(); }
+    void init() {
+        qputenv("ZT_TEST_MODE", "compact-lists");
+        m_errors.clear();
+        if (QFileInfo::exists(localConfigPath()))
+            QFile::setPermissions(localConfigPath(), QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                | QFileDevice::ReadUser | QFileDevice::WriteUser);
+        QFile::remove(localConfigPath());
+        const QDir moons(vusiif::zto::zerotier::moonDirectory());
+        for (const auto &info : moons.entryInfoList(QDir::Files))
+            QFile::remove(info.absoluteFilePath());
+    }
     void trayAndMinimizePauseUiPollingAndRefreshOnRestore() {
         const auto path=m_directory.filePath("tray-queries.log"); QFile::remove(path);
         qputenv("ZT_TEST_QUERY_LOG",path.toUtf8());
@@ -110,7 +217,7 @@ private slots:
         openWindow(); QTRY_COMPARE(m_controller->networks()->count(),2);
         const auto old=m_controller->networks()->get(0); m_controller->setExpanded(old["rowId"].toString(),true);
         m_window->hide(); QTRY_VERIFY(!m_window->isVisible()); QTest::qWait(200);
-        for(auto *poller:m_controller->findChildren<vusiif::ztgui::zerotier::JsonPoller *>()) QVERIFY(!poller->isActive());
+        for(auto *poller:m_controller->findChildren<vusiif::zto::zerotier::JsonPoller *>()) QVERIFY(!poller->isActive());
         const auto hidden=queries(); QSignalSpy hiddenUpdates(m_controller.get(),&AppController::stateChanged);
         QTest::qWait(2200); QCOMPARE(queries(),hidden); QCOMPARE(hiddenUpdates.size(),0);
         qputenv("ZT_TEST_MODE","empty");
@@ -123,17 +230,17 @@ private slots:
     }
     void hiddenWindowCancelsMemberRequestsAndPings() {
         qputenv("ZT_TEST_MODE","members"); qputenv("ZT_TEST_PING_MODE","hang");
-        QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost,vusiif::ztgui::protocol::NetworkPort));
+        QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost,vusiif::zto::protocol::NetworkPort));
         int requests=0; bool respond=false; QPointer<QTcpSocket> waiting;
         connect(&server,&QTcpServer::newConnection,this,[&] {
             auto *socket=server.nextPendingConnection(); auto input=std::make_shared<QByteArray>();
             connect(socket,&QTcpSocket::readyRead,socket,[&,socket,input] {
-                *input+=socket->readAll(); vusiif::ztgui::protocol::Packet packet;
-                if(vusiif::ztgui::protocol::takeFrame(*input,packet)!=vusiif::ztgui::protocol::ReadResult::Packet) return;
+                *input+=socket->readAll(); vusiif::zto::protocol::Packet packet;
+                if(vusiif::zto::protocol::takeFrame(*input,packet)!=vusiif::zto::protocol::ReadResult::Packet) return;
                 const auto request=QJsonDocument::fromJson(packet.payload).object(); ++requests;
                 if(!respond) { waiting=socket; return; }
                 const QJsonArray members{QJsonObject{{"nodeId","0123456789"},{"ipAssignments",QJsonArray{"127.0.0.3"}}}};
-                socket->write(vusiif::ztgui::protocol::frame("builtin",QJsonDocument(QJsonObject{{"v",1},{"id",request["id"]},{"ok",true},{"data",members}}).toJson(QJsonDocument::Compact)));
+                socket->write(vusiif::zto::protocol::frame("builtin",QJsonDocument(QJsonObject{{"v",1},{"id",request["id"]},{"ok",true},{"data",members}}).toJson(QJsonDocument::Compact)));
             });
             connect(socket,&QTcpSocket::disconnected,socket,&QObject::deleteLater);
         });
@@ -150,7 +257,7 @@ private slots:
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
     void pluginSelectionAndDeleteConfirmation() {
-        QTemporaryDir packages; const auto path=packages.filePath("invalid.ztplugin");
+        QTemporaryDir packages; const auto path=packages.filePath("invalid.z2plugin");
         QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("invalid package"); file.close();
         openWindow(packages.path()); QTRY_COMPARE(m_controller->plugins().size(),1);
         QTRY_VERIFY(!m_controller->plugins().first().toMap()["loading"].toBool());
@@ -171,8 +278,8 @@ private slots:
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
     void missingDependencyShowsNoticeWithoutLoading() {
-#ifdef ZTGUI_UI_VOICE_PACKAGE
-        QTemporaryDir packages; QVERIFY(QFile::copy(ZTGUI_UI_VOICE_PACKAGE,packages.filePath("voice.ztplugin")));
+#ifdef ZTO_UI_VOICE_PACKAGE
+        QTemporaryDir packages; QVERIFY(QFile::copy(ZTO_UI_VOICE_PACKAGE,packages.filePath("voice.z2plugin")));
         openWindow(packages.path());
         QTRY_VERIFY_WITH_TIMEOUT(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool(),10000);
         QVERIFY(object("pluginNoticeDialog")->property("message").toString().contains("media"));
@@ -188,16 +295,16 @@ private slots:
         QTest::addColumn<bool>("dark"); QTest::newRow("light")<<false; QTest::newRow("dark")<<true;
     }
     void serviceDependenciesBlockUnload() {
-#ifndef ZTGUI_UI_MEDIA_PACKAGE
+#ifndef ZTO_UI_MEDIA_PACKAGE
         QSKIP("Configure the independently built media and voice packages for this integration check");
 #else
         QFETCH(bool,dark);
-        QTemporaryDir packages; QVERIFY(QFile::copy(ZTGUI_UI_VOICE_PACKAGE,packages.filePath("voice.ztplugin")));
-        QVERIFY(QFile::copy(ZTGUI_UI_MEDIA_PACKAGE,packages.filePath("media.ztplugin")));
+        QTemporaryDir packages; QVERIFY(QFile::copy(ZTO_UI_VOICE_PACKAGE,packages.filePath("voice.z2plugin")));
+        QVERIFY(QFile::copy(ZTO_UI_MEDIA_PACKAGE,packages.filePath("media.z2plugin")));
         int ticks=0; QTimer heartbeat; heartbeat.setInterval(5); connect(&heartbeat,&QTimer::timeout,this,[&] { ++ticks; }); heartbeat.start();
         openWindow(packages.path());
         QTRY_COMPARE_WITH_TIMEOUT(m_controller->pluginRegistry()->plugins().size(),2,80000);
-        QTRY_COMPARE(m_controller->pluginRegistry()->preparationState("voice-chat"),vusiif::ztgui::plugins::PreparationState::Ready);
+        QTRY_COMPARE(m_controller->pluginRegistry()->preparationState("voice-chat"),vusiif::zto::plugins::PreparationState::Ready);
         click("settingsButton"); QTest::qWait(200);
         if(dark) { click("themeSelector"); QTRY_VERIFY(m_controller->dark()); QTest::qWait(250); }
         click("openPluginsButton"); QTRY_VERIFY(object("pluginDialog") && object("pluginDialog")->property("visible").toBool()); QTest::qWait(200);
@@ -229,8 +336,8 @@ private slots:
 #endif
     }
     void mediaOnlyUnloadMemory() {
-#if defined(Q_OS_WIN) && defined(ZTGUI_UI_MEDIA_PACKAGE)
-        if(!qEnvironmentVariableIntValue("ZTGUI_TEST_MEDIA_MEMORY")) QSKIP("Set ZTGUI_TEST_MEDIA_MEMORY=1 for the repeated physical worker memory check");
+#if defined(Q_OS_WIN) && defined(ZTO_UI_MEDIA_PACKAGE)
+        if(!qEnvironmentVariableIntValue("ZTO_TEST_MEDIA_MEMORY")) QSKIP("Set ZTO_TEST_MEDIA_MEMORY=1 for the repeated physical worker memory check");
         QTemporaryDir packages; openWindow(packages.path()); QTest::qWait(500);
         QFile file(".tmp/screenshots/media-unload-memory.csv"); QVERIFY(file.open(QIODevice::WriteOnly));
         QTextStream csv(&file); csv<<"round,privateBytes,workingSet,handles,threads\n";
@@ -248,15 +355,15 @@ private slots:
             QStringList mediaModules;
             if(Module32FirstW(modules,&module)) do {
                 const auto name=QString::fromWCharArray(module.szModule).toLower();
-                if(name.contains("multimedia") || name.startsWith("avcodec") || name.startsWith("avformat") || name.contains("ztgui_media")) mediaModules.append(name);
+                if(name.contains("multimedia") || name.startsWith("avcodec") || name.startsWith("avformat") || name.contains("z2_media")) mediaModules.append(name);
             } while(Module32NextW(modules,&module));
             CloseHandle(modules); QVERIFY2(mediaModules.isEmpty(),qPrintable(mediaModules.join(',')));
         };
         measure(0);
         for(int round=1;round<=6;++round) {
-            if(round==1) m_controller->importPlugin(QUrl::fromLocalFile(ZTGUI_UI_MEDIA_PACKAGE)); else m_controller->loadPlugin("media");
+            if(round==1) m_controller->importPlugin(QUrl::fromLocalFile(ZTO_UI_MEDIA_PACKAGE)); else m_controller->loadPlugin("media");
             QTRY_COMPARE_WITH_TIMEOUT(m_controller->pluginRegistry()->plugins().size(),1,80000);
-            QTRY_COMPARE_WITH_TIMEOUT(m_controller->pluginRegistry()->preparationState("media"),vusiif::ztgui::plugins::PreparationState::Ready,80000);
+            QTRY_COMPARE_WITH_TIMEOUT(m_controller->pluginRegistry()->preparationState("media"),vusiif::zto::plugins::PreparationState::Ready,80000);
             qint64 pid=0; for(const auto &v:m_controller->plugins()) if(v.toMap()["id"]=="media") pid=v.toMap()["pid"].toLongLong();
             QVERIFY(pid>0); const auto process=OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,DWORD(pid)); QVERIFY(process);
             wchar_t image[32768]; DWORD imageSize=32768; QVERIFY(QueryFullProcessImageNameW(process,0,image,&imageSize));
@@ -264,7 +371,7 @@ private slots:
             m_controller->unloadPlugin("media"); QTRY_VERIFY_WITH_TIMEOUT(m_controller->pluginRegistry()->plugins().isEmpty(),10000);
             QCOMPARE(WaitForSingleObject(process,0),DWORD(WAIT_OBJECT_0)); CloseHandle(process);
             QVERIFY(!QFileInfo::exists(cache));
-            const auto runtime=vusiif::ztgui::package::runtimeStatistics(); QCOMPARE(runtime["directories"].toInt(),0); QCOMPARE(runtime["handles"].toInt(),0);
+            const auto runtime=vusiif::zto::package::runtimeStatistics(); QCOMPARE(runtime["directories"].toInt(),0); QCOMPARE(runtime["handles"].toInt(),0);
             QTest::qWait(300); measure(round);
         }
         // Let Qt's default thread-pool expiry distinguish an idle worker from a leak.
@@ -279,7 +386,7 @@ private slots:
         QFile::remove(m_storage.settingsFile()); qunsetenv("ZT_TEST_MODE"); qunsetenv("ZT_TEST_COMMAND_LOG");
         qunsetenv("ZT_TEST_QUERY_LOG");
         qunsetenv("ZT_TEST_PING_MODE"); qunsetenv("ZT_TEST_PING_DELAY"); qunsetenv("ZT_TEST_PING_LOG");
-        qunsetenv("ZTGUI_PLUGIN_CREATE_STEPS");
+        qunsetenv("ZTO_PLUGIN_CREATE_STEPS");
     }
     void cleanupTestCase() { qputenv("PATH", m_path); qputenv("ProgramData", m_programData); qunsetenv("ZT_TEST_DATA_DIRECTORY"); }
     void recordUpdatesPreserveRowsAndExpansion() {
@@ -305,7 +412,7 @@ private slots:
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
     void applicationVersionLabelsMatchRootVersion() {
-        QFile versionFile(QString::fromUtf8(ZTGUI_SOURCE_VERSION_FILE));
+        QFile versionFile(QString::fromUtf8(ZTO_SOURCE_VERSION_FILE));
         QVERIFY(versionFile.open(QIODevice::ReadOnly));
         const auto expectedVersion = QString::fromUtf8(versionFile.readAll().trimmed());
         QVERIFY(!expectedVersion.isEmpty());
@@ -314,16 +421,17 @@ private slots:
         auto *sidebarVersion = object("sidebarVersionLabel"); QVERIFY(sidebarVersion);
         QCOMPARE(sidebarVersion->property("text").toString(), "v" + expectedVersion);
         click("settingsButton"); QTest::qWait(180);
+        scrollSettingsTo("aboutButton");
         click("aboutButton");
         QTRY_VERIFY(object("aboutDialog") && object("aboutDialog")->property("visible").toBool());
         auto *aboutVersion = object("aboutVersionLabel"); QVERIFY(aboutVersion);
         QCOMPARE(aboutVersion->property("text").toString(), "v" + expectedVersion);
-        QCOMPARE(m_controller->serverVersion(), QStringLiteral(ZTGUI_SERVER_VERSION));
-        QCOMPARE(m_controller->serverApiVersion(), QStringLiteral(ZTGUI_SERVER_API_VERSION));
+        QCOMPARE(m_controller->serverVersion(), QStringLiteral(ZTOHUB_VERSION));
+        QCOMPARE(m_controller->serverApiVersion(), QStringLiteral(ZTOHUB_API_VERSION));
         auto *aboutServerVersion = object("aboutServerVersionLabel"); QVERIFY(aboutServerVersion);
         QCOMPARE(aboutServerVersion->property("text").toString(),
-                 "服务端 " + QStringLiteral(ZTGUI_SERVER_VERSION)
-                     + "（API " + QStringLiteral(ZTGUI_SERVER_API_VERSION) + "）");
+                 "服务端 " + QStringLiteral(ZTOHUB_VERSION)
+                     + "（API " + QStringLiteral(ZTOHUB_API_VERSION) + "）");
         QTest::qWait(180);
         QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-application-version.png"));
         m_controller->setTheme("dark"); QTest::qWait(200);
@@ -339,7 +447,7 @@ private slots:
         QTest::qWait(220); click("themeSelector"); QTRY_VERIFY(m_controller->dark());
         QTest::qWait(250); QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-settings-dark.png"));
         m_controller->navigate(ZeroTierMenuId,qobject_cast<QQuickItem *>(object("pluginContainer"))); QTest::qWait(180);
-        const auto dir=QDir(vusiif::ztgui::zerotier::moonDirectory()); QVERIFY(QDir().mkpath(dir.path()));
+        const auto dir=QDir(vusiif::zto::zerotier::moonDirectory()); QVERIFY(QDir().mkpath(dir.path()));
         QFile file(dir.filePath("0000000123456789.moon")); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("moon"); file.close();
         click("moonsButton"); QTRY_VERIFY(m_controller->moonsActive());
         QTRY_VERIFY(m_controller->moons()->count()>0); QTest::qWait(250);
@@ -402,8 +510,8 @@ private slots:
     }
     void timeoutCountsEachRequestOnce() {
         qputenv("ZT_TEST_MODE","slow");
-        vusiif::ztgui::zerotier::JsonPoller poller(this,"info",true);
-        QSignalSpy availability(&poller,&vusiif::ztgui::zerotier::JsonPoller::availabilityChanged);
+        vusiif::zto::zerotier::JsonPoller poller(this,"info",true);
+        QSignalSpy availability(&poller,&vusiif::zto::zerotier::JsonPoller::availabilityChanged);
         poller.setActive(true);
         QTest::qWait(11500); QCOMPARE(availability.size(),0);
         QTRY_VERIFY_WITH_TIMEOUT(!availability.isEmpty(),9000);
@@ -441,7 +549,7 @@ private slots:
     }
     void pluginPagesUseQuickAndValidateOwnership() {
         QQmlEngine engine; QQuickItem parent;
-        vusiif::ztgui::plugins::PluginRegistry registry;
+        vusiif::zto::plugins::PluginRegistry registry;
         int creations=0;
         MenuContribution menu; menu.id="overview"; menu.title="Test";
         menu.createPage=[&](QQmlEngine *,QQuickItem *owner){ ++creations; return new QQuickItem(owner); };
@@ -591,8 +699,8 @@ private slots:
     }
     void pluginReloadKeepsOtherPagesInteractiveUntilReady() {
         QTemporaryDir plugins;
-        QVERIFY(QFile::copy(FIXTURE_CANCELLABLE,plugins.filePath("test.ztplugin")));
-        qputenv("ZTGUI_PLUGIN_CREATE_STEPS","100");
+        QVERIFY(QFile::copy(FIXTURE_CANCELLABLE,plugins.filePath("test.z2plugin")));
+        qputenv("ZTO_PLUGIN_CREATE_STEPS","100");
         openWindow(plugins.path());
         const QString menuId="test-cancellable/overview";
         const auto ready=[&] {
@@ -623,7 +731,7 @@ private slots:
     }
     void confirmationCancelsWithoutMutation() {
         DeferredOperations operations; AppController controller(nullptr,{},&operations,m_storage);
-        const auto dir=QDir(vusiif::ztgui::zerotier::moonDirectory()); QVERIFY(QDir().mkpath(dir.path()));
+        const auto dir=QDir(vusiif::zto::zerotier::moonDirectory()); QVERIFY(QDir().mkpath(dir.path()));
         QFile file(dir.filePath("0000000123456789.moon")); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("moon"); file.close();
         controller.refresh(); QTRY_VERIFY(controller.moons()->count()>0); QSignalSpy confirmation(&controller,&AppController::confirmationRequested);
         controller.deleteMoon("0000000123456789"); QCOMPARE(confirmation.size(),1); controller.confirm(false); QVERIFY(operations.script.isEmpty());
@@ -656,14 +764,14 @@ private slots:
         connect(&server,&QTcpServer::newConnection,this,[&] {
             auto *socket=server.nextPendingConnection(); auto input=std::make_shared<QByteArray>();
             connect(socket,&QTcpSocket::readyRead,socket,[&,socket,input] {
-                *input+=socket->readAll(); vusiif::ztgui::protocol::Packet packet;
-                if (vusiif::ztgui::protocol::takeFrame(*input,packet)!=vusiif::ztgui::protocol::ReadResult::Packet) return;
+                *input+=socket->readAll(); vusiif::zto::protocol::Packet packet;
+                if (vusiif::zto::protocol::takeFrame(*input,packet)!=vusiif::zto::protocol::ReadResult::Packet) return;
                 const auto request=QJsonDocument::fromJson(packet.payload).object(); if(request["data"].toObject()["purpose"]=="ui-members") ++requests;
                 const QJsonArray members{
                     QJsonObject{{"nodeId","012345678b"},{"ipAssignments",QJsonArray{"12.34.56.100"}}},
                     QJsonObject{{"nodeId","012345678a"},{"ipAssignments",QJsonArray{"12.34.56.10"}}},
                     QJsonObject{{"nodeId","0123456789"},{"authorized",true},{"ipAssignments",QJsonArray{requests==1?"12.34.56.2":"12.34.56.3"}}}};
-                socket->write(vusiif::ztgui::protocol::frame("builtin",QJsonDocument(QJsonObject{{"v",1},{"id",request["id"]},{"ok",true},{"data",members}}).toJson(QJsonDocument::Compact)));
+                socket->write(vusiif::zto::protocol::frame("builtin",QJsonDocument(QJsonObject{{"v",1},{"id",request["id"]},{"ok",true},{"data",members}}).toJson(QJsonDocument::Compact)));
             });
             connect(socket,&QTcpSocket::disconnected,socket,&QObject::deleteLater);
         });
@@ -722,12 +830,12 @@ private slots:
     }
     void closingDuringInitializationRemainsResponsive() {
         QFETCH(QString,library); QTemporaryDir directory; QVERIFY(QFile::copy(library,directory.filePath(QFileInfo(library).fileName())));
-        const auto marker=directory.filePath("started"); qputenv("ZTGUI_PLUGIN_PREPARATION_STARTED_FILE",marker.toUtf8()); qputenv("ZTGUI_PLUGIN_CREATE_STEPS","1000");
+        const auto marker=directory.filePath("started"); qputenv("ZTO_PLUGIN_PREPARATION_STARTED_FILE",marker.toUtf8()); qputenv("ZTO_PLUGIN_CREATE_STEPS","1000");
         openWindow(directory.path()); QTRY_VERIFY(QFileInfo::exists(marker));
         QSignalSpy exited(m_controller.get(),&AppController::exitFinished);
         int heartbeats=0; QTimer timer; connect(&timer,&QTimer::timeout,this,[&] { ++heartbeats; }); timer.start(10);
         QElapsedTimer elapsed; elapsed.start(); m_controller->requestQuit(); QVERIFY(elapsed.elapsed()<50); QTRY_COMPARE_WITH_TIMEOUT(exited.size(),1,2000); if(library==QString::fromUtf8(FIXTURE_CANCELLABLE_BLOCKED)) QVERIFY(heartbeats>0); QVERIFY(m_controller->closing());
-        qunsetenv("ZTGUI_PLUGIN_PREPARATION_STARTED_FILE"); qunsetenv("ZTGUI_PLUGIN_CREATE_STEPS");
+        qunsetenv("ZTO_PLUGIN_PREPARATION_STARTED_FILE"); qunsetenv("ZTO_PLUGIN_CREATE_STEPS");
         m_engine.reset(); m_window=nullptr; m_controller.reset();
     }
     void manualColumnsPersistAndDetailsRemainNonModal() {
@@ -759,7 +867,7 @@ private slots:
             original.sync();
         }
         const auto routeDirectory = QDir(personalBase).filePath(
-            QStringLiteral("installations/") + vusiif::ztgui::storage::StorageContext::installKey(shared));
+            QStringLiteral("installations/") + vusiif::zto::storage::StorageContext::installKey(shared));
         QVERIFY(QDir().mkpath(routeDirectory));
         {
             QFile route(QDir(routeDirectory).filePath("route.json"));
@@ -771,8 +879,8 @@ private slots:
         const HANDLE sourceHandle = CreateFileW(reinterpret_cast<LPCWSTR>(source.utf16()),
             GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         QVERIFY(sourceHandle != INVALID_HANDLE_VALUE);
-        auto storage = vusiif::ztgui::storage::StorageContext::resolveForTesting(shared, personalBase);
-        QCOMPARE(storage.mode(), vusiif::ztgui::storage::StorageContext::Mode::Personal);
+        auto storage = vusiif::zto::storage::StorageContext::resolveForTesting(shared, personalBase);
+        QCOMPARE(storage.mode(), vusiif::zto::storage::StorageContext::Mode::Personal);
         QString storageError;
         QVERIFY2(storage.prepare(storageError), qPrintable(storageError));
         QVERIFY(storage.settingsMigrationPending());
@@ -788,7 +896,7 @@ private slots:
                 for (const auto &error : list) errors.append(error.toString());
             });
             engine->setInitialProperties({{"backend", QVariant::fromValue(controller.get())}});
-            engine->load(QUrl("qrc:/qt/qml/ZTGUI/qml/Main.qml"));
+            engine->load(QUrl("qrc:/qt/qml/ZTOrbit/qml/Main.qml"));
             QVERIFY2(!engine->rootObjects().isEmpty(), qPrintable(errors.join('\n')));
             auto *window = qobject_cast<QQuickWindow *>(engine->rootObjects().first());
             QVERIFY(window);
@@ -815,12 +923,12 @@ private slots:
         QVERIFY(!QFileInfo::exists(target));
         CloseHandle(sourceHandle);
         // The restart restores the shared settings and QML persistence resumes.
-        auto retry = vusiif::ztgui::storage::StorageContext::resolveForTesting(shared, personalBase);
+        auto retry = vusiif::zto::storage::StorageContext::resolveForTesting(shared, personalBase);
         QVERIFY2(retry.prepare(storageError), qPrintable(storageError));
         QVERIFY(retry.migrationComplete());
         QVERIFY(!retry.settingsMigrationPending());
         {
-            vusiif::ztgui::storage::SettingsStore recovered(retry.settingsFile());
+            vusiif::zto::storage::SettingsStore recovered(retry.settingsFile());
             QCOMPARE(recovered.value("appearance/theme").toString(), QStringLiteral("dark"));
             QCOMPARE(recovered.value("names/networks/test").toString(), QStringLiteral("Original Name"));
         }
@@ -834,7 +942,7 @@ private slots:
                 for (const auto &error : list) errors.append(error.toString());
             });
             engine->setInitialProperties({{"backend", QVariant::fromValue(controller.get())}});
-            engine->load(QUrl("qrc:/qt/qml/ZTGUI/qml/Main.qml"));
+            engine->load(QUrl("qrc:/qt/qml/ZTOrbit/qml/Main.qml"));
             QVERIFY2(!engine->rootObjects().isEmpty(), qPrintable(errors.join('\n')));
             auto *window = qobject_cast<QQuickWindow *>(engine->rootObjects().first());
             QVERIFY(window);
@@ -847,7 +955,7 @@ private slots:
             controller.reset();
             QVERIFY2(errors.isEmpty(), qPrintable(errors.join('\n')));
         }
-        vusiif::ztgui::storage::SettingsStore saved(retry.settingsFile());
+        vusiif::zto::storage::SettingsStore saved(retry.settingsFile());
         // The recovered values survive the new QML persistence writes.
         QCOMPARE(saved.value("appearance/theme").toString(), QStringLiteral("dark"));
         QVERIFY(saved.value("window/qml/savedWidth").toInt() >= 720);
@@ -872,10 +980,391 @@ private slots:
         QSKIP("Windows-only caption behavior");
 #endif
     }
+    void localConfigSettingsReadActualValuesAndSaveOnce() {
+        prepareLocalConfigDirectory();
+        const QByteArray original(
+            "{\n"
+            "  \"settings\": {\n"
+            "    \"primaryPort\": 19999,\n"
+            "    \"allowTcpFallbackRelay\": true,\n"
+            "    \"forceTcpRelay\": true,\n"
+            "    \"tcpFallbackRelay\": \"192.0.2.10/9443\",\n"
+            "    \"extraSetting\": \"keep\"\n"
+            "  },\n"
+            "  \"unknown\": {\"nested\": 42}\n"
+            "}\n");
+        writeLocalConfig(original);
+        RecordingOperations operations;
+        openWindow({}, &operations);
+        QTRY_VERIFY(m_controller->localConfig().value("loaded").toBool());
+        QCOMPARE(readLocalConfig(), original);
+        click("settingsButton");
+        QTRY_VERIFY(object("settingsPage") && object("settingsPage")->property("visible").toBool());
+        auto *allow = object("allowTcpFallbackSwitch"); auto *force = object("forceTcpFallbackSwitch");
+        QVERIFY(allow); QVERIFY(force);
+        QVERIFY(allow->property("checked").toBool());
+        QVERIFY(force->property("checked").toBool());
+        QVERIFY(allow->property("enabled").toBool());
+        QVERIFY(force->property("enabled").toBool());
+        QVERIFY(object("localConfigRelayLabel")->property("text").toString().contains("192.0.2.10:9443"));
+
+        click("allowTcpFallbackSwitch");
+        QTRY_VERIFY(!m_controller->localConfig().value("allowTcpFallbackRelay").toBool());
+        auto state = vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true);
+        QVERIFY(state.valid());
+        QVERIFY(!state.allowTcpFallbackRelay);
+        QVERIFY(!state.forceTcpRelay);
+        QCOMPARE(state.root.value("settings").toObject().value("primaryPort").toInt(), 19999);
+        QCOMPARE(state.root.value("settings").toObject().value("extraSetting").toString(), QString("keep"));
+        QCOMPARE(state.root.value("unknown").toObject().value("nested").toInt(), 42);
+        QVERIFY(!force->property("checked").toBool());
+        QVERIFY(!force->property("enabled").toBool());
+        QCOMPARE(operations.operations, 0);
+
+        // A disabled force switch cannot create allow=false/force=true.
+        click("forceTcpFallbackSwitch");
+        QTest::qWait(80);
+        QVERIFY(!vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true).forceTcpRelay);
+
+        click("allowTcpFallbackSwitch");
+        QTRY_VERIFY(vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true).allowTcpFallbackRelay);
+        QVERIFY(!vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true).forceTcpRelay);
+        click("forceTcpFallbackSwitch");
+        QTRY_VERIFY(vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true).forceTcpRelay);
+        state = vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true);
+        QVERIFY(state.valid());
+        QVERIFY(state.allowTcpFallbackRelay);
+        QVERIFY(state.forceTcpRelay);
+        QCOMPARE(operations.operations, 0); // No service restart or elevation for ordinary saves.
+        // A manual edit is visible after an explicit re-read, and re-reading
+        // never rewrites the file or triggers another save.
+        const QByteArray edited("{\"settings\":{\"allowTcpFallbackRelay\":false,\"forceTcpRelay\":false},"
+                                "\"manual\":{\"keep\":true}}");
+        writeLocalConfig(edited);
+        m_controller->refreshLocalConfig();
+        QTRY_VERIFY(!allow->property("checked").toBool());
+        QVERIFY(!force->property("checked").toBool());
+        QCOMPARE(readLocalConfig(), edited);
+        m_controller->refreshLocalConfig();
+        QTest::qWait(50);
+        QCOMPARE(readLocalConfig(), edited);
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void localConfigInvalidFileIsReportedWithoutRewrite() {
+        prepareLocalConfigDirectory();
+        const QByteArray invalid("{\"settings\": []}");
+        writeLocalConfig(invalid);
+        openWindow();
+        QTRY_VERIFY(m_controller->localConfig().value("loaded").toBool());
+        QVERIFY(!m_controller->localConfig().value("valid").toBool());
+        click("settingsButton");
+        QTRY_VERIFY(object("settingsPage")->property("visible").toBool());
+        auto *allow = object("allowTcpFallbackSwitch");
+        QVERIFY(allow);
+        QVERIFY(!allow->property("enabled").toBool());
+        QVERIFY(object("localConfigErrorLabel")->property("text").toString().contains(QStringLiteral("settings")));
+        QCOMPARE(readLocalConfig(), invalid);
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void localConfigSaveFailureRestoresRealState() {
+        prepareLocalConfigDirectory();
+        const QByteArray original("{\"settings\":{\"allowTcpFallbackRelay\":true,\"forceTcpRelay\":false},"
+                                  "\"unknown\":{\"keep\":1}}");
+        writeLocalConfig(original);
+        QFile::setPermissions(localConfigPath(), QFileDevice::ReadOwner | QFileDevice::ReadUser);
+        RecordingOperations operations;
+        AppController controller(nullptr, {}, &operations, m_storage);
+        QTRY_VERIFY(controller.localConfig().value("loaded").toBool());
+        QVERIFY(controller.localConfig().value("allowTcpFallbackRelay").toBool());
+        controller.setTcpFallbackSwitches(false, false);
+        QTRY_VERIFY(!controller.localConfig().value("busy").toBool());
+        QVERIFY(operations.operations >= 1);
+        QCOMPARE(controller.localConfig().value("allowTcpFallbackRelay").toBool(), true);
+        QCOMPARE(controller.localConfig().value("forceTcpRelay").toBool(), false);
+        QVERIFY(!controller.localConfig().value("error").toString().isEmpty());
+        QCOMPARE(readLocalConfig(), original);
+        QFile::setPermissions(localConfigPath(), QFileDevice::ReadOwner | QFileDevice::WriteOwner
+#if defined(Q_OS_WIN)
+            | QFileDevice::ReadUser | QFileDevice::WriteUser
+#else
+            | QFileDevice::ReadGroup | QFileDevice::ReadOther
+#endif
+        );
+    }
+    void tcpFallbackServerSelectionSavesAndPromptsManualRestart() {
+        prepareLocalConfigDirectory();
+        const QByteArray original(
+            "{\"settings\":{\"primaryPort\":19999,\"allowTcpFallbackRelay\":true,"
+            "\"forceTcpRelay\":false,\"tcpFallbackRelay\":\"192.0.2.99/9443\"},\"unknown\":true}");
+        writeLocalConfig(original);
+        writeMoonFile();
+        qputenv("ZT_TEST_MODE", "members");
+        RecordingOperations operations;
+        openWindow({}, &operations);
+        click("settingsButton");
+        QTRY_VERIFY(object("settingsPage")->property("visible").toBool());
+        click("switchTcpFallbackServerButton");
+        QTRY_VERIFY(object("tcpFallbackRelayPopup") && object("tcpFallbackRelayPopup")->property("visible").toBool());
+        QTRY_COMPARE(m_controller->tcpFallbackServers().size(), 1);
+        const auto candidate = m_controller->tcpFallbackServers().first().toMap();
+        QCOMPARE(candidate.value("networkId").toString(), QString("0123456789abcdef"));
+        QCOMPARE(candidate.value("relay").toString(), QString("192.0.2.10:9443"));
+        QVERIFY(candidate.value("enabled").toBool());
+        QVERIFY(object("tcpFallbackServer-0123456789abcdef"));
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/tcp-fallback-popup.png"));
+        click("tcpFallbackServer-0123456789abcdef");
+        QTest::qWait(250);
+        QTRY_VERIFY(object("confirmationDialog") && object("confirmationDialog")->property("visible").toBool());
+        QVERIFY(object("confirmationDialog")->property("message").toString().contains("192.0.2.10:9443"));
+        click("cancelActionButton");
+        QTRY_VERIFY(!object("confirmationDialog")->property("visible").toBool());
+        QTest::qWait(80);
+        QCOMPARE(readLocalConfig(), original);
+        QCOMPARE(operations.operations, 0);
+        QVERIFY(!object("pluginNoticeDialog") || !object("pluginNoticeDialog")->property("visible").toBool());
+
+        click("switchTcpFallbackServerButton");
+        QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("visible").toBool());
+        QTRY_COMPARE(m_controller->tcpFallbackServers().size(), 1);
+        click("tcpFallbackServer-0123456789abcdef");
+        QTest::qWait(250);
+        QTRY_VERIFY(object("confirmationDialog")->property("visible").toBool());
+        click("confirmActionButton");
+        QTRY_COMPARE(vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true).tcpFallbackRelay,
+                     QString("192.0.2.10/9443"));
+        QTRY_VERIFY(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool());
+        QCOMPARE(object("pluginNoticeDialog")->property("message").toString(),
+                 QStringLiteral("TCP回退中转服务器已更新，请手动重启 ZeroTier，以及时刷新配置并切换中继连接。"));
+        auto state = vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true);
+        QVERIFY(state.valid());
+        QVERIFY(state.allowTcpFallbackRelay);
+        QVERIFY(!state.forceTcpRelay);
+        QCOMPARE(state.root.value("settings").toObject().value("primaryPort").toInt(), 19999);
+        QCOMPARE(operations.operations, 0);
+        QTest::keyClick(m_window, Qt::Key_Escape);
+        QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
+
+        const auto selected = readLocalConfig();
+        click("switchTcpFallbackServerButton");
+        QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("visible").toBool());
+        QTRY_COMPARE(m_controller->tcpFallbackServers().size(), 1);
+        QVERIFY(m_controller->tcpFallbackServers().first().toMap().value("current").toBool());
+        click("tcpFallbackServer-0123456789abcdef");
+        QTest::qWait(120);
+        QVERIFY(!object("confirmationDialog") || !object("confirmationDialog")->property("visible").toBool());
+        QVERIFY(!object("pluginNoticeDialog") || !object("pluginNoticeDialog")->property("visible").toBool());
+        QCOMPARE(readLocalConfig(), selected);
+        QVERIFY(m_controller->feedback().contains(QStringLiteral("当前已使用")));
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void tcpFallbackServerWithoutMoonMetadataIsDisabled() {
+        prepareLocalConfigDirectory();
+        writeLocalConfig(vusiif::zto::zerotier::localconfig::defaultContent());
+        writeMoonFile(QStringLiteral("0000008056c2e21c.moon"), QByteArray("moon"));
+        openWindow();
+        click("settingsButton");
+        QTRY_VERIFY(object("settingsPage")->property("visible").toBool());
+        click("switchTcpFallbackServerButton");
+        QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("visible").toBool());
+        QTRY_VERIFY(m_controller->tcpFallbackServers().size() >= 1);
+        bool found = false;
+        for (const auto &value : m_controller->tcpFallbackServers()) {
+            const auto candidate = value.toMap();
+            if (candidate.value("networkId").toString() != QString("8056c2e21c000000")) continue;
+            found = true;
+            QVERIFY(!candidate.value("enabled").toBool());
+            QVERIFY(candidate.value("reason").toString().contains(QStringLiteral("Moon")));
+            QVERIFY(!object("tcpFallbackServer-8056c2e21c000000")->property("enabled").toBool());
+        }
+        QVERIFY(found);
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void localConfigRevealUsesSystemPathAndReportsMissingFile() {
+        prepareLocalConfigDirectory();
+        writeLocalConfig(vusiif::zto::zerotier::localconfig::defaultContent());
+        RevealOperations operations;
+        AppController controller(nullptr, {}, &operations, m_storage);
+        QTRY_VERIFY(controller.localConfig().value("loaded").toBool());
+        controller.revealLocalConfig();
+        QCOMPARE(operations.calls, 1);
+        QCOMPARE(operations.path, QFileInfo(localConfigPath()).absoluteFilePath());
+        QFile::remove(localConfigPath());
+        controller.revealLocalConfig();
+        QCOMPARE(operations.calls, 1);
+        QVERIFY(controller.feedback().contains(QStringLiteral("尚未创建")));
+        SystemOperations real;
+        QString error;
+        QVERIFY(!real.revealFile(m_directory.filePath("missing-local.conf"), error));
+        QVERIFY(error.contains(QStringLiteral("尚未创建")));
+#ifdef Q_OS_WIN
+        QCOMPARE(vusiif::zto::ui::explorerSelectParameters("C:/ProgramData/ZeroTier/One/带 空格/local.conf"),
+                 QString("/select,\"C:\\ProgramData\\ZeroTier\\One\\带 空格\\local.conf\""));
+#endif
+    }
+    void localConfigSettingsThemeAndMinimumSize() {
+        prepareLocalConfigDirectory();
+        writeLocalConfig(vusiif::zto::zerotier::localconfig::defaultContent());
+        writeMoonFile();
+        qputenv("ZT_TEST_MODE", "members");
+        openWindow();
+        click("settingsButton");
+        QTRY_VERIFY(object("settingsPage")->property("visible").toBool());
+        QCOMPARE(object("openLocalConfigButton")->property("text").toString(), QStringLiteral("打开本地配置文件"));
+        m_controller->setTheme("dark");
+        m_window->resize(720, 480);
+        QTest::qWait(300);
+        scrollSettingsTo("allowTcpFallbackSwitch");
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/local-config-dark-small.png"));
+        click("switchTcpFallbackServerButton");
+        QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("visible").toBool());
+        QTRY_COMPARE(m_controller->tcpFallbackServers().size(), 1);
+        QTest::qWait(150);
+        auto *popup = object("tcpFallbackRelayPopup");
+        QVERIFY(popup);
+        QVERIFY(popup->property("width").toReal() > 100);
+        QVERIFY(popup->property("width").toReal() <= m_window->width());
+        QVERIFY(popup->property("x").toReal() >= -1 && popup->property("y").toReal() >= -1);
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/tcp-fallback-popup-dark-small.png"));
+        QTest::keyClick(m_window, Qt::Key_Escape);
+        QTRY_VERIFY(!object("tcpFallbackRelayPopup")->property("visible").toBool());
+        m_controller->setTheme("light");
+        QTest::qWait(300);
+        scrollSettingsTo("allowTcpFallbackSwitch");
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/local-config-light-small.png"));
+        click("allowTcpFallbackSwitch");
+        QTRY_VERIFY(!object("allowTcpFallbackSwitch")->property("checked").toBool());
+        QVERIFY(!object("forceTcpFallbackSwitch")->property("enabled").toBool());
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/local-config-force-disabled-light-small.png"));
+        click("allowTcpFallbackSwitch");
+        QTRY_VERIFY(object("allowTcpFallbackSwitch")->property("checked").toBool());
+        click("switchTcpFallbackServerButton");
+        QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("visible").toBool());
+        QTest::qWait(150);
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/tcp-fallback-popup-light-small.png"));
+        QTest::keyClick(m_window, Qt::Key_Escape);
+        QTRY_VERIFY(!object("tcpFallbackRelayPopup")->property("visible").toBool());
+        scrollSettingsTo("openLocalConfigButton");
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/local-config-locate-light-small.png"));
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void forcedTcpFallbackDoesNotReportConnectionFault() {
+        prepareLocalConfigDirectory();
+        writeLocalConfig("{\"settings\":{\"allowTcpFallbackRelay\":true,\"forceTcpRelay\":true}}");
+        qputenv("ZT_TEST_MODE", "tcp-fallback");
+        openWindow();
+        QTRY_VERIFY(m_controller->service().value("available").toBool());
+        QTRY_VERIFY(m_controller->info().value("tcpFallbackActive").toBool());
+        QTRY_VERIFY(m_controller->service().value("warning").toString().isEmpty());
+        writeLocalConfig("{\"settings\":{\"allowTcpFallbackRelay\":true,\"forceTcpRelay\":false}}");
+        m_controller->refreshLocalConfig();
+        QTRY_VERIFY(!m_controller->localConfig().value("forceTcpRelay").toBool());
+        QTRY_VERIFY(m_controller->service().value("warning").toString().contains(QStringLiteral("TCP 中转")));
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void exportConfigurationCarriesRelayOnlyForMatchingServer() {
+        prepareLocalConfigDirectory();
+        writeMoonFile();
+        writeLocalConfig("{\"settings\":{\"allowTcpFallbackRelay\":true,\"forceTcpRelay\":false,"
+                         "\"tcpFallbackRelay\":\"192.0.2.10/9443\"}}");
+        qputenv("ZT_TEST_MODE", "members");
+        AppController controller(nullptr, {}, nullptr, m_storage);
+        const auto match = m_directory.filePath("export-match");
+        controller.exportConfiguration("0123456789abcdef", QUrl::fromLocalFile(match));
+        QTRY_VERIFY(QFileInfo::exists(match + ".z2bundle"));
+        vusiif::zto::zerotier::bundle::Configuration decoded; QString error;
+        QFile first(match + ".z2bundle"); QVERIFY(first.open(QIODevice::ReadOnly));
+        QVERIFY2(vusiif::zto::zerotier::bundle::decode(first.readAll(), decoded, error), qPrintable(error));
+        QCOMPARE(decoded.tcpFallbackRelay, QString("192.0.2.10:9443"));
+
+        writeLocalConfig("{\"settings\":{\"allowTcpFallbackRelay\":true,\"forceTcpRelay\":false,"
+                         "\"tcpFallbackRelay\":\"192.0.2.11/9443\"}}");
+        const auto mismatch = m_directory.filePath("export-mismatch");
+        controller.exportConfiguration("0123456789abcdef", QUrl::fromLocalFile(mismatch));
+        QTRY_VERIFY(QFileInfo::exists(mismatch + ".z2bundle"));
+        QFile second(mismatch + ".z2bundle"); QVERIFY(second.open(QIODevice::ReadOnly));
+        QVERIFY2(vusiif::zto::zerotier::bundle::decode(second.readAll(), decoded, error), qPrintable(error));
+        QVERIFY(decoded.tcpFallbackRelay.isEmpty());
+
+        // An invalid current file must not fall back to a cached relay value.
+        writeLocalConfig("{\"settings\":");
+        const auto invalid = m_directory.filePath("export-invalid");
+        controller.exportConfiguration("0123456789abcdef", QUrl::fromLocalFile(invalid));
+        QTRY_VERIFY(QFileInfo::exists(invalid + ".z2bundle"));
+        QFile third(invalid + ".z2bundle"); QVERIFY(third.open(QIODevice::ReadOnly));
+        QVERIFY2(vusiif::zto::zerotier::bundle::decode(third.readAll(), decoded, error), qPrintable(error));
+        QVERIFY(decoded.tcpFallbackRelay.isEmpty());
+    }
+    void importConfigurationChangesOnlyRelayAfterMoonConfirmation() {
+#ifdef Q_OS_WIN
+        prepareLocalConfigDirectory();
+        const QByteArray original(
+            "{\"settings\":{\"primaryPort\":19999,\"allowTcpFallbackRelay\":true,"
+            "\"forceTcpRelay\":false,\"tcpFallbackRelay\":\"198.51.100.9/9443\"},\"unknown\":{\"keep\":1}}");
+        writeLocalConfig(original);
+        writeMoonFile(QStringLiteral("0000000123456789.moon"), QByteArray("old-moon"));
+        vusiif::zto::zerotier::bundle::Configuration configuration{
+            "0123456789abcdef", "0000000123456789.moon", QByteArray("new-moon"), "192.0.2.10:9443"};
+        const auto encoded = vusiif::zto::zerotier::bundle::encode(configuration);
+        QVERIFY(!encoded.isEmpty());
+        const auto bundlePath = m_directory.filePath("import.z2bundle");
+        QFile bundle(bundlePath); QVERIFY(bundle.open(QIODevice::WriteOnly)); bundle.write(encoded); bundle.close();
+        ScriptExecutingOperations operations;
+        AppController controller(nullptr, {}, &operations, m_storage);
+        QSignalSpy confirmation(&controller, &AppController::confirmationRequested);
+        controller.importConfiguration(QUrl::fromLocalFile(bundlePath));
+        QTRY_COMPARE(confirmation.size(), 1);
+        controller.confirm(false);
+        QTest::qWait(120);
+        QCOMPARE(operations.operations, 0);
+        QCOMPARE(readLocalConfig(), original);
+
+        controller.importConfiguration(QUrl::fromLocalFile(bundlePath));
+        QTRY_COMPARE(confirmation.size(), 2);
+        controller.confirm(true);
+        QTRY_VERIFY(!controller.busy());
+        QTRY_COMPARE(operations.operations, 1);
+        auto state = vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true);
+        QVERIFY(state.valid());
+        QCOMPARE(state.tcpFallbackRelay, QString("192.0.2.10/9443"));
+        QVERIFY(state.allowTcpFallbackRelay);
+        QVERIFY(!state.forceTcpRelay);
+        QCOMPARE(state.root.value("settings").toObject().value("primaryPort").toInt(), 19999);
+        QCOMPARE(state.root.value("unknown").toObject().value("keep").toInt(), 1);
+        QFile moonFile(QDir(vusiif::zto::zerotier::moonDirectory()).filePath("0000000123456789.moon"));
+        QVERIFY(moonFile.open(QIODevice::ReadOnly));
+        QCOMPARE(moonFile.readAll(), QByteArray("new-moon"));
+
+        configuration.tcpFallbackRelay.clear();
+        const auto withoutRelay = vusiif::zto::zerotier::bundle::encode(configuration);
+        const auto withoutPath = m_directory.filePath("without-relay.z2bundle");
+        QFile without(withoutPath); QVERIFY(without.open(QIODevice::WriteOnly)); without.write(withoutRelay); without.close();
+        controller.importConfiguration(QUrl::fromLocalFile(withoutPath));
+        QTRY_COMPARE(confirmation.size(), 3);
+        controller.confirm(true);
+        QTRY_VERIFY(!controller.busy());
+        QTRY_COMPARE(operations.operations, 2);
+        QCOMPARE(vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true).tcpFallbackRelay,
+                 QString("192.0.2.10/9443"));
+
+        const auto beforeInvalid = readLocalConfig();
+        auto object = QJsonDocument::fromJson(encoded).object();
+        object["tcpFallbackRelay"] = "192.0.2.10:9993";
+        const auto invalidPath = m_directory.filePath("invalid-relay.z2bundle");
+        QFile invalid(invalidPath); QVERIFY(invalid.open(QIODevice::WriteOnly));
+        invalid.write(QJsonDocument(object).toJson()); invalid.close();
+        controller.importConfiguration(QUrl::fromLocalFile(invalidPath));
+        QTest::qWait(120);
+        QCOMPARE(operations.operations, 2);
+        QCOMPARE(readLocalConfig(), beforeInvalid);
+        QVERIFY(controller.feedback().contains("tcpFallbackRelay"));
+#else
+        QSKIP("Script execution fixture is Windows-only");
+#endif
+    }
     void configurationImportOnlyJoinsAfterSuccessfulCopy() {
         DeferredOperations operations; AppController controller(nullptr,{},&operations,m_storage);
-        const auto bytes=vusiif::ztgui::zerotier::bundle::encode({"0123456789abcdef","0000000123456789.moon",QByteArray("signed-moon-bytes")});
-        QVERIFY(!bytes.isEmpty()); QFile source(m_directory.filePath("network.ztbundle")); QVERIFY(source.open(QIODevice::WriteOnly)); source.write(bytes); source.close();
+        const auto bytes=vusiif::zto::zerotier::bundle::encode({"0123456789abcdef","0000000123456789.moon",QByteArray("signed-moon-bytes")});
+        QVERIFY(!bytes.isEmpty()); QFile source(m_directory.filePath("network.z2bundle")); QVERIFY(source.open(QIODevice::WriteOnly)); source.write(bytes); source.close();
         const auto trace=m_directory.filePath("joins.txt"); qputenv("ZT_TEST_COMMAND_LOG",trace.toUtf8());
         controller.importConfiguration(QUrl::fromLocalFile(source.fileName())); QVERIFY(controller.busy()); QVERIFY(operations.script.contains("signed-moon-bytes")==false);
         QVERIFY(!QFileInfo::exists(trace)); operations.complete(false); QVERIFY(!QFileInfo::exists(trace)); QVERIFY(!controller.busy());

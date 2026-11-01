@@ -3,9 +3,9 @@
 #include <QLockFile>
 #include <QString>
 
-namespace vusiif::ztgui::storage {
+namespace vusiif::zto::storage {
 
-// Short-lived cross-process lock below <active root>/.ztgui. It serializes
+// Short-lived cross-process lock below <active root>/.zto. It serializes
 // lease checks/registration, migration metadata, file transactions and cache
 // cleanup. Lock order is always the install-directory package change lock
 // first, then this coordination lock; never acquire the package lock while
@@ -33,4 +33,4 @@ private:
 // processes for the same absolute file.
 QString cacheReadLockPath(const QString &metadataRoot, const QString &filePath);
 
-} // namespace vusiif::ztgui::storage
+} // namespace vusiif::zto::storage

@@ -15,7 +15,7 @@
 #include <QUrl>
 #include <memory>
 
-namespace vusiif::ztgui::ui {
+namespace vusiif::zto::ui {
 class AppController : public QObject {
     Q_OBJECT
     Q_PROPERTY(RecordModel *networks READ networks CONSTANT)
@@ -51,6 +51,10 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList plugins READ plugins NOTIFY menusChanged)
     Q_PROPERTY(QString activeMenu READ activeMenu NOTIFY activeMenuChanged)
     Q_PROPERTY(bool moonsActive READ moonsActive WRITE setMoonsActive NOTIFY stateChanged)
+    Q_PROPERTY(QVariantMap localConfig READ localConfig NOTIFY localConfigChanged)
+    Q_PROPERTY(QVariantList tcpFallbackServers READ tcpFallbackServers NOTIFY tcpFallbackServersChanged)
+    Q_PROPERTY(bool tcpFallbackServersBusy READ tcpFallbackServersBusy NOTIFY tcpFallbackServersChanged)
+    Q_PROPERTY(QString tcpFallbackServersMessage READ tcpFallbackServersMessage NOTIFY tcpFallbackServersChanged)
 public:
     explicit AppController(QObject *parent = nullptr, const QString &pluginDirectory = {},
                            SystemOperations *operations = nullptr,
@@ -104,6 +108,16 @@ public:
     QString activeMenu() const { return m_activeMenu; }
     bool moonsActive() const { return m_moonsActive; }
     void setMoonsActive(bool active);
+    QVariantMap localConfig() const;
+    QVariantList tcpFallbackServers() const { return m_tcpFallbackServers; }
+    bool tcpFallbackServersBusy() const { return m_tcpFallbackServersBusy; }
+    QString tcpFallbackServersMessage() const { return m_tcpFallbackServersMessage; }
+    Q_INVOKABLE void refreshLocalConfig();
+    Q_INVOKABLE void retryLocalConfig();
+    Q_INVOKABLE void setTcpFallbackSwitches(bool allow, bool force);
+    Q_INVOKABLE void refreshTcpFallbackServers();
+    Q_INVOKABLE void selectTcpFallbackServer(const QString &networkId);
+    Q_INVOKABLE void revealLocalConfig();
     void setWindow(QQuickWindow *window);
     void setVisible(bool visible);
     plugins::PluginRegistry *pluginRegistry() { return &m_registry; }
@@ -139,6 +153,8 @@ signals:
     void activeMenuChanged();
     void storageUsageChanged();
     void storageScanFinished();
+    void localConfigChanged();
+    void tcpFallbackServersChanged();
     void confirmationRequested(const QString &title, const QString &message, const QString &acceptLabel);
     void pluginNoticeRequested(const QString &title, const QString &message);
     void networkJoined();
@@ -159,6 +175,11 @@ private:
     QPointer<QQuickItem> m_page;
     QVariantMap m_info;
     QJsonDocument m_moonMetadata;
+    zerotier::localconfig::State m_localConfig;
+    QVariantList m_tcpFallbackServers;
+    QString m_localConfigPath, m_localConfigError, m_tcpFallbackServersMessage;
+    bool m_localConfigLoaded = false, m_localConfigBusy = false;
+    bool m_tcpFallbackServersBusy = false;
     zerotier::ServiceStatus m_serviceStatus;
     QString m_pluginDirectory, m_feedback, m_networkStatus, m_peerStatus, m_shutdownMessage, m_storageWarning;
     QVariantMap m_storageUsage;
@@ -205,7 +226,18 @@ private:
     void refreshMoonFiles();
     QString localName(const QString &kind, const QString &id, const QString &fallback = {}) const;
     void networkCommand(const QString &action, const QString &id, bool moonConfigured = false);
-    void importMoonFiles(const QStringList &sources, std::function<void(bool)> completed = {});
+    void importMoonFiles(const QStringList &sources, std::function<void(bool)> completed = {},
+                         const QString &tcpFallbackRelay = {});
+    void loadLocalConfig(bool allowElevation);
+    void beginElevatedLocalConfigRead();
+    void applyLocalConfig(const zerotier::localconfig::State &state, const QString &error);
+    void recoverLocalConfig(const QString &error);
+    bool currentLocalConfigForUpdate(zerotier::localconfig::State &state, QString &expectedHash, QString &error);
+    void writeLocalConfig(const QByteArray &content, const QString &expectedHash,
+                          std::function<void(bool, const QString &)> finished);
+    void applyTcpFallbackRelay(const QString &networkId, const QString &ip);
+    bool prepareImportRelay(const QString &display, const QString &directoryPath,
+                            zerotier::localconfig::Install &install, QByteArray &content, QString &error);
     QVariantMap details(const QString &kind, const QString &id) const;
 };
 }

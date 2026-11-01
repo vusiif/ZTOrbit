@@ -11,8 +11,8 @@
 #include <exception>
 #include <utility>
 
-namespace vusiif::ztgui::plugins {
-using namespace vusiif::ztgui::api;
+namespace vusiif::zto::plugins {
+using namespace vusiif::zto::api;
 namespace {
 bool validId(const QString &id)
 {
@@ -243,4 +243,4 @@ Result PluginRegistry::activateMenu(const QString &menuId, const std::function<v
     return {};
 }
 
-} // namespace vusiif::ztgui::plugins
+} // namespace vusiif::zto::plugins

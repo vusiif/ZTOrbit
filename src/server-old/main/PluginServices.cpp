@@ -9,12 +9,12 @@
 #include <QSaveFile>
 #include <QDateTime>
 #include <limits>
-namespace vusiif::ztgui::server {
-using util::FileResult;
-using util::LogResult;
-using util::LogLevel;
-using util::logLevelName;
-namespace log = util::log;
+namespace vusiif::ztohub {
+using vusiif::zto::util::FileResult;
+using vusiif::zto::util::LogResult;
+using vusiif::zto::util::LogLevel;
+using vusiif::zto::util::logLevelName;
+namespace log = vusiif::zto::util::log;
 namespace {
 QMutex fileMutex; // Serializes requests, including plugins using the same name.
 bool linked(const QFileInfo &info) { return info.isSymLink() || info.isJunction(); }
@@ -116,18 +116,18 @@ QObject *PluginServices::requestContext(QObject *context) {
     if(m_stopped || !context || QThread::currentThread()!=thread() || context->thread()!=thread()) return nullptr;
     auto *job=new QObject(&m_requests); connect(context,&QObject::destroyed,job,[job] { delete job; }); return job;
 }
-void PluginServices::sendDataTo(const QString &network,const QString &member,const QByteArray &data,QObject *context,util::SendCallback callback)
+void PluginServices::sendDataTo(const QString &network,const QString &member,const QByteArray &data,QObject *context,vusiif::zto::util::SendCallback callback)
 { broadcastDataTo(network,{member},data,context,std::move(callback)); }
-void PluginServices::broadcastDataTo(const QString &network,const QStringList &members,const QByteArray &data,QObject *context,util::SendCallback callback) {
-    if(auto *job=requestContext(context)) m_host.transport().send(m_id,network,members,data,false,job,[job,callback](const util::SendResult &r) { job->deleteLater(); if(callback) callback(r); });
+void PluginServices::broadcastDataTo(const QString &network,const QStringList &members,const QByteArray &data,QObject *context,vusiif::zto::util::SendCallback callback) {
+    if(auto *job=requestContext(context)) m_host.transport().send(m_id,network,members,data,false,job,[job,callback](const vusiif::zto::util::SendResult &r) { job->deleteLater(); if(callback) callback(r); });
 }
-void PluginServices::broadcastDataBalancedTo(const QString &network,const QStringList &members,const QByteArray &data,QObject *context,util::SendCallback callback) {
-    if(auto *job=requestContext(context)) m_host.transport().send(m_id,network,members,data,true,job,[job,callback](const util::SendResult &r) { job->deleteLater(); if(callback) callback(r); });
+void PluginServices::broadcastDataBalancedTo(const QString &network,const QStringList &members,const QByteArray &data,QObject *context,vusiif::zto::util::SendCallback callback) {
+    if(auto *job=requestContext(context)) m_host.transport().send(m_id,network,members,data,true,job,[job,callback](const vusiif::zto::util::SendResult &r) { job->deleteLater(); if(callback) callback(r); });
 }
-void PluginServices::getNetworkRelays(const QString &network,QObject *context,util::RelayCallback callback) {
-    if(auto *job=requestContext(context)) m_host.transport().relays(network,job,[job,callback](const util::RelayResult &r) { job->deleteLater(); if(callback) callback(r); });
+void PluginServices::getNetworkRelays(const QString &network,QObject *context,vusiif::zto::util::RelayCallback callback) {
+    if(auto *job=requestContext(context)) m_host.transport().relays(network,job,[job,callback](const vusiif::zto::util::RelayResult &r) { job->deleteLater(); if(callback) callback(r); });
 }
-util::NetworkSubscription *PluginServices::subscribeNetworkData(const QString &network,QObject *context,util::NetworkCallback callback) {
+vusiif::zto::util::NetworkSubscription *PluginServices::subscribeNetworkData(const QString &network,QObject *context,vusiif::zto::util::NetworkCallback callback) {
     auto *guard=requestContext(context); if(!guard) return nullptr;
     auto *sub=m_host.transport().subscribe(m_id,network,context,std::move(callback));
     if(sub) connect(guard,&QObject::destroyed,sub,[sub] { sub->cancel(); }); else delete guard;

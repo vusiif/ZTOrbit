@@ -1,14 +1,14 @@
 #pragma once
 
-#include <ztgui/PluginApi.h>
-#include <ztgui/PluginLifecycle.h>
+#include <zto/PluginApi.h>
+#include <zto/PluginLifecycle.h>
 #include <QObject>
 #include <QMap>
 #include <QPointer>
 #include <QQuickItem>
 #include <QQmlEngine>
 
-namespace vusiif::ztgui::plugins {
+namespace vusiif::zto::plugins {
 
 enum class PreparationState { Ready, Preparing, Failed, Stopping };
 
@@ -49,4 +49,4 @@ private:
     bool m_busy = false;
 };
 
-} // namespace vusiif::ztgui::plugins
+} // namespace vusiif::zto::plugins

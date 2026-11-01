@@ -8,7 +8,7 @@ ApplicationWindow {
     width: 460
     height: 190
     visible: true
-    title: "ZTGUI"
+    title: "Z2"
     color: Theme.window
     ColumnLayout {
         anchors.fill: parent

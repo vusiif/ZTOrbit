@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.21.1)
-project(ztgui_media VERSION 2.0.0 LANGUAGES C CXX)
+project(zto_media VERSION 2.0.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
-find_package(ZTGUIPluginApi 0.5 EXACT CONFIG REQUIRED)
-find_package(ZTGUIMediaApi 2 CONFIG REQUIRED)
-find_package(Qt6 6.8 REQUIRED COMPONENTS Network Gui Multimedia)
+find_package(ZTOrbitPluginApi 0.5 EXACT CONFIG REQUIRED)
+find_package(ZTOrbitMediaApi 2 CONFIG REQUIRED)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Network Gui Multimedia ZlibPrivate)
 include(engine-sdk/FFmpeg.cmake)
 add_subdirectory(engine-sdk)
 add_subdirectory(examples/flip)
@@ -18,15 +18,20 @@ set(BUILD_SHARED_LIBS OFF)
 FetchContent_Declare(opus URL https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz
     URL_HASH SHA256=6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1)
 FetchContent_MakeAvailable(opus)
-add_library(ztmedia_engine_runtime STATIC service/DeviceManager.cpp service/SessionEngine.cpp service/ClipPlayer.cpp service/VideoCodec.cpp)
-target_link_libraries(ztmedia_engine_runtime PUBLIC ZTGUI::MediaTypes ZTGUI::MediaEngine ZTGUI::Protocol Qt6::Multimedia Opus::opus
+add_library(ztmedia_engine_runtime STATIC service/DeviceManager.cpp service/SessionEngine.cpp service/ClipPlayer.cpp service/VideoCodec.cpp service/VideoCanvas.cpp service/TileCodec.cpp)
+target_link_libraries(ztmedia_engine_runtime PRIVATE Qt6::ZlibPrivate)
+if(WIN32)
+    target_sources(ztmedia_engine_runtime PRIVATE service/WindowsWindowCapture.cpp)
+    target_link_libraries(ztmedia_engine_runtime PRIVATE d3d11 dwmapi windowsapp)
+endif()
+target_link_libraries(ztmedia_engine_runtime PUBLIC ZTO::MediaTypes ZTO::MediaEngine ZTO::Protocol Qt6::Multimedia Opus::opus
     FFmpeg::avcodec FFmpeg::avformat FFmpeg::avfilter FFmpeg::avdevice FFmpeg::swscale FFmpeg::swresample)
-add_executable(ztgui_media_worker service/main.cpp)
-target_link_libraries(ztgui_media_worker PRIVATE ztmedia_engine_runtime)
-add_dependencies(ztgui_media_worker ztmedia_flip)
+add_executable(zto_media_worker service/main.cpp)
+target_link_libraries(zto_media_worker PRIVATE ztmedia_engine_runtime)
+add_dependencies(zto_media_worker ztmedia_flip)
 if(MSVC)
     target_compile_options(ztmedia_engine_runtime PRIVATE /utf-8 /permissive-)
-    target_compile_options(ztgui_media_worker PRIVATE /utf-8)
+    target_compile_options(zto_media_worker PRIVATE /utf-8)
 endif()
 include(cmake/BundleExtensions.cmake)
 set(runtime_files "runtime/bin/openh264.dll=${MEDIA_FFMPEG_ROOT}/bin/openh264.dll")
@@ -39,8 +44,8 @@ foreach(dll IN LISTS MEDIA_FFMPEG_DLLS)
         list(APPEND runtime_overrides "runtime/bin/${name}=${dll}")
     endif()
 endforeach()
-ztgui_package_plugin(ztgui_media_worker HOST client ID media NAME "媒体服务" VERSION "2.0.0"
-    API "${ZTGUI_API_VERSION}" IID "ztgui-service/1" SERVICE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/service-manifest.json"
+zto_package_plugin(zto_media_worker HOST client ID media NAME "媒体服务" VERSION "2.0.0"
+    API "${ZTO_API_VERSION}" IID "zto-service/1" SERVICE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/service-manifest.json"
     RUNTIME_QT_MODULES Gui Network Multimedia RUNTIME_FILES ${runtime_files} RUNTIME_OVERRIDE_FILES ${runtime_overrides}
     RESOURCE_FILES "extensions.json=${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/extensions.json" ${extension_resources}
     RUNTIME_PROVENANCE "${MEDIA_FFMPEG_ROOT}/actual-build.json"
@@ -49,7 +54,7 @@ ztgui_package_plugin(ztgui_media_worker HOST client ID media NAME "媒体服务"
       "licenses/FFmpeg/LICENSE.md=${MEDIA_FFMPEG_ROOT}/LICENSE.md"
       "licenses/FFmpeg/actual-build.json=${MEDIA_FFMPEG_ROOT}/actual-build.json"
       "licenses/OpenH264/LICENSE=${MEDIA_FFMPEG_ROOT}/LICENSE")
-install(FILES "$<TARGET_FILE_DIR:ztgui_media_worker>/ztgui_media_worker.ztplugin" DESTINATION plugins)
+install(FILES "$<TARGET_FILE_DIR:zto_media_worker>/$<TARGET_FILE_BASE_NAME:zto_media_worker>.z2plugin" DESTINATION plugins)
 option(MEDIA_BUILD_TESTS "Build media engine tests" OFF)
 if(MEDIA_BUILD_TESTS)
     enable_testing()

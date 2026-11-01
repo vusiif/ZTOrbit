@@ -6,7 +6,7 @@
 #include <QJsonDocument>
 #include <QSignalBlocker>
 #include <limits>
-namespace vusiif::ztgui::voice_chat {
+namespace vusiif::zto::voice_chat {
 VoiceSession::VoiceSession(std::shared_ptr<AudioDeviceCache> cache, QObject *parent) : QObject(parent), tcp(new QTcpSocket(this)), udp(new QUdpSocket(this)),
     heartbeat(new QTimer(this)), registration(new QTimer(this)), watchdog(new QTimer(this)), audio(new VoiceAudio(cache->audio.get(),this)), deviceCache(std::move(cache))
 {

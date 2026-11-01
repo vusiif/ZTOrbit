@@ -1,12 +1,12 @@
-#include <ztgui/PluginInterface.h>
-#include <ztgui/PluginLifecycle.h>
-#include <ztgui/PluginStop.h>
-#include <ztgui/PluginPage.h>
+#include <zto/PluginInterface.h>
+#include <zto/PluginLifecycle.h>
+#include <zto/PluginStop.h>
+#include <zto/PluginPage.h>
 #include <ztmedia/MediaSession.h>
 #include <ztmedia/VideoPreview.h>
 #include <QPointer>
 #include <stdexcept>
-using namespace vusiif::ztgui;
+using namespace vusiif::zto;
 class PreviewController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList sources MEMBER sourceRows NOTIFY changed)
@@ -155,9 +155,9 @@ class PreviewPlugin final : public QObject,
                             public api::PluginLifecycleInterface,
                             public api::PluginStopInterface {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID ZTGUI_PLUGIN_IID FILE "plugin.json")
-    Q_INTERFACES(vusiif::ztgui::api::PluginInterface vusiif::ztgui::api::PluginLifecycleInterface
-                     vusiif::ztgui::api::PluginStopInterface)
+    Q_PLUGIN_METADATA(IID ZTO_PLUGIN_IID FILE "plugin.json")
+    Q_INTERFACES(vusiif::zto::api::PluginInterface vusiif::zto::api::PluginLifecycleInterface
+                     vusiif::zto::api::PluginStopInterface)
     std::shared_ptr<media::MediaSession> session;
     QPointer<PreviewController> controller;
 

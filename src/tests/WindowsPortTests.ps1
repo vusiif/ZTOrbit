@@ -3,7 +3,7 @@ $scriptSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../client/mai
 $preflight = [regex]::Match($scriptSource, 'R"PS\((.*?)\)PS"', [Text.RegularExpressions.RegexOptions]::Singleline).Groups[1].Value
 if (!$preflight) { throw 'Port preflight script missing' }
 $originalProgramData = $env:ProgramData
-$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('ztgui-port-test-' + [guid]::NewGuid())
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('zto-port-test-' + [guid]::NewGuid())
 $env:ProgramData = $testRoot
 New-Item -ItemType Directory -Path (Join-Path $testRoot 'ZeroTier/One') -Force | Out-Null
 $configPath = Join-Path $testRoot 'ZeroTier/One/local.conf'
@@ -27,7 +27,7 @@ try {
     if ($config.settings.primaryPort -lt 20003 -or $config.settings.primaryPort -gt 29999) { throw 'Selected a reserved port' }
     if ($config.settings.allowTcpFallbackRelay -ne $false -or $config.extra.keep -ne 42) { throw 'Lost existing configuration' }
     if ($script:stops -ne 1) { throw 'Did not stop conflicting ZeroTier service' }
-    if (!(Test-Path -LiteralPath ($configPath + '.ztgui-backup'))) { throw 'Backup missing' }
+    if (!(Test-Path -LiteralPath ($configPath + '.zto-backup'))) { throw 'Backup missing' }
     $saved = Get-Content -LiteralPath $configPath -Raw
     $script:reserved = $false
     & ([scriptblock]::Create($preflight))
@@ -40,7 +40,7 @@ try {
 } finally {
     $env:ProgramData = $originalProgramData
     $resolved = [IO.Path]::GetFullPath($testRoot)
-    if (![IO.Path]::GetFileName($resolved).StartsWith('ztgui-port-test-') -or
+    if (![IO.Path]::GetFileName($resolved).StartsWith('zto-port-test-') -or
         [IO.Path]::GetDirectoryName($resolved) -ne [IO.Path]::GetTempPath().TrimEnd('\','/')) { throw 'Unsafe test cleanup' }
     Remove-Item -LiteralPath $resolved -Recurse -Force
 }

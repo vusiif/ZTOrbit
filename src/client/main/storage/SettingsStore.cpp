@@ -13,7 +13,7 @@
 #include <QSaveFile>
 #include <QSettings>
 
-namespace vusiif::ztgui::storage {
+namespace vusiif::zto::storage {
 namespace {
 QStringList exactWhitelist()
 {
@@ -77,7 +77,7 @@ QString statusText(QSettings::Status status)
 
 QSettings::Format sourceFormat()
 {
-#ifdef ZEROTIER_TESTING
+#ifdef ZTO_TESTING
     // Tests redirect the INI user scope; never touch the real registry.
     return QSettings::IniFormat;
 #else
@@ -259,6 +259,8 @@ SettingsMigrationResult SettingsStore::migrateLegacy(SettingsStore &target,
 
     result.attempted = true;
     const auto format = sourceFormat();
+    // Historical persisted identities are read-only migration sources. Keep
+    // their original names when changing the current application brand.
     QSettings current(format, QSettings::UserScope, QStringLiteral("ZeroTierGUI"), QStringLiteral("ZTGUI"));
     QSettings previous(format, QSettings::UserScope, QStringLiteral("ZeroTierGUI"), QStringLiteral("ZeroTier GUI"));
     QSettings *sources[]{&current, &previous};
@@ -319,4 +321,4 @@ SettingsMigrationResult SettingsStore::migrateLegacy(SettingsStore &target,
     return result;
 }
 
-} // namespace vusiif::ztgui::storage
+} // namespace vusiif::zto::storage

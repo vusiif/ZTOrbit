@@ -6,7 +6,7 @@
 #include <QJsonObject>
 
 namespace {
-using namespace vusiif::ztgui;
+using namespace vusiif::zto;
 using util::PluginFileSnapshot;
 using util::PluginFileUpdate;
 

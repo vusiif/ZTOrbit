@@ -3,7 +3,7 @@
 #include <QThread>
 #include <QtConcurrent/QtConcurrentRun>
 
-namespace vusiif::ztgui::storage {
+namespace vusiif::zto::storage {
 namespace {
 bool isCachePath(const QString &path)
 {
@@ -151,4 +151,4 @@ void StorageMaintenanceScheduler::handleFinished()
     }
 }
 
-} // namespace vusiif::ztgui::storage
+} // namespace vusiif::zto::storage

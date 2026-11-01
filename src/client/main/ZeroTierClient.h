@@ -1,4 +1,5 @@
 #pragma once
+#include "LocalConfig.h"
 #include <QElapsedTimer>
 
 #include <QObject>
@@ -12,7 +13,7 @@
 
 class QTemporaryDir;
 
-namespace vusiif::ztgui::zerotier {
+namespace vusiif::zto::zerotier {
 struct ServiceStatus { bool exists = false; bool running = false; bool known = true; };
 ServiceStatus serviceStatus();
 QString matchingMoonFile(const QString &networkId);
@@ -22,8 +23,10 @@ QString homeDirectory();
 QString systemHomeDirectory();
 QString moonDirectory();
 QString moonWriteDirectory();
+QString localConfigPath();
 QString wrapScript(const QString &commands);
-QString moonImportScript(const QList<QPair<QString, QString>> &files);
+QString moonImportScript(const QList<QPair<QString, QString>> &files,
+                         const localconfig::Install *localConfig = nullptr);
 QString moonDeleteScript(const QString &path);
 QString sessionRefreshScript();
 std::function<void(bool)> createServiceMonitor(QObject *owner);
@@ -68,4 +71,4 @@ private:
     void failed(const QString &message);
 };
 
-} // namespace vusiif::ztgui::zerotier
+} // namespace vusiif::zto::zerotier

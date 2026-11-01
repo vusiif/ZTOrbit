@@ -1,6 +1,6 @@
 #include "PluginPackage.h"
 #include "PluginRuntime.h"
-#include <ztgui/PluginInterface.h>
+#include <zto/PluginInterface.h>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -11,12 +11,12 @@
 #include <QProcess>
 #include <QStandardPaths>
 #include <QJsonObject>
-namespace vusiif::ztgui::package { QString writeLegacy(const QString &,const QString &,QJsonObject); }
-using namespace vusiif::ztgui::package;
+namespace vusiif::zto::package { QString writeLegacy(const QString &,const QString &,QJsonObject); }
+using namespace vusiif::zto::package;
 class PluginPackageTests : public QObject {
     Q_OBJECT
     QJsonObject info() const {
-        return {{"host","client"},{"id","test-dynamic"},{"name","Dynamic"},{"version","1"},{"apiVersion",QString::fromLatin1(vusiif::ztgui::api::ApiVersion)},{"iid","vusiif.ztgui.api.PluginInterface/3.0"}};
+        return {{"host","client"},{"id","test-dynamic"},{"name","Dynamic"},{"version","1"},{"apiVersion",QString::fromLatin1(vusiif::zto::api::ApiVersion)},{"iid","vusiif.zto.api.PluginInterface/3.0"}};
     }
     QJsonObject manifest(const QString &resource) const {
         return {{"files",QJsonArray{
@@ -30,6 +30,19 @@ class PluginPackageTests : public QObject {
     }
     QByteArray read(const QString &path) { QFile f(path); if(!f.open(QIODevice::ReadOnly)) return {}; return f.readAll(); }
 private slots:
+    void packageExtensionDoesNotChangeAuthenticatedContents() {
+        QTemporaryDir temp;
+        const auto resource=temp.filePath("data"),path=temp.filePath("test.z2plugin");
+        save(resource,"license");
+        QVERIFY(writeBundle(manifest(resource),path,info()).isEmpty());
+        QVERIFY(inspect(path).ok());
+        const auto oldPath=temp.filePath("test.ztplugin");
+        QVERIFY(QFile::copy(path,oldPath));
+        QVERIFY(!inspect(oldPath).ok());
+        const auto renamed=temp.filePath("renamed.Z2PLUGIN");
+        QVERIFY(QFile::rename(oldPath,renamed));
+        QVERIFY(inspect(renamed).ok());
+    }
     void linkedInputsAndLicenseDestinationsAreRejected() {
         QTemporaryDir temp; const auto real=temp.filePath("real"),link=temp.filePath("linked");
         QVERIFY(QDir().mkpath(real)); QVERIFY(QFile::copy(FIXTURE_LIBRARY,QDir(real).filePath("entry.dll")));
@@ -39,7 +52,7 @@ private slots:
 #else
         if(!QFile::link(real,link)) QSKIP("Cannot create a symlink");
 #endif
-        const auto data=temp.filePath("data"),path=temp.filePath("linked-test.ztplugin"); save(data,"license");
+        const auto data=temp.filePath("data"),path=temp.filePath("linked-test.z2plugin"); save(data,"license");
         auto bundle=manifest(data); auto files=bundle["files"].toArray(); auto item=files[0].toObject();
         item["source"]=QDir(link).filePath("entry.dll"); files[0]=item; bundle["files"]=files;
         QVERIFY(writeBundle(bundle,path,info()).contains("Linked"));
@@ -50,7 +63,7 @@ private slots:
     void dependencyClosureReuseAndConflicts() {
 #ifdef Q_OS_WIN
         QQuickItem hostQuickItem; // Model a host that actually links its declared Quick base runtime.
-        QTemporaryDir temp; const auto resource=temp.filePath("data"),path=temp.filePath("runtime.ztplugin"); save(resource,"x");
+        QTemporaryDir temp; const auto resource=temp.filePath("data"),path=temp.filePath("runtime.z2plugin"); save(resource,"x");
         auto bundle=manifest(resource); auto files=bundle["files"].toArray();
         files.append(QJsonObject{{"path","runtime/bin/zt_runtime_probe.dll"},{"role","runtime-library"},{"source",QString(RUNTIME_LIBRARY)}});
         bundle["files"]=files;
@@ -83,7 +96,7 @@ private slots:
     }
     void chunksAndEmptyFilesRoundTrip() {
         for(int size:{0,1,1024*1024,1024*1024+57}) {
-            QTemporaryDir temp; const auto resource=temp.filePath("data"),package=temp.filePath("test.ztplugin");
+            QTemporaryDir temp; const auto resource=temp.filePath("data"),package=temp.filePath("test.z2plugin");
             const QByteArray bytes(size,'x'); save(resource,bytes);
             const auto error=writeBundle(manifest(resource),package,info()); QVERIFY2(error.isEmpty(),qPrintable(error));
             const auto p=inspect(package); QVERIFY2(p.ok(),qPrintable(p.error)); QCOMPARE(p.info["formatVersion"].toInt(),2); QVERIFY(p.encrypted.isEmpty());
@@ -96,7 +109,7 @@ private slots:
         }
     }
     void authenticationAndExactSize() {
-        QTemporaryDir temp; const auto resource=temp.filePath("data"),path=temp.filePath("test.ztplugin");
+        QTemporaryDir temp; const auto resource=temp.filePath("data"),path=temp.filePath("test.z2plugin");
         save(resource,QByteArray(2*1024*1024+20,'x')); QVERIFY(writeBundle(manifest(resource),path,info()).isEmpty());
         const auto original=read(path); const auto length=qFromBigEndian<quint32>(reinterpret_cast<const uchar *>(original.constData()+6)); const int body=10+length;
         for(int index:{11,body,body+25,int(original.size()-1)}) {
@@ -118,7 +131,7 @@ private slots:
     void unsafePathsAndLimits() {
         for(const auto &path:{"../x","/x","C:/x","a//b","a/./b","a/../b","a\\b","a:b","con","NUL.txt","x.","x ","a/LPT1.dll","a/<x"}) QVERIFY2(!safeRelativePath(path).isEmpty(),path);
         QVERIFY(safeRelativePath("licenses/组件.txt").isEmpty());
-        QTemporaryDir temp; const auto resource=temp.filePath("data"),path=temp.filePath("test.ztplugin");
+        QTemporaryDir temp; const auto resource=temp.filePath("data"),path=temp.filePath("test.z2plugin");
         save(resource,"x"); QVERIFY(writeBundle(manifest(resource),path,info()).isEmpty()); auto p=inspect(path); QVERIFY(p.ok());
         for(const auto &bad:{"../escape","assets/DATA.bin","assets/data.bin/child"}) {
             auto info=p.info; auto files=info["files"].toArray(); auto item=files[2].toObject(); item["path"]=bad; item["role"]="resource"; files[2]=item; info["files"]=files;
@@ -131,14 +144,14 @@ private slots:
         while(files.size()<513) files.append(files[1]); info["files"]=files; QVERIFY(!validBundle(info).isEmpty());
     }
     void legacyStillLoads() {
-        QTemporaryDir temp; const auto path=temp.filePath("legacy.ztplugin"); const auto error=writeLegacy(FIXTURE_LIBRARY,path,info()); QVERIFY2(error.isEmpty(),qPrintable(error));
+        QTemporaryDir temp; const auto path=temp.filePath("legacy.z2plugin"); const auto error=writeLegacy(FIXTURE_LIBRARY,path,info()); QVERIFY2(error.isEmpty(),qPrintable(error));
         const auto p=inspect(path); QVERIFY2(p.ok(),qPrintable(p.error)); QCOMPARE(p.info["formatVersion"].toInt(),1);
         std::unique_ptr<QTemporaryDir> directory; std::unique_ptr<QLockFile> lock; QString entry;
         QVERIFY(extract(p,directory,entry,lock).isEmpty()); QCOMPARE(read(entry),read(FIXTURE_LIBRARY));
     }
     void legacyIgnoresBundleFieldsAndUsesProvidedHostFiles() {
 #ifdef Q_OS_WIN
-        QTemporaryDir temp; const auto data=temp.filePath("data"),path=temp.filePath("legacy-deps.ztplugin"); save(data,"license");
+        QTemporaryDir temp; const auto data=temp.filePath("data"),path=temp.filePath("legacy-deps.z2plugin"); save(data,"license");
         QVERIFY(writeBundle(manifest(data),path,info()).isEmpty()); auto p=inspect(path); QVERIFY(p.ok());
         auto legacyInfo=p.info; auto legacyManifest=legacyInfo["files"].toArray();
         legacyManifest.append(QJsonObject{{"path","../../outside.dll"},{"role","runtime-library"},{"size",1},{"sha256",QString(64,'0')}});
@@ -158,7 +171,7 @@ private slots:
     }
     void cacheSessionOwnershipAndCrashRecovery() {
         QStandardPaths::setTestModeEnabled(true);
-        QCoreApplication::setOrganizationName("ZTGUI-Package-Tests");
+        QCoreApplication::setOrganizationName("ZTOrbit-Package-Tests");
         QCoreApplication::setApplicationName("PluginPackageTests");
         QTemporaryDir directory; QVERIFY(directory.isValid());
         const auto root = [&directory](const QString &run) {

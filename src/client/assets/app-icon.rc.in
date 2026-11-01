@@ -2,7 +2,7 @@
 #define IDI_APP_ICON 101
 
 // Explorer, shortcuts and the UAC prompt use this embedded application icon.
-IDI_APP_ICON ICON "@ZTGUI_ROOT_DIR@/src/client/assets/app-icon.ico"
+IDI_APP_ICON ICON "@ZTO_ROOT_DIR@/src/client/assets/app-icon.ico"
 
 #include <winver.h>
 VS_VERSION_INFO VERSIONINFO
@@ -18,12 +18,12 @@ BEGIN
     BEGIN
         BLOCK "040904B0"
         BEGIN
-            VALUE "FileDescription", "ZTGUI\0"
-            VALUE "FileVersion", "@ZEROTIER_VERSION@\0"
-            VALUE "InternalName", "ZTGUI\0"
-            VALUE "OriginalFilename", "ZTGUI.exe\0"
-            VALUE "ProductName", "ZTGUI\0"
-            VALUE "ProductVersion", "@ZEROTIER_VERSION@\0"
+            VALUE "FileDescription", "Z2\0"
+            VALUE "FileVersion", "@ZTO_VERSION@\0"
+            VALUE "InternalName", "ZTOrbit\0"
+            VALUE "OriginalFilename", "Z2.exe\0"
+            VALUE "ProductName", "Z2\0"
+            VALUE "ProductVersion", "@ZTO_VERSION@\0"
         END
     END
     BLOCK "VarFileInfo"

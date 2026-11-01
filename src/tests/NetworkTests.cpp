@@ -5,7 +5,7 @@
 #include <QNetworkInterface>
 #include <QtTest>
 
-using namespace vusiif::ztgui;
+using namespace vusiif::zto;
 class NetworkTests : public QObject {
     Q_OBJECT
 private slots:

@@ -1,6 +1,6 @@
 #pragma once
 #include <QString>
-namespace vusiif::ztgui::util {
+namespace vusiif::zto::util {
 enum class LogLevel { Debug, Info, Warning, Error };
 struct LogResult {
     QString hostError;

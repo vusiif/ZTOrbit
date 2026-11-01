@@ -6,9 +6,9 @@
 #include <QString>
 #include <QStringList>
 
-#include <ztgui/PluginStorage.h>
+#include <zto/PluginStorage.h>
 
-namespace vusiif::ztgui::voice_chat {
+namespace vusiif::zto::voice_chat {
 // Voice owns its business format. config.json is versioned independently from
 // the host application version.
 struct VoiceConfig {

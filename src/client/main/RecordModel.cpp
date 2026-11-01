@@ -2,7 +2,7 @@
 #include <QSet>
 #include <algorithm>
 
-namespace vusiif::ztgui::ui {
+namespace vusiif::zto::ui {
 QHash<int, QByteArray> RecordModel::roleNames() const
 {
     static const QHash<int, QByteArray> roles{{RowId, "rowId"}, {Name, "name"}, {Cells, "cells"}, {Details, "details"},

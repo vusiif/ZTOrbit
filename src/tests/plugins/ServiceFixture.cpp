@@ -1,19 +1,19 @@
-#include <ztgui/PluginInterface.h>
-#include <ztgui/PluginLifecycle.h>
-#include <ztgui/PluginStop.h>
-#include <ztgui/PluginServices.h>
+#include <zto/PluginInterface.h>
+#include <zto/PluginLifecycle.h>
+#include <zto/PluginStop.h>
+#include <zto/PluginServices.h>
 #include <QQuickItem>
 #include <QTimer>
 #include <QFile>
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <stdexcept>
-using namespace vusiif::ztgui;
-static void trace(const QByteArray &value) { const auto path=qEnvironmentVariable("ZTGUI_SERVICE_TRACE"); if(path.isEmpty()) return; QFile f(path); if(f.open(QIODevice::WriteOnly|QIODevice::Append)) { f.write(value); f.write("\n"); } }
+using namespace vusiif::zto;
+static void trace(const QByteArray &value) { const auto path=qEnvironmentVariable("ZTO_SERVICE_TRACE"); if(path.isEmpty()) return; QFile f(path); if(f.open(QIODevice::WriteOnly|QIODevice::Append)) { f.write(value); f.write("\n"); } }
 class ServiceFixture final : public QObject,public api::PluginInterface,public api::PluginLifecycleInterface,public api::PluginStopInterface {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID ZTGUI_PLUGIN_IID FILE "service-fixture.json")
-    Q_INTERFACES(vusiif::ztgui::api::PluginInterface vusiif::ztgui::api::PluginLifecycleInterface vusiif::ztgui::api::PluginStopInterface)
+    Q_PLUGIN_METADATA(IID ZTO_PLUGIN_IID FILE "service-fixture.json")
+    Q_INTERFACES(vusiif::zto::api::PluginInterface vusiif::zto::api::PluginLifecycleInterface vusiif::zto::api::PluginStopInterface)
     std::shared_ptr<util::ServiceLease> lease;
     bool rejectionEntered=false;
     void flood(bool closeNow) {
@@ -39,7 +39,7 @@ public:
         QString error; lease=access->pluginServices().acquire("fixture-provider",FIXTURE_SERVICE_NAME,"1",&error);
         if(!lease) throw std::runtime_error(error.toStdString());
         ping();
-        if(qEnvironmentVariable("ZTGUI_SERVICE_INIT_FAIL")==FIXTURE_SERVICE_ID) return [] { return api::CreateResult{false,"fixture init failed"}; };
+        if(qEnvironmentVariable("ZTO_SERVICE_INIT_FAIL")==FIXTURE_SERVICE_ID) return [] { return api::CreateResult{false,"fixture init failed"}; };
         return {};
     }
     Q_INVOKABLE void ping() {
@@ -52,7 +52,7 @@ public:
     Q_INVOKABLE void canceledRejections() { flood(true); }
     void requestStop(QObject *context,std::function<void(api::CreateResult)> completed) override {
         trace("stop:" FIXTURE_SERVICE_ID);
-        if(qEnvironmentVariable("ZTGUI_SERVICE_STOP_FAIL")==FIXTURE_SERVICE_ID) { completed({false,"fixture stop failed"}); return; }
+        if(qEnvironmentVariable("ZTO_SERVICE_STOP_FAIL")==FIXTURE_SERVICE_ID) { completed({false,"fixture stop failed"}); return; }
         // Exercise a genuinely asynchronous stop while pages and DLL are retained.
         QTimer::singleShot(80,context,[this,context,completed] {
             lease->close(context,[completed](const util::ServiceResult &r) { completed({r.ok(),r.error}); });

@@ -134,7 +134,7 @@ class ServerTests(unittest.TestCase):
                 self.fail("--jar is required when --binary is a launcher script")
             launcher = root/"start-server.sh"
             shutil.copyfile(OPTIONS.binary, launcher)
-            shutil.copyfile(OPTIONS.jar, root/"zt-server.jar")
+            shutil.copyfile(OPTIONS.jar, root/"Z2Hub.jar")
             return ["/bin/bash",str(launcher)]
         if OPTIONS.binary:
             return [str(Path(OPTIONS.binary).resolve())]
@@ -258,8 +258,8 @@ def java():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--binary", help="zt-server.jar, start-server.sh or native server binary")
-    parser.add_argument("--jar", help="zt-server.jar used with --binary start-server.sh")
+    parser.add_argument("--binary", help="Z2Hub.jar, start-server.sh or native server binary")
+    parser.add_argument("--jar", help="Z2Hub.jar used with --binary start-server.sh")
     parser.add_argument("--plugin", help="voice plugin jar or a directory containing it")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=18100)

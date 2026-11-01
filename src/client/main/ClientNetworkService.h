@@ -7,9 +7,9 @@
 #include <ztprotocol/NetworkService.h>
 #include <functional>
 #include <memory>
-namespace vusiif::ztgui::network { class NetworkTransport; }
-namespace vusiif::ztgui::zerotier { class JsonPoller; }
-namespace vusiif::ztgui::network {
+namespace vusiif::zto::network { class NetworkTransport; }
+namespace vusiif::zto::zerotier { class JsonPoller; }
+namespace vusiif::zto::network {
 class ClientNetworkService final : public QObject {
 public:
     static ClientNetworkService &instance();

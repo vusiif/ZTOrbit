@@ -4,7 +4,7 @@
 #include <QJsonObject>
 #include <QtEndian>
 
-namespace vusiif::ztgui::voice_chat {
+namespace vusiif::zto::voice_chat {
 inline constexpr int ProtocolVersion = 1;
 inline constexpr quint16 DefaultPort = 18100;
 inline constexpr int MaxControlBytes = 65536;

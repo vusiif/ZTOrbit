@@ -9,7 +9,7 @@
 #include <QRegularExpression>
 #include <memory>
 
-namespace vusiif::ztgui::zerotier {
+namespace vusiif::zto::zerotier {
 void requestMembers(QObject *context, const QHostAddress &server, const QString &networkId,
                     util::JsonCallback completed) {
     auto *job = new QObject(context);

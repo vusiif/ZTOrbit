@@ -44,11 +44,11 @@
 #endif
 
 #include "SystemOperations.h"
-using namespace vusiif::ztgui::api;
-using namespace vusiif::ztgui::util;
-using namespace vusiif::ztgui::plugins;
-using namespace vusiif::ztgui::storage;
-using namespace vusiif::ztgui::ui;
+using namespace vusiif::zto::api;
+using namespace vusiif::zto::util;
+using namespace vusiif::zto::plugins;
+using namespace vusiif::zto::storage;
+using namespace vusiif::zto::ui;
 static QString serviceMocks()
 {
 #ifdef Q_OS_MACOS
@@ -85,7 +85,7 @@ public:
         QProcess process;
         process.start("/bin/sh", {file.fileName()});
 #else
-        const auto invocation = vusiif::ztgui::zerotier::preparePowerShell(serviceMocks() + script);
+        const auto invocation = vusiif::zto::zerotier::preparePowerShell(serviceMocks() + script);
         QProcess process;
         process.start("powershell.exe", invocation.arguments);
 #endif
@@ -107,7 +107,7 @@ class CoreTests : public QObject {
 private slots:
     void initTestCase() {
         QVERIFY(m_settings.isValid());
-        QCoreApplication::setOrganizationName("ZeroTierGUI-Tests");
+        QCoreApplication::setOrganizationName("ZTOrbit-Tests");
         QCoreApplication::setApplicationName("RegressionTests");
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settings.path());
@@ -118,7 +118,7 @@ private slots:
         qputenv("ZT_TEST_DATA_DIRECTORY", (m_settings.path() + "/ZeroTier").toLocal8Bit());
 #endif
         qputenv("PATH", QCoreApplication::applicationDirPath().toLocal8Bit() + QDir::listSeparator().toLatin1() + m_oldPath);
-        QVERIFY(vusiif::ztgui::zerotier::executable().startsWith(QCoreApplication::applicationDirPath()));
+        QVERIFY(vusiif::zto::zerotier::executable().startsWith(QCoreApplication::applicationDirPath()));
     }
     void cleanup() {
         qunsetenv("ZT_TEST_MODE");
@@ -136,10 +136,10 @@ private slots:
         QTemporaryDir directory; const auto path=directory.filePath("queries.log");
         qputenv("ZT_TEST_QUERY_LOG",path.toUtf8()); qputenv("ZT_TEST_MODE","empty");
         const auto queries=[&] { QFile file(path); return file.open(QIODevice::ReadOnly)?file.readAll():QByteArray(); };
-        auto &service=vusiif::ztgui::network::ClientNetworkService::instance();
+        auto &service=vusiif::zto::network::ClientNetworkService::instance();
         QTest::qWait(1200); QVERIFY(queries().isEmpty());
         auto *context=new QObject; bool invoked=false;
-        service.withTransport(context,[&](vusiif::ztgui::network::NetworkTransport &) { invoked=true; });
+        service.withTransport(context,[&](vusiif::zto::network::NetworkTransport &) { invoked=true; });
         QTRY_VERIFY(invoked); QVERIFY(queries().contains("info")); QVERIFY(queries().contains("listnetworks"));
         delete context; QTest::qWait(150); const auto idle=queries(); QTest::qWait(1300); QCOMPARE(queries(),idle);
         QObject parent;
@@ -150,11 +150,11 @@ private slots:
         QTRY_VERIFY(queries().size()>one.size()); // The second subscription retains background polling.
         second->cancel(); QTest::qWait(150); const auto stopped=queries(); QTest::qWait(1300); QCOMPARE(queries(),stopped);
         qputenv("ZT_TEST_MODE","slow"); bool cancelled=false; auto *pending=new QObject;
-        service.withTransport(pending,[&](vusiif::ztgui::network::NetworkTransport &) { cancelled=true; });
+        service.withTransport(pending,[&](vusiif::zto::network::NetworkTransport &) { cancelled=true; });
         QTRY_VERIFY(queries().contains("slow|")); delete pending; QTest::qWait(150);
         QVERIFY(!cancelled);
         qputenv("ZT_TEST_MODE","empty"); auto *resumed=new QObject; bool ready=false;
-        service.withTransport(resumed,[&](vusiif::ztgui::network::NetworkTransport &) { ready=true; });
+        service.withTransport(resumed,[&](vusiif::zto::network::NetworkTransport &) { ready=true; });
         QTRY_VERIFY(ready); delete resumed; QTest::qWait(150);
     }
     void pluginNetworkRequestsReleaseDemandAfterCompletionAndUnload() {
@@ -172,17 +172,17 @@ private slots:
     }
     void pluginSubscriptionReceivesDataAndClosesIdleSocket() {
         qputenv("ZT_TEST_MODE","members");
-        QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost,vusiif::ztgui::protocol::NetworkPort));
+        QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost,vusiif::zto::protocol::NetworkPort));
         connect(&server,&QTcpServer::newConnection,this,[&] {
             auto *socket=server.nextPendingConnection(); auto input=std::make_shared<QByteArray>();
             connect(socket,&QTcpSocket::readyRead,socket,[socket,input] {
-                *input+=socket->readAll(); vusiif::ztgui::protocol::Packet packet;
-                if(vusiif::ztgui::protocol::takeFrame(*input,packet)!=vusiif::ztgui::protocol::ReadResult::Packet) return;
+                *input+=socket->readAll(); vusiif::zto::protocol::Packet packet;
+                if(vusiif::zto::protocol::takeFrame(*input,packet)!=vusiif::zto::protocol::ReadResult::Packet) return;
                 const auto request=QJsonDocument::fromJson(packet.payload).object();
                 const QJsonArray members{QJsonObject{{"nodeId","0123456789"},{"authorized",true},{"ipAssignments",QJsonArray{"127.0.0.2"}}},
                     QJsonObject{{"nodeId","abcdef0123"},{"authorized",true},{"ipAssignments",QJsonArray{"127.0.0.3"}}}};
                 const QJsonValue data=request["op"]=="controller.members"?QJsonValue(members):QJsonValue(QJsonObject{});
-                socket->write(vusiif::ztgui::protocol::frame("builtin",QJsonDocument(QJsonObject{{"v",1},{"id",1},{"ok",true},{"data",data}}).toJson(QJsonDocument::Compact)));
+                socket->write(vusiif::zto::protocol::frame("builtin",QJsonDocument(QJsonObject{{"v",1},{"id",1},{"ok",true},{"data",data}}).toJson(QJsonDocument::Compact)));
             });
             connect(socket,&QTcpSocket::disconnected,socket,&QObject::deleteLater);
         });
@@ -190,19 +190,19 @@ private slots:
         int received=0; auto *sub=host.subscribeNetworkData("0123456789abcdef",&context,[&](const NetworkMessage &message) { QCOMPARE(message.data,QByteArray("background")); ++received; }); QVERIFY(sub);
         bool ready=false; host.getNetworkRelays("0123456789abcdef",&context,[&](const RelayResult &result) { QVERIFY(result.ok()); ready=true; }); QTRY_VERIFY(ready);
         QUdpSocket sender; QVERIFY(sender.bind(QHostAddress("127.0.0.3"),0));
-        const auto payload=vusiif::ztgui::protocol::encodeDelivery({"0123456789abcdef","abcdef0123","0123456789","idle-fixture",QByteArray(16,'a'),"background"});
-        sender.writeDatagram(payload,QHostAddress("127.0.0.2"),vusiif::ztgui::protocol::ClientNetworkPort);
+        const auto payload=vusiif::zto::protocol::encodeDelivery({"0123456789abcdef","abcdef0123","0123456789","idle-fixture",QByteArray(16,'a'),"background"});
+        sender.writeDatagram(payload,QHostAddress("127.0.0.2"),vusiif::zto::protocol::ClientNetworkPort);
         QTRY_COMPARE(received,1); sub->cancel(); QTRY_VERIFY(!host.hasCallbacks()); QTest::qWait(100);
         QUdpSocket replacement;
-        QTRY_VERIFY(replacement.state()==QAbstractSocket::BoundState || replacement.bind(QHostAddress("127.0.0.2"),vusiif::ztgui::protocol::ClientNetworkPort));
+        QTRY_VERIFY(replacement.state()==QAbstractSocket::BoundState || replacement.bind(QHostAddress("127.0.0.2"),vusiif::zto::protocol::ClientNetworkPort));
     }
     void pausedSlowPollerResumesWithoutReportingFailure() {
         QTemporaryDir directory; const auto path=directory.filePath("queries.log");
         qputenv("ZT_TEST_QUERY_LOG",path.toUtf8()); qputenv("ZT_TEST_MODE","slow");
         const auto queries=[&] { QFile file(path); return file.open(QIODevice::ReadOnly)?file.readAll():QByteArray(); };
-        vusiif::ztgui::zerotier::JsonPoller poller(this,"info",true);
-        QSignalSpy updated(&poller,&vusiif::ztgui::zerotier::JsonPoller::updated);
-        QSignalSpy availability(&poller,&vusiif::ztgui::zerotier::JsonPoller::availabilityChanged);
+        vusiif::zto::zerotier::JsonPoller poller(this,"info",true);
+        QSignalSpy updated(&poller,&vusiif::zto::zerotier::JsonPoller::updated);
+        QSignalSpy availability(&poller,&vusiif::zto::zerotier::JsonPoller::availabilityChanged);
         poller.setActive(true); QTRY_VERIFY(queries().contains("slow|"));
         poller.setActive(false); qputenv("ZT_TEST_MODE","empty"); poller.setActive(true);
         QTRY_VERIFY_WITH_TIMEOUT(!updated.isEmpty(),3000);
@@ -211,25 +211,28 @@ private slots:
     }
     void pluginImportIsAtomicAndDoesNotOverwrite() {
         QTemporaryDir directory;
-const QString name = "example.ztplugin";
+        const QString name = "example.z2plugin";
         QFile source(directory.filePath(name));
         QVERIFY(source.open(QIODevice::WriteOnly)); source.write("plugin bytes"); source.close();
         const auto target = directory.filePath("plugins");
-        QVERIFY(vusiif::ztgui::plugins::importPlugin(source.fileName(),target).isEmpty());
+        QVERIFY(vusiif::zto::plugins::importPlugin(source.fileName(),target).isEmpty());
         QFile installed(QDir(target).filePath(name)); QVERIFY(installed.open(QIODevice::ReadOnly));
         QCOMPARE(installed.readAll(),QByteArray("plugin bytes")); installed.close();
-        QVERIFY(!vusiif::ztgui::plugins::importPlugin(source.fileName(),target).isEmpty());
-        QVERIFY(!vusiif::ztgui::plugins::importPlugin(directory.filePath("missing.dll"),target).isEmpty());
+        QVERIFY(!vusiif::zto::plugins::importPlugin(source.fileName(),target).isEmpty());
+        QVERIFY(!vusiif::zto::plugins::importPlugin(directory.filePath("missing.dll"),target).isEmpty());
+        const auto oldName=directory.filePath("old.ztplugin");
+        QVERIFY(QFile::copy(source.fileName(),oldName));
+        QVERIFY(!vusiif::zto::plugins::importPlugin(oldName,target).isEmpty());
         QFile blocker(directory.filePath("blocked")); QVERIFY(blocker.open(QIODevice::WriteOnly)); blocker.close();
-        QVERIFY(!vusiif::ztgui::plugins::importPlugin(source.fileName(),blocker.fileName()).isEmpty());
+        QVERIFY(!vusiif::zto::plugins::importPlugin(source.fileName(),blocker.fileName()).isEmpty());
     }
 
     void pluginLogsWriteBothSinksAndReportPartialFailure() {
         QTemporaryDir directory;
-        vusiif::ztgui::util::HostServicesImpl host(QStringLiteral("测试插件"),directory.path(),"test-logger");
+        vusiif::zto::util::HostServicesImpl host(QStringLiteral("测试插件"),directory.path(),"test-logger");
         std::vector<std::future<bool>> tasks;
         for (int i=0;i<4;++i) tasks.push_back(std::async(std::launch::async,[&host,i] {
-            for (int j=0;j<20;++j) if (!host.logs().write(vusiif::ztgui::util::LogLevel::Info,QString("concurrent-%1-%2").arg(i).arg(j)).ok()) return false;
+            for (int j=0;j<20;++j) if (!host.logs().write(vusiif::zto::util::LogLevel::Info,QString("concurrent-%1-%2").arg(i).arg(j)).ok()) return false;
             return true;
         }));
         for (auto &task:tasks) QVERIFY(task.get());
@@ -238,15 +241,15 @@ const QString name = "example.ztplugin";
         QFile plugin(logs.filePath(logs.entryList({"*.log"},QDir::Files).first()));
         QVERIFY(plugin.open(QIODevice::ReadOnly)); const auto entries = plugin.readAll();
         QCOMPARE(entries.count("[test-logger]"),80);
-        QFile main(vusiif::ztgui::util::log::path()); QVERIFY(main.open(QIODevice::ReadOnly));
+        QFile main(vusiif::zto::util::log::path()); QVERIFY(main.open(QIODevice::ReadOnly));
         QVERIFY(main.readAll().contains("[test-logger] concurrent-3-19"));
         // A display name is UI metadata only, so an unusable data root must be
         // what makes the plugin log sink fail while the host log still works.
         const auto blockedDataRoot = directory.filePath("blocked-data-root");
         { QFile blocker(blockedDataRoot); QVERIFY(blocker.open(QIODevice::WriteOnly)); }
-        vusiif::ztgui::util::HostServicesImpl invalid(QStringLiteral("部分失败"), blockedDataRoot, "test-partial");
+        vusiif::zto::util::HostServicesImpl invalid(QStringLiteral("部分失败"), blockedDataRoot, "test-partial");
         QVERIFY(!invalid.storageReady());
-        const auto result=invalid.logs().write(vusiif::ztgui::util::LogLevel::Warning,"partial-sink-probe");
+        const auto result=invalid.logs().write(vusiif::zto::util::LogLevel::Warning,"partial-sink-probe");
         QVERIFY(result.hostError.isEmpty()); QVERIFY(!result.pluginError.isEmpty());
         QVERIFY(!QFileInfo::exists(QDir(directory.path()).filePath(QStringLiteral("部分失败"))));
     }
@@ -297,7 +300,7 @@ const QString name = "example.ztplugin";
         QCOMPARE(original.count(QStringLiteral("应用启动").toUtf8()), 1);
         QVERIFY(original.contains(QStringLiteral("日志测试：中文").toUtf8()));
         QVERIFY(original.contains("WARN captured warning"));
-        QVERIFY(original.contains("ZTGUI v" ZEROTIER_GUI_VERSION));
+        QVERIFY(original.contains("ZTOrbit v" ZTO_VERSION));
         QCOMPARE(runProbe(), logs.filePath(date + "-2.log"));
         QVERIFY(first.open(QIODevice::ReadOnly));
         QCOMPARE(first.readAll(), original);
@@ -374,17 +377,17 @@ const QString name = "example.ztplugin";
         QCOMPARE(notified, QStringList{"cache/item.bin"});
         QVERIFY(host.files().writeFile("config.json", "config").ok());
         QCOMPARE(notified.size(), 1);
-        auto *storage = dynamic_cast<vusiif::ztgui::util::PluginStorage *>(&host.files());
+        auto *storage = dynamic_cast<vusiif::zto::util::PluginStorage *>(&host.files());
         QVERIFY(storage);
         const auto changed = storage->updateFile("cache/item.bin",
-            [](const vusiif::ztgui::util::PluginFileSnapshot &) {
-                return vusiif::ztgui::util::PluginFileUpdate::replace("two");
+            [](const vusiif::zto::util::PluginFileSnapshot &) {
+                return vusiif::zto::util::PluginFileUpdate::replace("two");
             });
         QVERIFY(changed.ok);
         QCOMPARE(notified, (QStringList{"cache/item.bin", "cache/item.bin"}));
         const auto kept = storage->updateFile("cache/item.bin",
-            [](const vusiif::ztgui::util::PluginFileSnapshot &) {
-                return vusiif::ztgui::util::PluginFileUpdate::keep();
+            [](const vusiif::zto::util::PluginFileSnapshot &) {
+                return vusiif::zto::util::PluginFileUpdate::keep();
             });
         QVERIFY(kept.ok);
         QCOMPARE(notified.size(), 2);
@@ -395,7 +398,7 @@ const QString name = "example.ztplugin";
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const auto dataRoot = directory.filePath("plugins-data");
-        const auto metadataRoot = directory.filePath(".ztgui");
+        const auto metadataRoot = directory.filePath(".zto");
         HostServicesImpl host(QStringLiteral("缓存读取"), dataRoot, "cache-reader", metadataRoot, "run", "user");
         QVERIFY2(host.storageReady(), qPrintable(host.storageError()));
         const QByteArray payload(512 * 1024, 'x');
@@ -406,8 +409,8 @@ const QString name = "example.ztplugin";
             QVERIFY(file.open(QIODevice::ReadWrite));
             QVERIFY(file.setFileTime(QDateTime::currentDateTime().addDays(-8), QFileDevice::FileModificationTime));
         }
-        const auto context = vusiif::ztgui::storage::StorageContext::forTesting(directory.path());
-        vusiif::ztgui::storage::StorageMaintenance maintenance(context);
+        const auto context = vusiif::zto::storage::StorageContext::forTesting(directory.path());
+        vusiif::zto::storage::StorageMaintenance maintenance(context);
         std::atomic<bool> stop{false};
         std::atomic<int> unexpected{0};
         std::atomic<int> reads{0};
@@ -441,7 +444,7 @@ const QString name = "example.ztplugin";
     }
 
     void pluginFilesUseDataRootAndRejectEscapes() {
-        using namespace vusiif::ztgui::api;
+        using namespace vusiif::zto::api;
         QTemporaryDir directory; QVERIFY(directory.isValid());
         HostServicesImpl services("chat", directory.filePath("plugins-data"), "chat");
         QVERIFY2(services.storageReady(), qPrintable(services.storageError()));
@@ -512,7 +515,7 @@ const QString name = "example.ztplugin";
     }
 
     void pluginStorageUsesStableIdAndCoordinatesTransactions() {
-        using namespace vusiif::ztgui::util;
+        using namespace vusiif::zto::util;
         QTemporaryDir directory; QVERIFY(directory.isValid());
         HostServicesImpl host(QStringLiteral("测试插件"), directory.filePath("plugins-data"), "plugin-id");
         QVERIFY2(host.storageReady(), qPrintable(host.storageError()));
@@ -586,12 +589,12 @@ const QString name = "example.ztplugin";
         QVERIFY(!storage->legacyImportAllowed().allowed);
         QVERIFY(storage->completeLegacyImport().ok());
         // Host-owned metadata lives under the root, outside plugin data.
-        QVERIFY(QFileInfo::exists(QDir(directory.path()).filePath(".ztgui/plugins/plugin-id.json")));
+        QVERIFY(QFileInfo::exists(QDir(directory.path()).filePath(".zto/plugins/plugin-id.json")));
     }
 
     void pendingMigrationBlocksConsumerInitializationUntilRetry()
     {
-        using namespace vusiif::ztgui::util;
+        using namespace vusiif::zto::util;
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const auto shared = directory.filePath("application");
@@ -678,7 +681,7 @@ const QString name = "example.ztplugin";
 
     void pluginStorageUpdatesAreAtomicAcrossProcesses() {
 #ifdef STORAGE_UPDATE_PROBE
-        using namespace vusiif::ztgui::util;
+        using namespace vusiif::zto::util;
         QTemporaryDir directory; QVERIFY(directory.isValid());
         const auto dataRoot = directory.filePath("plugins-data");
         QProcess first, second;
@@ -748,7 +751,7 @@ const QString name = "example.ztplugin";
     }
 
     void pluginZeroTierQueriesPreserveJsonAndCancelCallbacks() {
-        using namespace vusiif::ztgui::api;
+        using namespace vusiif::zto::api;
         HostServicesImpl services("query-test", m_settings.filePath("plugin-tools"), "query-test");
         QObject context;
         int calls = 0;
@@ -795,21 +798,21 @@ const QString name = "example.ztplugin";
         if (!QFileInfo::exists(shell)) QSKIP("A POSIX shell is needed for script syntax checks.");
         const QString value = QStringLiteral("name with 'quotes' and $(never-run)\\backslash\nnext line");
         QProcess quoting;
-        quoting.start(shell, {"-c", "printf '%s' " + vusiif::ztgui::platform::quote(value)});
+        quoting.start(shell, {"-c", "printf '%s' " + vusiif::zto::platform::quote(value)});
         QVERIFY(quoting.waitForFinished(5000));
         QCOMPARE(quoting.exitCode(), 0);
         QCOMPARE(QString::fromUtf8(quoting.readAllStandardOutput()), value);
         const QString directory = "/Library/Application Support/ZeroTier/One/moons.d";
         const QString target = directory + "/000000abcdef1234.moon";
         const QStringList scripts = {
-            vusiif::ztgui::platform::serviceCommands("start", "/usr/local/bin/zerotier-cli"),
-            vusiif::ztgui::platform::serviceCommands("stop", "/usr/local/bin/zerotier-cli"),
-            vusiif::ztgui::platform::serviceCommands("restart", "/usr/local/bin/zerotier-cli"),
-            vusiif::ztgui::platform::packageScript(false, "/Library/Application Support/ZeroTier"),
-            vusiif::ztgui::platform::packageScript(true, "/Library/Application Support/ZeroTier"),
-            vusiif::ztgui::platform::copyMoons({{"/tmp/file's.moon", target}}, directory),
-            vusiif::ztgui::platform::deleteMoon(target, directory),
-            vusiif::ztgui::platform::synchronizeSession("/Library/Application Support/ZeroTier/One", "/tmp/ztgui-session-test", 501)
+            vusiif::zto::platform::serviceCommands("start", "/usr/local/bin/zerotier-cli"),
+            vusiif::zto::platform::serviceCommands("stop", "/usr/local/bin/zerotier-cli"),
+            vusiif::zto::platform::serviceCommands("restart", "/usr/local/bin/zerotier-cli"),
+            vusiif::zto::platform::packageScript(false, "/Library/Application Support/ZeroTier"),
+            vusiif::zto::platform::packageScript(true, "/Library/Application Support/ZeroTier"),
+            vusiif::zto::platform::copyMoons({{"/tmp/file's.moon", target}}, directory),
+            vusiif::zto::platform::deleteMoon(target, directory),
+            vusiif::zto::platform::synchronizeSession("/Library/Application Support/ZeroTier/One", "/tmp/zto-session-test", 501)
         };
         QTemporaryDir temporary;
         for (const auto &script : scripts) {
@@ -821,9 +824,9 @@ const QString name = "example.ztplugin";
             QVERIFY(syntax.waitForFinished(5000));
             QCOMPARE(syntax.exitCode(), 0);
         }
-        QCOMPARE(vusiif::ztgui::platform::deleteMoon("/tmp/outside.moon", directory), QString("exit 1\n"));
-        QVERIFY(!vusiif::ztgui::platform::synchronizeSession("/source", "/cache", 501).contains("identity.secret"));
-        QCOMPARE(vusiif::ztgui::platform::appleScriptString("a\"b\\c"), QString("\"a\\\"b\\\\c\""));
+        QCOMPARE(vusiif::zto::platform::deleteMoon("/tmp/outside.moon", directory), QString("exit 1\n"));
+        QVERIFY(!vusiif::zto::platform::synchronizeSession("/source", "/cache", 501).contains("identity.secret"));
+        QCOMPARE(vusiif::zto::platform::appleScriptString("a\"b\\c"), QString("\"a\\\"b\\\\c\""));
     }
 
     void serviceStopErrorsDoNotBlockRestart() {
@@ -840,12 +843,12 @@ const QString name = "example.ztplugin";
     }
 
     void bundleFormatRejectsInvalidContent() {
-        const vusiif::ztgui::zerotier::bundle::Configuration original {"ABCDEF1234000001", "000000ABCDEF1234.moon", QByteArray("signed\0moon", 11)};
-        const QByteArray encoded = vusiif::ztgui::zerotier::bundle::encode(original);
+        const vusiif::zto::zerotier::bundle::Configuration original {"ABCDEF1234000001", "000000ABCDEF1234.moon", QByteArray("signed\0moon", 11)};
+        const QByteArray encoded = vusiif::zto::zerotier::bundle::encode(original);
         QVERIFY(!encoded.isEmpty());
-        vusiif::ztgui::zerotier::bundle::Configuration decoded;
+        vusiif::zto::zerotier::bundle::Configuration decoded;
         QString error;
-        QVERIFY(vusiif::ztgui::zerotier::bundle::decode(encoded, decoded, error));
+        QVERIFY(vusiif::zto::zerotier::bundle::decode(encoded, decoded, error));
         QCOMPARE(decoded.networkId, original.networkId.toLower());
         QCOMPARE(decoded.moonFileName, original.moonFileName);
         QCOMPARE(decoded.moonContents, original.moonContents);
@@ -860,12 +863,12 @@ const QString name = "example.ztplugin";
             if (scenario == "base64") moon.insert("contentBase64", "!!!");
             if (scenario == "empty") moon.insert("contentBase64", "");
             object.insert("moon", moon);
-            QVERIFY(!vusiif::ztgui::zerotier::bundle::decode(QJsonDocument(object).toJson(), decoded, error));
+            QVERIFY(!vusiif::zto::zerotier::bundle::decode(QJsonDocument(object).toJson(), decoded, error));
             QVERIFY(!error.isEmpty());
             QVERIFY(decoded.networkId.isEmpty());
         }
-        QVERIFY(!vusiif::ztgui::zerotier::bundle::decode("not json", decoded, error));
-        QVERIFY(!vusiif::ztgui::zerotier::bundle::decode(QByteArray(vusiif::ztgui::zerotier::bundle::MaxFileSize + 1, 'a'), decoded, error));
+        QVERIFY(!vusiif::zto::zerotier::bundle::decode("not json", decoded, error));
+        QVERIFY(!vusiif::zto::zerotier::bundle::decode(QByteArray(vusiif::zto::zerotier::bundle::MaxFileSize + 1, 'a'), decoded, error));
     }
 
     void uninstallOnlyCleansAfterSuccess() {
@@ -882,7 +885,7 @@ const QString name = "example.ztplugin";
         identity.close();
         const auto original = qgetenv("ProgramData");
         qputenv("ProgramData", sandbox.path().toLocal8Bit());
-        const QString script = vusiif::ztgui::zerotier::packageScript(true, vusiif::ztgui::zerotier::executable());
+        const QString script = vusiif::zto::zerotier::packageScript(true, vusiif::zto::zerotier::executable());
         qputenv("ProgramData", original);
         QProcess process;
         auto environment = QProcessEnvironment::systemEnvironment();
@@ -915,7 +918,7 @@ const QString name = "example.ztplugin";
         const QString lockedPath = locked.fileName();
         locked.close();
         const QString brokenScript = "& { Write-Output 'payload'; exit 0 } *> "
-                                      + vusiif::ztgui::zerotier::quotePowerShell(lockedPath);
+                                      + vusiif::zto::zerotier::quotePowerShell(lockedPath);
         const auto brokenEncoded = QByteArray(reinterpret_cast<const char *>(brokenScript.utf16()),
                                               brokenScript.size() * 2).toBase64();
         QProcess broken;
@@ -928,8 +931,8 @@ const QString name = "example.ztplugin";
         QTemporaryDir payloadDirectory;
         QVERIFY(payloadDirectory.isValid());
         const QString actualMarker = payloadDirectory.filePath("payload-ran.txt");
-        auto invocation = vusiif::ztgui::zerotier::preparePowerShell(
-            "Set-Content -LiteralPath " + vusiif::ztgui::zerotier::quotePowerShell(actualMarker)
+        auto invocation = vusiif::zto::zerotier::preparePowerShell(
+            "Set-Content -LiteralPath " + vusiif::zto::zerotier::quotePowerShell(actualMarker)
             + " -Value 'executed'\nWrite-Output '命令实际执行成功'\nexit 0");
         QVERIFY(invocation.directory->isValid());
         QVERIFY(!QFileInfo::exists(invocation.logPath));
@@ -944,7 +947,7 @@ const QString name = "example.ztplugin";
         QVERIFY(output.readAll().contains(QStringLiteral("命令实际执行成功")));
         log.close();
 
-        auto failure = vusiif::ztgui::zerotier::preparePowerShell(QStringLiteral("Write-Output '实际失败原因'; exit 23"));
+        auto failure = vusiif::zto::zerotier::preparePowerShell(QStringLiteral("Write-Output '实际失败原因'; exit 23"));
         process.start("powershell.exe", failure.arguments);
         QVERIFY(process.waitForFinished(10000));
         QCOMPARE(process.exitCode(), 23);
@@ -957,10 +960,10 @@ const QString name = "example.ztplugin";
 #endif
     }
     void pluginRegistrationIsAtomicAndVersioned() {
-        using namespace vusiif::ztgui::api;
+        using namespace vusiif::zto::api;
         QCOMPARE(ApiMajor, 0);
         QCOMPARE(ApiMinor, 5);
-        QCOMPARE(QString::fromLatin1(ApiVersion), QStringLiteral(ZTGUI_API_VERSION));
+        QCOMPARE(QString::fromLatin1(ApiVersion), QStringLiteral(ZTO_API_VERSION));
         PluginRegistry registry;
         QSignalSpy changes(&registry, &PluginRegistry::menusChanged);
         MenuContribution menu;
@@ -1008,7 +1011,7 @@ const QString name = "example.ztplugin";
         QCOMPARE(registry.menus().size(), 2);
     }
     void pluginPagesDieBeforeFactoryResources() {
-        using namespace vusiif::ztgui::api;
+        using namespace vusiif::zto::api;
         QQmlEngine engine; QQuickItem host;
         QPointer<QQuickItem> page;
         bool pageWasDestroyedFirst = false;
@@ -1041,7 +1044,7 @@ const QString name = "example.ztplugin";
         QVERIFY(pageWasDestroyedFirst);
     }
     void pluginMutationRejectsWorkerThreads() {
-        using namespace vusiif::ztgui::api;
+        using namespace vusiif::zto::api;
         PluginRegistry registry;
         Result registration;
         Result removal;

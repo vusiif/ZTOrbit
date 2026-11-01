@@ -3,10 +3,11 @@
 #include <QCameraDevice>
 #include <QCapturableWindow>
 #include <QFile>
+#include <QMetaObject>
 #include <QUuid>
 #include <algorithm>
 #include <cmath>
-namespace vusiif::ztgui::media::engine {
+namespace vusiif::zto::media::engine {
 DeviceManager::DeviceManager(QObject *parent) : QObject(parent) {
     connect(&devices, &QMediaDevices::audioInputsChanged, this, [this] {
         if (changed)
@@ -23,6 +24,96 @@ DeviceManager::DeviceManager(QObject *parent) : QObject(parent) {
     timer.setTimerType(Qt::PreciseTimer);
     timer.setInterval(20);
     connect(&timer, &QTimer::timeout, this, [this] { mix(); });
+    if (qGuiApp) {
+        connect(qGuiApp, &QGuiApplication::screenAdded, this, [this](QScreen *) {
+            if (changed)
+                changed();
+        });
+        // The removed QScreen may be deleted right after this signal. Read the
+        // stable name while the signal is emitted and do the source bookkeeping
+        // on the device thread.
+        connect(
+            qGuiApp, &QGuiApplication::screenRemoved, this,
+            [this](QScreen *screen) {
+                const auto name = screen ? screen->name() : QString{};
+                QMetaObject::invokeMethod(this, [this, name] { screenGone(name); }, Qt::QueuedConnection);
+            },
+            Qt::DirectConnection);
+        windowTimer.setInterval(1000);
+        connect(&windowTimer, &QTimer::timeout, this, [this] { monitorWindows(); });
+    }
+}
+void DeviceManager::failSource(Source &source, const QString &message) {
+    if (source.failed)
+        return;
+    source.failed = true;
+    if (source.audio)
+        source.audio->stop();
+    if (source.camera)
+        source.camera->stop();
+    if (source.screen)
+        source.screen->stop();
+    if (source.window)
+        source.window->stop();
+#ifdef Q_OS_WIN
+    if (source.nativeWindow) source.nativeWindow->stop();
+#endif
+    // Report exactly once. Consumers are removed because the session detaches
+    // the track asynchronously; late frames must not reach it again.
+    auto consumers = source.consumers;
+    source.consumers.clear();
+    for (const auto &consumer : consumers)
+        if (consumer.failed)
+            consumer.failed(message);
+}
+void DeviceManager::screenGone(const QString &name) {
+    for (auto &entry : inputs) {
+        auto &source = *entry.second;
+        if (source.kind != "screen" || source.failed)
+            continue;
+        if (source.id == name)
+            failSource(source, QStringLiteral("Screen removed"));
+    }
+    if (changed)
+        changed();
+}
+void DeviceManager::monitorWindows() {
+    bool active = false;
+    for (const auto &entry : inputs)
+        active |= entry.second->kind == "window" && !entry.second->failed;
+    if (!active) {
+        windowTimer.stop();
+        return;
+    }
+#ifdef Q_OS_WIN
+    const auto capturable = WindowsWindowCapture::windows();
+#else
+    const auto capturable = QWindowCapture::capturableWindows();
+#endif
+    if (capturable != lastWindows) {
+        lastWindows = capturable;
+        if (changed)
+            changed();
+    }
+    for (auto &entry : inputs) {
+        auto &source = *entry.second;
+        if (source.kind != "window" || source.failed)
+            continue;
+#ifdef Q_OS_WIN
+        const auto window = source.nativeWindowInfo;
+#else
+        const auto window = source.window ? source.window->window() : QCapturableWindow{};
+#endif
+        if (capturable.contains(window)) {
+            source.missingSeconds = 0;
+            continue;
+        }
+        // A single probe miss is not evidence of a closed window: minimized,
+        // occluded or temporarily unavailable windows stay in a waiting state.
+        if (++source.missingSeconds < WindowMissingSeconds)
+            continue;
+        failSource(source, QStringLiteral("Window closed or unavailable"));
+    }
 }
 QAudioDevice DeviceManager::audioDevice(bool input, const QString &id) {
     auto devices = input ? QMediaDevices::audioInputs() : QMediaDevices::audioOutputs();
@@ -47,8 +138,13 @@ QJsonArray DeviceManager::sources() {
         add(QString::fromLatin1(d.id().toHex()), "camera", d.description(), d.isDefault());
     for (auto *s : QGuiApplication::screens())
         add(s->name(), "screen", s->name());
-    QMap<QString, QCapturableWindow> current;
-    for (const auto &w : QWindowCapture::capturableWindows()) {
+    QMap<QString, CapturableWindow> current;
+#ifdef Q_OS_WIN
+    const auto availableWindows = WindowsWindowCapture::windows();
+#else
+    const auto availableWindows = QWindowCapture::capturableWindows();
+#endif
+    for (const auto &w : availableWindows) {
         QString id;
         for (auto it = windows.cbegin(); it != windows.cend(); ++it)
             if (it.value() == w) {
@@ -58,7 +154,11 @@ QJsonArray DeviceManager::sources() {
         if (id.isEmpty())
             id = QUuid::createUuid().toString(QUuid::Id128);
         current.insert(id, w);
+#ifdef Q_OS_WIN
+        add(id, "window", w.title);
+#else
         add(id, "window", w.description());
+#endif
     }
     windows = std::move(current);
     add("synthetic", "synthetic", "Synthetic video test pattern");
@@ -83,6 +183,8 @@ QString DeviceManager::attach(const QString &track, const TrackConfig &config, C
     }
     auto key = kind + ":" + id;
     auto found = inputs.find(key);
+    if (found != inputs.end() && found->second->failed)
+        found = inputs.erase(found);
     if (found != inputs.end()) {
         const auto &active = found->second->config;
         if (config.kind == "video" &&
@@ -90,6 +192,23 @@ QString DeviceManager::attach(const QString &track, const TrackConfig &config, C
              active.codec.frameRate != config.codec.frameRate))
             return "Source is in use with an incompatible format";
         found->second->consumers.insert(track, std::move(consumer));
+        // A shared static source may never produce another device notification.
+        // Seed the new consumer with its real, most recent CPU frame. The actor
+        // holds this bounded startup frame until track.start commits running.
+        auto &activeSource = *found->second;
+        const auto &added = activeSource.consumers[track];
+        if (added.video && activeSource.lastVideoFrame.isValid()) {
+            ++activeSource.cachedDeliveries;
+            ++activeSource.deliveredFrames;
+            // QVideoFrame copies explicitly share timestamp metadata. Wrap
+            // the immutable CPU image in a fresh frame before changing PTS.
+            auto seed = QVideoFrame(activeSource.lastVideoFrame.toImage());
+            // This is a new stream's cache refresh, not a newly captured
+            // physical frame. Timestamp the refresh now, just like a cached
+            // keyframe, so its first packet cannot bias later live PTS.
+            seed.setStartTime(monotonicTimeUs());
+            added.video(std::move(seed));
+        }
         return {};
     }
     auto source = std::make_unique<Source>();
@@ -98,12 +217,7 @@ QString DeviceManager::attach(const QString &track, const TrackConfig &config, C
     s->kind = kind;
     s->config = config;
     s->consumers.insert(track, std::move(consumer));
-    auto failed = [s](const QString &message) {
-        auto consumers = s->consumers;
-        for (const auto &c : consumers)
-            if (c.failed)
-                c.failed(message);
-    };
+    auto failed = [s](const QString &message) { failSource(*s, message); };
     if (kind == "microphone") {
         const auto device = audioDevice(true, id);
         auto f = PcmConverter::mono();
@@ -121,6 +235,8 @@ QString DeviceManager::attach(const QString &track, const TrackConfig &config, C
         if (!s->capture)
             return "Cannot open microphone";
         connect(s->capture, &QIODevice::readyRead, s->callbacks.get(), [s] {
+            if (s->failed)
+                return;
             const auto capturedAt=monotonicTimeUs();
             auto bytes = s->capture->readAll();
             for (const auto &c : s->consumers)
@@ -131,13 +247,8 @@ QString DeviceManager::attach(const QString &track, const TrackConfig &config, C
         s->session = std::make_unique<QMediaCaptureSession>();
         s->sink = std::make_unique<QVideoSink>();
         s->session->setVideoSink(s->sink.get());
-        connect(s->sink.get(), &QVideoSink::videoFrameChanged, s->callbacks.get(), [s](const QVideoFrame &f) {
-            const auto capturedAt=monotonicTimeUs();
-            auto cpu = QVideoFrame(f.toImage());
-            cpu.setStartTime(capturedAt);
-            for (const auto &c : s->consumers)
-                if (c.video)
-                    c.video(cpu);
+        connect(s->sink.get(), &QVideoSink::videoFrameChanged, s->callbacks.get(), [this,s](const QVideoFrame &f) {
+            deliverVideo(*s, f);
         });
         if (kind == "camera") {
             QCameraDevice chosen;
@@ -176,9 +287,21 @@ QString DeviceManager::attach(const QString &track, const TrackConfig &config, C
             s->screen->setScreen(screen);
             s->session->setScreenCapture(s->screen.get());
             connect(s->screen.get(), &QScreenCapture::errorOccurred, s->callbacks.get(),
-                    [failed](QScreenCapture::Error, const QString &m) { failed(m); });
+                    [failed](QScreenCapture::Error, const QString &m) {
+                        failed(m.isEmpty() ? QStringLiteral("Screen capture failed")
+                                           : QStringLiteral("Screen capture failed: ") + m);
+                    });
             s->screen->start();
         } else if (kind == "window") {
+#ifdef Q_OS_WIN
+            if (!windows.contains(id)) return "Window unavailable; enumerate sources again";
+            s->nativeWindowInfo = windows.value(id);
+            s->nativeWindow = std::make_unique<WindowsWindowCapture>();
+            s->nativeWindow->frame = [this, s](QVideoFrame frame) { deliverVideo(*s, frame); };
+            s->nativeWindow->failed = failed;
+            const auto error = s->nativeWindow->start(s->nativeWindowInfo, config.codec.frameRate);
+            if (!error.isEmpty()) return error;
+#else
             QCapturableWindow window = windows.value(id);
             if (!window.isValid())
                 return "Window unavailable; enumerate sources again";
@@ -186,13 +309,39 @@ QString DeviceManager::attach(const QString &track, const TrackConfig &config, C
             s->window->setWindow(window);
             s->session->setWindowCapture(s->window.get());
             connect(s->window.get(), &QWindowCapture::errorOccurred, s->callbacks.get(),
-                    [failed](QWindowCapture::Error, const QString &m) { failed(m); });
+                    [failed](QWindowCapture::Error error, const QString &m) {
+                        // A not-found window can be transient (moving between
+                        // screens, recreating its native surface). The one
+                        // second validity probe decides after a sustained
+                        // absence instead of failing on the first miss.
+                        if (error == QWindowCapture::NotFound)
+                            return;
+                        failed(m.isEmpty() ? QStringLiteral("Window capture failed")
+                                           : QStringLiteral("Window capture failed: ") + m);
+                    });
             s->window->start();
+#endif
         } else
             return "Unsupported source kind";
     }
     inputs.emplace(key, std::move(source));
+    if (kind == "window" && qGuiApp && !windowTimer.isActive())
+        windowTimer.start();
     return {};
+}
+void DeviceManager::deliverVideo(Source &source, const QVideoFrame &frame) {
+    if (source.failed) return;
+    const auto capturedAt = monotonicTimeUs();
+    ++rawVideoFrames;
+    ++source.rawFrames;
+    auto cpu = QVideoFrame(frame.toImage());
+    if (cpu.isValid()) { ++cpuVideoFrames; ++source.cpuFrames; }
+    cpu.setStartTime(capturedAt);
+    if (cpu.isValid()) source.lastVideoFrame = cpu;
+    for (const auto &consumer : source.consumers) if (consumer.video) {
+        ++source.deliveredFrames;
+        consumer.video(cpu);
+    }
 }
 void DeviceManager::detach(const QString &track) {
     for (auto it = inputs.begin(); it != inputs.end();) {
@@ -213,10 +362,15 @@ void DeviceManager::detach(const QString &track) {
     }
     if (outputs.empty())
         timer.stop();
+    bool windowActive = false;
+    for (const auto &entry : inputs)
+        windowActive |= entry.second->kind == "window" && !entry.second->failed;
+    if (!windowActive)
+        windowTimer.stop();
 }
 bool DeviceManager::injectedPlaybackFailure()
 {
-    const auto path = qEnvironmentVariable("ZTGUI_MEDIA_TEST_CLIP_FAILURE");
+    const auto path = qEnvironmentVariable("ZTO_MEDIA_TEST_CLIP_FAILURE");
     if (path.isEmpty()) {
         m_testFailureNonce.clear();
         m_testAcceptedPlays = 0;
@@ -352,8 +506,30 @@ QJsonObject DeviceManager::statistics() const {
     quint64 bytes = 0;
     for (const auto &o : outputs)
         bytes += o.second->bytes;
-    return {{"physicalInputs", int(inputs.size())},
+    QJsonArray sources;
+    for (const auto &entry : inputs) {
+        const auto &s = *entry.second;
+        QJsonArray tracks;
+        for (auto it = s.consumers.cbegin(); it != s.consumers.cend(); ++it) tracks.append(it.key());
+        QJsonObject snapshot{{"tracks", tracks}, {"kind", s.kind}, {"failed", s.failed},
+            {"rawVideoFrames", QString::number(s.rawFrames)},
+            {"cpuVideoFrames", QString::number(s.cpuFrames)},
+            {"consumerDeliveries", QString::number(s.deliveredFrames)},
+            {"cachedDeliveries", QString::number(s.cachedDeliveries)},
+            {"captureActive", s.window ? s.window->isActive() : s.screen ? s.screen->isActive() : s.camera ? s.camera->isActive() : bool(s.audio)},
+            {"sinkHasFrame", s.sink && s.sink->videoFrame().isValid()}};
+#ifdef Q_OS_WIN
+        if (s.nativeWindow) {
+            snapshot["captureActive"] = s.nativeWindow->isActive();
+            snapshot["native"] = s.nativeWindow->statistics();
+        }
+#endif
+        sources.append(snapshot);
+    }
+    return {{"physicalInputs", int(inputs.size())}, {"sources", sources},
+            {"rawVideoFrames",QString::number(rawVideoFrames)},
+            {"cpuVideoFrames",QString::number(cpuVideoFrames)},
             {"physicalOutputs", int(outputs.size())},
             {"playedBytes", QString::number(bytes)}};
 }
-} // namespace vusiif::ztgui::media::engine
+} // namespace vusiif::zto::media::engine

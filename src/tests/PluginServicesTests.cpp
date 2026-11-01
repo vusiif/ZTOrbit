@@ -2,7 +2,7 @@
 #include "../client/main/plugins/PluginRegistry.h"
 #include "PluginDependencies.h"
 #include "PluginRuntime.h"
-#include <ztgui/PluginInterface.h>
+#include <zto/PluginInterface.h>
 #include <ztprotocol/ServiceWire.h>
 #include <QtTest>
 #include <QSettings>
@@ -17,7 +17,7 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
-using namespace vusiif::ztgui;
+using namespace vusiif::zto;
 class PluginServicesTests:public QObject {
     Q_OBJECT
     QTemporaryDir settings;
@@ -29,7 +29,7 @@ class PluginServicesTests:public QObject {
     static QString provider(const QString &directory) {
         QJsonArray files{QJsonObject{{"path","runtime/bin/fixture.exe"},{"role","entry"},{"source",SERVICE_WORKER}}};
         for(const auto &path:{QString(QT_CORE_LIBRARY),QString(QT_NETWORK_LIBRARY)}) files.append(QJsonObject{{"path","runtime/bin/"+QFileInfo(path).fileName()},{"role","runtime-library"},{"source",path}});
-        const auto path=directory+"/provider.ztplugin";
+        const auto path=directory+"/provider.z2plugin";
         const QJsonObject manifest{{"files",files},{"execution",QJsonObject{{"kind","worker-process"},{"protocol",protocol::service::Protocol}}},
             {"dependencies",QJsonArray{}},{"provides",QJsonArray{QJsonObject{{"service","fixture.audio"},{"api","1"}},QJsonObject{{"service","fixture.video"},{"api","1"}}}}};
         const auto error=package::writeBundle(manifest,path,{{"host","client"},{"id","fixture-provider"},{"name","Fixture provider"},{"version","1.0.0"},{"apiVersion",api::ApiVersion},{"iid",protocol::service::Protocol}});
@@ -44,10 +44,10 @@ class PluginServicesTests:public QObject {
 #endif
 private slots:
     void initTestCase() {
-        QCoreApplication::setOrganizationName("ZTGUI-Service-Tests"); QCoreApplication::setApplicationName("Services");
+        QCoreApplication::setOrganizationName("ZTOrbit-Service-Tests"); QCoreApplication::setApplicationName("Services");
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings.path());
     }
-    void cleanup() { QSettings().clear(); qunsetenv("ZTGUI_SERVICE_TRACE"); qunsetenv("ZTGUI_SERVICE_INIT_FAIL"); qunsetenv("ZTGUI_SERVICE_STOP_FAIL"); qunsetenv("ZTGUI_WORKER_READY_DELAY"); qunsetenv("ZTGUI_WORKER_BAD_CAPABILITY"); qunsetenv("ZTGUI_WORKER_SHUTDOWN_DELAY"); qunsetenv("ZTGUI_FIXTURE_LOG_STARTUP"); qunsetenv("ZTGUI_WORKER_PREPARATION_DELAY"); }
+    void cleanup() { QSettings().clear(); qunsetenv("ZTO_SERVICE_TRACE"); qunsetenv("ZTO_SERVICE_INIT_FAIL"); qunsetenv("ZTO_SERVICE_STOP_FAIL"); qunsetenv("ZTO_WORKER_READY_DELAY"); qunsetenv("ZTO_WORKER_BAD_CAPABILITY"); qunsetenv("ZTO_WORKER_SHUTDOWN_DELAY"); qunsetenv("ZTO_FIXTURE_LOG_STARTUP"); qunsetenv("ZTO_WORKER_PREPARATION_DELAY"); }
     void versionsAndGraph() {
         QVERIFY(package::versionMatches("1.3.0",">=1.0.0 <2.0.0")); QVERIFY(!package::versionMatches("2.0.0",">=1.0.0 <2.0.0"));
         for(const auto &range:{"^1.0.0","1.x","01.0.0",">=1.0","","1.0.0 || 2.0.0"}) { QString error; QVERIFY(!package::versionMatches("1.0.0",range,&error)); QVERIFY(!error.isEmpty()); }
@@ -69,20 +69,20 @@ private slots:
     }
     void missingDisabledAndDuplicateNeverExecuteConsumer() {
         QTemporaryDir dir; const auto path=copy(SERVICE_CONSUMER_A,dir.path()); QVERIFY(!path.isEmpty());
-        const auto log=dir.filePath("trace"); qputenv("ZTGUI_SERVICE_TRACE",log.toUtf8());
+        const auto log=dir.filePath("trace"); qputenv("ZTO_SERVICE_TRACE",log.toUtf8());
         plugins::PluginRegistry registry; plugins::PluginLoader loader; QSignalSpy finished(&loader,&plugins::PluginLoader::loadFinished);
         QVERIFY(loader.loadFile(path,registry).ok()); QTRY_COMPARE(finished.size(),1); QVERIFY(!finished.last()[1].toBool()); QVERIFY(!QFileInfo::exists(log));
         QVERIFY(!provider(dir.path()).isEmpty()); QSettings().setValue("plugins/disabled/fixture-provider",true);
         finished.clear(); QVERIFY(loader.loadFile(path,registry).ok()); QTRY_COMPARE(finished.size(),1); QVERIFY(finished.last()[2].toString().contains("disabled")); QVERIFY(!QFileInfo::exists(log));
         QSettings().clear();
-        QVERIFY(QFile::copy(dir.filePath("provider.ztplugin"),dir.filePath("duplicate.ztplugin")));
+        QVERIFY(QFile::copy(dir.filePath("provider.z2plugin"),dir.filePath("duplicate.z2plugin")));
         finished.clear(); QVERIFY(loader.loadFile(path,registry).ok()); QTRY_COMPARE(finished.size(),1); QVERIFY(!finished.last()[1].toBool()); QVERIFY(!QFileInfo::exists(log));
     }
     void sharedProviderAndReverseStop() {
         QTemporaryDir dir; QVERIFY(!provider(dir.path()).isEmpty()); const auto a=copy(SERVICE_CONSUMER_A,dir.path()),b=copy(SERVICE_CONSUMER_B,dir.path());
         plugins::PluginRegistry registry; plugins::PluginLoader loader; QQmlEngine engine; QQuickItem parent;
         int ticks=0; QTimer heartbeat; heartbeat.setInterval(5); connect(&heartbeat,&QTimer::timeout,this,[&] { ++ticks; }); heartbeat.start();
-        QVERIFY(loader.loadFile(dir.filePath("provider.ztplugin"),registry).ok());
+        QVERIFY(loader.loadFile(dir.filePath("provider.z2plugin"),registry).ok());
         QTRY_VERIFY_WITH_TIMEOUT(ready(registry,"fixture-provider"),20000);
         QVERIFY(loader.loadFile(a,registry).ok()); QVERIFY(loader.loadFile(b,registry).ok());
         QTRY_VERIFY_WITH_TIMEOUT(ready(registry,"fixture-a") && ready(registry,"fixture-b"),20000);
@@ -99,7 +99,7 @@ private slots:
         QVERIFY(!QSettings().value("plugins/disabled/fixture-provider",false).toBool());
         QVERIFY(QMetaObject::invokeMethod(fixture,"ping")); QTRY_VERIFY(fixture->property("replies").toInt()>2);
         // Already explicitly retained; the UI policy rejects duplicate activation.
-        QVERIFY(!loader.loadFile(dir.filePath("provider.ztplugin"),registry).ok());
+        QVERIFY(!loader.loadFile(dir.filePath("provider.z2plugin"),registry).ok());
         QVERIFY(loader.unload("fixture-b",registry).ok()); QTRY_COMPARE(registry.plugins().size(),1);
         QVERIFY(loader.unload("fixture-provider",registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(registry.plugins().isEmpty(),10000);
 #ifdef Q_OS_WIN
@@ -107,14 +107,14 @@ private slots:
 #endif
         // Explicitly unloading a provider persistently disables it. Only a
         // direct user load may clear that setting before consumers can restart.
-        QVERIFY(loader.loadFile(dir.filePath("provider.ztplugin"),registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(ready(registry,"fixture-provider"),20000);
+        QVERIFY(loader.loadFile(dir.filePath("provider.z2plugin"),registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(ready(registry,"fixture-provider"),20000);
         QVERIFY(loader.loadFile(a,registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(ready(registry,"fixture-a"),20000);
         for(const auto &v:loader.catalog()) if(v.toMap()["id"]=="fixture-provider") QVERIFY(v.toMap()["generation"].toString()!=generation);
         loader.requestShutdown(); QTRY_VERIFY_WITH_TIMEOUT(loader.shutdownComplete(),10000);
     }
     void failedConsumerRollsBackAutomaticProvider() {
         QTemporaryDir dir; QVERIFY(!provider(dir.path()).isEmpty()); const auto a=copy(SERVICE_CONSUMER_A,dir.path());
-        qputenv("ZTGUI_SERVICE_INIT_FAIL","fixture-a"); plugins::PluginRegistry registry; plugins::PluginLoader loader;
+        qputenv("ZTO_SERVICE_INIT_FAIL","fixture-a"); plugins::PluginRegistry registry; plugins::PluginLoader loader;
         QSignalSpy finished(&loader,&plugins::PluginLoader::loadFinished);
         QVERIFY(loader.loadFile(a,registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(finished.size()>=2,20000); QTRY_VERIFY_WITH_TIMEOUT(registry.plugins().isEmpty(),10000);
     }
@@ -123,7 +123,7 @@ private slots:
         plugins::PluginRegistry registry; plugins::PluginLoader loader;
         QVERIFY(loader.loadFile(p,registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(ready(registry,"fixture-provider"),15000);
         QSignalSpy finished(&loader,&plugins::PluginLoader::loadFinished);
-        qputenv("ZTGUI_SERVICE_INIT_FAIL","fixture-a"); QVERIFY(loader.loadFile(a,registry).ok());
+        qputenv("ZTO_SERVICE_INIT_FAIL","fixture-a"); QVERIFY(loader.loadFile(a,registry).ok());
         QTRY_COMPARE(finished.size(),1); QVERIFY(!finished[0][1].toBool());
         QTRY_COMPARE(registry.plugins().size(),1); QVERIFY(ready(registry,"fixture-provider"));
         loader.requestShutdown(); QTRY_VERIFY(loader.shutdownComplete());
@@ -132,11 +132,11 @@ private slots:
         QTemporaryDir dir; QVERIFY(!provider(dir.path()).isEmpty()); const auto a=copy(SERVICE_CONSUMER_A,dir.path());
         plugins::PluginRegistry registry; plugins::PluginLoader loader; QSignalSpy finished(&loader,&plugins::PluginLoader::unloadFinished);
         QVERIFY(loader.loadFile(a,registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(ready(registry,"fixture-a"),15000);
-        qputenv("ZTGUI_SERVICE_STOP_FAIL","fixture-a");
+        qputenv("ZTO_SERVICE_STOP_FAIL","fixture-a");
         QVERIFY(!loader.unload("fixture-provider",registry).ok()); QVERIFY(finished.isEmpty());
         QVERIFY(loader.unload("fixture-a",registry).ok()); QTRY_COMPARE(finished.size(),1); QVERIFY(!finished[0][1].toBool());
         QTest::qWait(150); QCOMPARE(registry.plugins().size(),2);
-        qunsetenv("ZTGUI_SERVICE_STOP_FAIL"); QVERIFY(loader.unload("fixture-a",registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(registry.plugins().isEmpty(),10000);
+        qunsetenv("ZTO_SERVICE_STOP_FAIL"); QVERIFY(loader.unload("fixture-a",registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(registry.plugins().isEmpty(),10000);
     }
     void crashInvalidatesAndNewInstanceHasNewGeneration() {
         QTemporaryDir dir; QVERIFY(!provider(dir.path()).isEmpty()); const auto a=copy(SERVICE_CONSUMER_A,dir.path());
@@ -151,7 +151,7 @@ private slots:
     }
     void cancellationWhileWaitingForHandshakeRollsBack() {
         QTemporaryDir dir; QVERIFY(!provider(dir.path()).isEmpty()); const auto a=copy(SERVICE_CONSUMER_A,dir.path());
-        const auto log=dir.filePath("trace"); qputenv("ZTGUI_SERVICE_TRACE",log.toUtf8()); qputenv("ZTGUI_WORKER_READY_DELAY","400");
+        const auto log=dir.filePath("trace"); qputenv("ZTO_SERVICE_TRACE",log.toUtf8()); qputenv("ZTO_WORKER_READY_DELAY","400");
         plugins::PluginRegistry registry; plugins::PluginLoader loader; QSignalSpy finished(&loader,&plugins::PluginLoader::loadFinished);
         QVERIFY(loader.loadFile(a,registry).ok()); QTRY_COMPARE(registry.plugins().size(),1);
         QVERIFY(loader.unload("fixture-a",registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(registry.plugins().isEmpty(),10000); QVERIFY(!QFileInfo::exists(log));
@@ -159,7 +159,7 @@ private slots:
     }
     void cancellationBeforeIdentityIsKnownNeverExecutesEntry() {
         QTemporaryDir dir; QVERIFY(!provider(dir.path()).isEmpty()); const auto a=copy(SERVICE_CONSUMER_A,dir.path());
-        const auto log=dir.filePath("trace"); qputenv("ZTGUI_SERVICE_TRACE",log.toUtf8());
+        const auto log=dir.filePath("trace"); qputenv("ZTO_SERVICE_TRACE",log.toUtf8());
         plugins::PluginRegistry registry; plugins::PluginLoader loader; QSignalSpy finished(&loader,&plugins::PluginLoader::loadFinished);
         QVERIFY(loader.loadFile(a,registry).ok()); QVERIFY(loader.unload(a,registry).ok());
         QTRY_COMPARE(finished.size(),1); QVERIFY(!finished[0][1].toBool()); QVERIFY(registry.plugins().isEmpty()); QVERIFY(!QFileInfo::exists(log));
@@ -167,14 +167,14 @@ private slots:
     void serviceDeclarationsAreAuthenticatedAndCannotDowngrade() {
         QTemporaryDir dir; const auto path=provider(dir.path()); const auto pkg=package::inspect(path); QVERIFY2(pkg.ok(),qPrintable(pkg.error));
         auto downgraded=pkg.info; downgraded["formatVersion"]=2;
-        QVERIFY(package::validate(downgraded,"client",api::ApiVersion,ZTGUI_PLUGIN_IID).contains("ZTPK3"));
+        QVERIFY(package::validate(downgraded,"client",api::ApiVersion,ZTO_PLUGIN_IID).contains("ZTPK3"));
         QFile file(path); QVERIFY(file.open(QIODevice::ReadWrite)); auto bytes=file.readAll(); QVERIFY(bytes.startsWith("ZTPK3\n"));
         QVERIFY(bytes.contains("fixture.audio")); bytes.replace("fixture.audio","fixture.badio"); QVERIFY(file.seek(0)); QCOMPARE(file.write(bytes),bytes.size()); file.close();
         QVERIFY(package::inspect(path).error.contains("authentication"));
     }
     void workerCapabilitiesMustMatchAuthenticatedManifest() {
         QTemporaryDir dir; QVERIFY(!provider(dir.path()).isEmpty()); const auto a=copy(SERVICE_CONSUMER_A,dir.path());
-        const auto log=dir.filePath("trace"); qputenv("ZTGUI_SERVICE_TRACE",log.toUtf8()); qputenv("ZTGUI_WORKER_BAD_CAPABILITY","1");
+        const auto log=dir.filePath("trace"); qputenv("ZTO_SERVICE_TRACE",log.toUtf8()); qputenv("ZTO_WORKER_BAD_CAPABILITY","1");
         plugins::PluginRegistry registry; plugins::PluginLoader loader; QSignalSpy finished(&loader,&plugins::PluginLoader::loadFinished);
         QVERIFY(loader.loadFile(a,registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(finished.size()>=2,15000);
         QTRY_VERIFY_WITH_TIMEOUT(registry.plugins().isEmpty(),10000); QVERIFY(!QFileInfo::exists(log));
@@ -182,7 +182,7 @@ private slots:
     }
     void newConsumerWaitsForAutomaticProviderStop() {
         QTemporaryDir dir; QVERIFY(!provider(dir.path()).isEmpty()); const auto a=copy(SERVICE_CONSUMER_A,dir.path()),b=copy(SERVICE_CONSUMER_B,dir.path());
-        qputenv("ZTGUI_WORKER_SHUTDOWN_DELAY","250");
+        qputenv("ZTO_WORKER_SHUTDOWN_DELAY","250");
         plugins::PluginRegistry registry; plugins::PluginLoader loader;
         QVERIFY(loader.loadFile(a,registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(ready(registry,"fixture-a"),15000);
         QString generation; for(const auto &v:loader.catalog()) if(v.toMap()["id"]=="fixture-provider") generation=v.toMap()["generation"].toString();
@@ -194,7 +194,7 @@ private slots:
     }
     void rejectedCallbackWithHostContextKeepsDllUntilReturn() {
         QTemporaryDir dir; QVERIFY(!provider(dir.path()).isEmpty()); const auto a=copy(SERVICE_CONSUMER_A,dir.path());
-        const auto log=dir.filePath("trace"); qputenv("ZTGUI_SERVICE_TRACE",log.toUtf8());
+        const auto log=dir.filePath("trace"); qputenv("ZTO_SERVICE_TRACE",log.toUtf8());
         const auto text=[&] { QFile f(log); return f.open(QIODevice::ReadOnly)?f.readAll():QByteArray(); };
         plugins::PluginRegistry registry; plugins::PluginLoader loader; QQmlEngine engine; QQuickItem parent;
         QVERIFY(loader.loadFile(a,registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(ready(registry,"fixture-a"),15000);
@@ -206,7 +206,7 @@ private slots:
     }
     void closeCancelsDeferredRejectionsEvenWithHostContext() {
         QTemporaryDir dir; QVERIFY(!provider(dir.path()).isEmpty()); const auto a=copy(SERVICE_CONSUMER_A,dir.path());
-        const auto log=dir.filePath("trace"); qputenv("ZTGUI_SERVICE_TRACE",log.toUtf8());
+        const auto log=dir.filePath("trace"); qputenv("ZTO_SERVICE_TRACE",log.toUtf8());
         plugins::PluginRegistry registry; plugins::PluginLoader loader; QQmlEngine engine; QQuickItem parent;
         QVERIFY(loader.loadFile(a,registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(ready(registry,"fixture-a"),15000);
         const auto page=registry.page("fixture-a/test",&engine,&parent); QVERIFY(page.result.ok()); auto *fixture=page.page->property("fixture").value<QObject *>(); QVERIFY(fixture);
@@ -219,7 +219,7 @@ private slots:
         QTemporaryDir dir; const auto path=provider(dir.path()); const auto pkg=package::inspect(path); QVERIFY(pkg.ok());
         std::unique_ptr<QTemporaryDir> cache; std::unique_ptr<QLockFile> lock; QString entry;
         QVERIFY(package::extract(pkg,cache,entry,lock).isEmpty());
-        qputenv("ZTGUI_WORKER_SHUTDOWN_DELAY","10000");
+        qputenv("ZTO_WORKER_SHUTDOWN_DELAY","10000");
         plugins::ServiceBroker broker; broker.start(entry,cache->path(),pkg.info); QTRY_VERIFY_WITH_TIMEOUT(broker.ready(),15000);
         auto lease=broker.acquire("fixture.audio","1"); QVERIFY(lease); qint64 childPid=0;
         lease->call("spawn-child",{}, {},this,[&](const util::ServiceResult &r) { childPid=r.data["pid"].toString().toLongLong(); });
@@ -311,7 +311,7 @@ private slots:
     }
     void workerFailureSurvivesForcedCleanup() {
         QTemporaryDir dir; const auto path=provider(dir.path()); QVERIFY(!path.isEmpty());
-        qputenv("ZTGUI_WORKER_BAD_CAPABILITY","1"); qputenv("ZTGUI_WORKER_SHUTDOWN_DELAY","10000");
+        qputenv("ZTO_WORKER_BAD_CAPABILITY","1"); qputenv("ZTO_WORKER_SHUTDOWN_DELAY","10000");
         plugins::PluginRegistry registry; plugins::PluginLoader loader; QSignalSpy finished(&loader,&plugins::PluginLoader::loadFinished);
         QVERIFY(loader.loadFile(path,registry).ok());
         for(const auto &value:loader.catalog()) {
@@ -329,7 +329,7 @@ private slots:
         QTemporaryDir dir; const auto pkg=package::inspect(provider(dir.path())); QVERIFY(pkg.ok());
         std::unique_ptr<QTemporaryDir> cache; std::unique_ptr<QLockFile> lock; QString entry;
         QVERIFY(package::extract(pkg,cache,entry,lock).isEmpty());
-        qputenv("ZTGUI_FIXTURE_LOG_STARTUP","1");
+        qputenv("ZTO_FIXTURE_LOG_STARTUP","1");
         QTest::ignoreMessage(QtWarningMsg,QRegularExpression("\\[worker\\].*fixture-startup"));
         plugins::ServiceBroker broker; broker.start(entry,cache->path(),pkg.info); QTRY_VERIFY_WITH_TIMEOUT(broker.ready(),15000);
         broker.stop(); QTRY_VERIFY_WITH_TIMEOUT(broker.exited(),8000);
@@ -337,8 +337,8 @@ private slots:
     }
     void slowPreparationDoesNotPublishOrRunConsumerEarly() {
         QTemporaryDir dir; QVERIFY(!provider(dir.path()).isEmpty()); const auto a=copy(SERVICE_CONSUMER_A,dir.path());
-        const auto trace=dir.filePath("trace"); qputenv("ZTGUI_SERVICE_TRACE",trace.toUtf8());
-        qputenv("ZTGUI_WORKER_PREPARATION_DELAY","18000");
+        const auto trace=dir.filePath("trace"); qputenv("ZTO_SERVICE_TRACE",trace.toUtf8());
+        qputenv("ZTO_WORKER_PREPARATION_DELAY","18000");
         plugins::PluginRegistry registry; plugins::PluginLoader loader; QSignalSpy finished(&loader,&plugins::PluginLoader::loadFinished);
         QElapsedTimer elapsed; elapsed.start(); int ticks=0; QTimer heartbeat; heartbeat.setInterval(10);
         connect(&heartbeat,&QTimer::timeout,this,[&] { ++ticks; }); heartbeat.start();
@@ -352,7 +352,7 @@ private slots:
     }
     void preparationRemainsCancellableAfterHandshake() {
         QTemporaryDir dir; const auto path=provider(dir.path()); QVERIFY(!path.isEmpty());
-        qputenv("ZTGUI_WORKER_PREPARATION_DELAY","18000");
+        qputenv("ZTO_WORKER_PREPARATION_DELAY","18000");
         plugins::PluginRegistry registry; plugins::PluginLoader loader;
         const auto preparing=[&] { for(const auto &v:loader.catalog()) if(v.toMap()["message"]=="Preparing service") return true; return false; };
         QVERIFY(loader.loadFile(path,registry).ok()); QTRY_VERIFY_WITH_TIMEOUT(preparing(),5000);

@@ -28,7 +28,7 @@
 #include <pwd.h>
 #endif
 
-namespace vusiif::ztgui::storage {
+namespace vusiif::zto::storage {
 namespace {
 QMutex installKeyMutex;
 QString cachedInstallKey;
@@ -237,7 +237,7 @@ QString StorageContext::pluginPackageCacheRoot() const
 
 QString StorageContext::metadataDirectory() const
 {
-    return m_activeRoot.isEmpty() ? QString() : QDir(m_activeRoot).filePath(".ztgui");
+    return m_activeRoot.isEmpty() ? QString() : QDir(m_activeRoot).filePath(".zto");
 }
 
 void StorageContext::addWarning(const QString &message)
@@ -268,7 +268,7 @@ StorageContext StorageContext::resolveInternal(const QString &applicationDirecto
     if (base.isEmpty()) base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     if (base.isEmpty()) {
         context.addWarning(QStringLiteral("无法确定当前用户的本地数据目录，个人回退目录使用临时位置。"));
-        base = QDir(QDir::tempPath()).filePath(QStringLiteral("ZTGUI"));
+        base = QDir(QDir::tempPath()).filePath(QStringLiteral("ZTOrbit"));
     }
     const QDir installations(QDir(base).filePath(QStringLiteral("installations")));
     const QDir installDirectory(installations.filePath(context.m_installKey));
@@ -305,7 +305,7 @@ StorageContext StorageContext::resolveInternal(const QString &applicationDirecto
             context.m_mode = Mode::Ephemeral;
             context.addWarning(QStringLiteral("个人存储目录不可写，本次运行无法持久保存设置。"));
             const auto ephemeral = QDir(QDir::tempPath()).filePath(
-                QStringLiteral("ZTGUI-ephemeral-%1-%2").arg(context.m_installKey.left(12),
+                QStringLiteral("ZTOrbit-ephemeral-%1-%2").arg(context.m_installKey.left(12),
                     QUuid::createUuid().toString(QUuid::Id128).left(12)));
             if (QDir().mkpath(ephemeral)) context.m_activeRoot = QDir::cleanPath(ephemeral);
         }
@@ -321,15 +321,15 @@ bool StorageContext::probeWritable(const QString &root, QString &error)
     if (rootInfo.exists() && !rootInfo.isDir()) { error = QStringLiteral("存储路径不是目录：%1").arg(root); return false; }
     const auto token = QUuid::createUuid().toString(QUuid::Id128);
     const QStringList subdirectories{QString(), QStringLiteral("logs"), QStringLiteral("plugins-data"),
-                                     QStringLiteral("cache"), QStringLiteral(".ztgui")};
+                                     QStringLiteral("cache"), QStringLiteral(".zto")};
     for (const auto &subdirectory : subdirectories) {
         const QDir directory(subdirectory.isEmpty() ? root : QDir(root).filePath(subdirectory));
         if (!QDir().mkpath(directory.absolutePath())) {
             error = QStringLiteral("无法创建 %1").arg(directory.absolutePath()); return false;
         }
-        const QString probe = directory.filePath(QStringLiteral(".ztgui-probe-") + token);
+        const QString probe = directory.filePath(QStringLiteral(".zto-probe-") + token);
         QSaveFile file(probe);
-        const QByteArray payload("ztgui-storage-probe");
+        const QByteArray payload("zto-storage-probe");
         if (!file.open(QIODevice::WriteOnly) || file.write(payload) != payload.size() || !file.commit()) {
             error = file.errorString(); return false;
         }
@@ -342,7 +342,7 @@ bool StorageContext::probeWritable(const QString &root, QString &error)
     }
     // Another process holding the coordination lock does not make the root
     // read-only. Permission and unknown errors do.
-    QLockFile lock(QDir(root).filePath(QStringLiteral(".ztgui/coord.lock")));
+    QLockFile lock(QDir(root).filePath(QStringLiteral(".zto/coord.lock")));
     lock.setStaleLockTime(30000);
     if (!lock.tryLock(500) && lock.error() != QLockFile::LockFailedError) {
         error = QStringLiteral("无法创建存储协调锁"); return false;
@@ -379,7 +379,7 @@ QByteArray StorageContext::ownershipRecord() const
 {
     return QJsonDocument(QJsonObject{
         {"format", 1},
-        {"kind", QStringLiteral("ztgui-storage")},
+        {"kind", QStringLiteral("zto-storage")},
         {"installKey", m_installKey},
         {"userKey", m_userKey},
         {"mode", modeName(m_mode)},
@@ -616,11 +616,11 @@ bool StorageContext::migrateSharedData(QString &error)
         addWarning(QStringLiteral("共享插件数据目录是链接，未迁移：%1").arg(dataSource));
     }
 
-    process(QStringLiteral("plugin-ownership"), QDir(m_sharedRoot).filePath(QStringLiteral(".ztgui/plugins")),
+    process(QStringLiteral("plugin-ownership"), QDir(m_sharedRoot).filePath(QStringLiteral(".zto/plugins")),
             QDir(metadataDirectory()).filePath(QStringLiteral("plugins")),
             QStringLiteral("plugin-ownership"), true);
     process(QStringLiteral("settings-migration"),
-            QDir(m_sharedRoot).filePath(QStringLiteral(".ztgui/settings-migration.json")),
+            QDir(m_sharedRoot).filePath(QStringLiteral(".zto/settings-migration.json")),
             QDir(metadataDirectory()).filePath(QStringLiteral("settings-migration.json")),
             QStringLiteral("settings-migration"), false);
 
@@ -674,4 +674,4 @@ bool StorageContext::prepare(QString &error)
     return true;
 }
 
-} // namespace vusiif::ztgui::storage
+} // namespace vusiif::zto::storage

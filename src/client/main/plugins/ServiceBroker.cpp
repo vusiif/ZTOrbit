@@ -17,7 +17,7 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
-namespace vusiif::ztgui::plugins {
+namespace vusiif::zto::plugins {
 using namespace util;
 static void discardCallbackScope(std::unique_ptr<QObject> &scope) {
     if(!scope) return;
@@ -166,7 +166,7 @@ void ServiceBroker::start(const QString &entry,const QString &root,const QJsonOb
     m_cacheRoot=root;
     m_provides=manifest["provides"].toArray();
     m_credential=QUuid::createUuid().toString(QUuid::Id128)+QUuid::createUuid().toString(QUuid::Id128);
-    m_serverName="ztgui-"+QUuid::createUuid().toString(QUuid::Id128);
+    m_serverName="zto-"+QUuid::createUuid().toString(QUuid::Id128);
     m_server.setSocketOptions(QLocalServer::UserAccessOption);
     if(!m_server.listen(m_serverName)) { fail(m_server.errorString()); return; }
     m_dataServer.setSocketOptions(QLocalServer::UserAccessOption);
@@ -187,7 +187,7 @@ void ServiceBroker::start(const QString &entry,const QString &root,const QJsonOb
     env.insert("QT_QPA_PLATFORM_PLUGIN_PATH",root+"/runtime/qt-plugins/platforms");
     env.remove("QT_QPA_PLATFORM"); // A headless parent test must not disable child capture.
     env.insert("QT_FORCE_STDERR_LOGGING","1"); // CREATE_NO_WINDOW must still forward Qt diagnostics through the pipe.
-    env.insert("ZTGUI_SERVICE_TOKEN",m_credential);
+    env.insert("ZTO_SERVICE_TOKEN",m_credential);
     m_process.setProcessEnvironment(env); m_process.setWorkingDirectory(root);
     m_process.setProgram(entry); m_process.setArguments({"--service-socket",m_serverName,"--service-generation",QString::number(m_generation),"--host-pid",QString::number(QCoreApplication::applicationPid())});
     m_startDeadline=QDateTime::currentMSecsSinceEpoch()+15000; m_timer.start(); m_process.start();

@@ -9,7 +9,7 @@
 #include <windows.h>
 #endif
 
-namespace vusiif::ztgui::zerotier {
+namespace vusiif::zto::zerotier {
 namespace {
 class PingProcess final : public QProcess {
 public:

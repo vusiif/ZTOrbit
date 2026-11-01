@@ -5,7 +5,7 @@
 #include "../../client/main/storage/StorageContext.h"
 #include "../../client/main/storage/StorageMaintenance.h"
 #include "PluginPackage.h"
-#include <ztgui/PluginInterface.h>
+#include <zto/PluginInterface.h>
 #include <QFile>
 #include <QDateTime>
 #include <QJsonArray>
@@ -20,10 +20,10 @@
 #include <QTimer>
 #include <QtTest>
 #include <algorithm>
-using namespace vusiif::ztgui;
+using namespace vusiif::zto;
 using namespace api;
 using namespace plugins;
-namespace vusiif::ztgui::package { QString writeLegacy(const QString &,const QString &,QJsonObject); }
+namespace vusiif::zto::package { QString writeLegacy(const QString &,const QString &,QJsonObject); }
 class LoaderTests : public QObject {
     Q_OBJECT
     QTemporaryDir settings;
@@ -87,7 +87,7 @@ private slots:
         const auto path = copy(FIXTURE_GOOD, directory);
         const auto dataRoot = QDir(data.path()).filePath("plugins-data");
         const auto dataDirectory = QDir(dataRoot).filePath("id-test-dynamic");
-        const auto metadataDirectory = QDir(data.path()).filePath(".ztgui");
+        const auto metadataDirectory = QDir(data.path()).filePath(".zto");
         QVERIFY(QDir().mkpath(dataDirectory));
         {
             QFile config(QDir(dataDirectory).filePath("config.json"));
@@ -139,7 +139,7 @@ private slots:
         const auto install = QDir(directory.path()).filePath("plugins");
         const auto dataRoot = QDir(directory.path()).filePath("plugins-data");
         QVERIFY(QDir().mkpath(install));
-        const auto broken = QDir(install).filePath("broken.ztplugin");
+        const auto broken = QDir(install).filePath("broken.z2plugin");
         {
             QFile file(broken);
             QVERIFY(file.open(QIODevice::WriteOnly));
@@ -182,7 +182,7 @@ private slots:
             const auto install = QDir(directory.path()).filePath("plugins");
             const auto dataRoot = QDir(directory.path()).filePath("plugins-data");
             if (!QDir().mkpath(install)) return QStringLiteral("create install directory");
-            if (!QFile::copy(package, QDir(install).filePath("plugin.ztplugin")))
+            if (!QFile::copy(package, QDir(install).filePath("plugin.z2plugin")))
                 return QStringLiteral("copy package");
             const auto dataDirectory = QDir(dataRoot).filePath("id-" + id.toLower());
             if (!QDir().mkpath(dataDirectory)) return QStringLiteral("create data directory");
@@ -198,7 +198,7 @@ private slots:
                 // A concurrent scan of the same root would reject the load as a
                 // duplicate; loadFile performs discovery itself.
                 QSignalSpy finished(&loader, &PluginLoader::loadFinished);
-                if (!loader.loadFile(QDir(install).filePath("plugin.ztplugin"), registry).ok())
+                if (!loader.loadFile(QDir(install).filePath("plugin.z2plugin"), registry).ok())
                     return QStringLiteral("loadFile rejected");
                 if (finished.isEmpty() && !finished.wait(15000)) return QStringLiteral("load timed out");
                 if (finished.first()[1].toBool()) return QStringLiteral("fixture unexpectedly loaded");
@@ -242,7 +242,7 @@ private slots:
         const auto path = copy(FIXTURE_GOOD, directory);
         const auto dataRoot = data.filePath("plugins-data");
         const auto dataDirectory = QDir(dataRoot).filePath("id-test-dynamic");
-        const auto metadata = QDir(data.path()).filePath(".ztgui");
+        const auto metadata = QDir(data.path()).filePath(".zto");
         const auto record = QDir(metadata).filePath("pending-deletions/test-dynamic.json");
         QVERIFY(QDir().mkpath(dataDirectory));
         {
@@ -274,7 +274,7 @@ private slots:
 
         // 2) The package cannot be moved into the controlled pending area: the
         // record is dropped again and both the package and data stay in place.
-        const auto pendingDirectory = QDir(directory.path()).filePath(".ztgui-pending-deletions");
+        const auto pendingDirectory = QDir(directory.path()).filePath(".zto-pending-deletions");
         {
             QFile blocker(pendingDirectory);
             QVERIFY(blocker.open(QIODevice::WriteOnly));
@@ -333,7 +333,7 @@ private slots:
         const auto path = copy(FIXTURE_GOOD, directory);
         const auto dataRoot = QDir(data.path()).filePath("plugins-data");
         const auto dataDirectory = QDir(dataRoot).filePath("id-test-dynamic");
-        const auto ownershipPath = QDir(data.path()).filePath(".ztgui/plugins/test-dynamic.json");
+        const auto ownershipPath = QDir(data.path()).filePath(".zto/plugins/test-dynamic.json");
         QVERIFY(QDir().mkpath(dataDirectory));
         {
             QFile config(QDir(dataDirectory).filePath("config.json"));
@@ -352,7 +352,7 @@ private slots:
         QVERIFY(refused.message.contains(QStringLiteral("所有权")));
         QVERIFY(QFileInfo::exists(path));
         QVERIFY(QFileInfo::exists(QDir(dataDirectory).filePath("config.json")));
-        QVERIFY(!QFileInfo::exists(QDir(data.path()).filePath(".ztgui/pending-deletions/test-dynamic.json")));
+        QVERIFY(!QFileInfo::exists(QDir(data.path()).filePath(".zto/pending-deletions/test-dynamic.json")));
 
         {
             QFile corrupt(ownershipPath);
@@ -414,10 +414,10 @@ private slots:
 
         const auto sourceDirectory = directory.filePath("source");
         QVERIFY(QDir().mkpath(sourceDirectory));
-        const auto source = QDir(sourceDirectory).filePath("other.ztplugin");
+        const auto source = QDir(sourceDirectory).filePath("other.z2plugin");
         QVERIFY(QFile::copy(FIXTURE_GOOD, source));
         QVERIFY(!importPlugin(source, directory.path()).isEmpty());
-        QVERIFY(!QFileInfo::exists(QDir(directory.path()).filePath("other.ztplugin")));
+        QVERIFY(!QFileInfo::exists(QDir(directory.path()).filePath("other.z2plugin")));
 
         QVERIFY(probe.waitForFinished(15000));
         QCOMPARE(probe.exitCode(), 0);
@@ -435,7 +435,7 @@ private slots:
         const auto path = copy(FIXTURE_GOOD, directory);
         const auto dataRoot = QDir(data.path()).filePath("plugins-data");
         const auto dataDirectory = QDir(dataRoot).filePath("id-test-dynamic");
-        const auto metadata = QDir(data.path()).filePath(".ztgui");
+        const auto metadata = QDir(data.path()).filePath(".zto");
         const auto record = QDir(metadata).filePath("pending-deletions/test-dynamic.json");
         QVERIFY(QDir().mkpath(dataDirectory));
         {
@@ -486,9 +486,9 @@ private slots:
         const auto root = base.filePath("case");
         const auto pluginDirectory = QDir(root).filePath("plugins");
         const auto dataRoot = QDir(root).filePath("plugins-data");
-        const auto metadataRoot = QDir(root).filePath(".ztgui");
-        const auto package = QDir(pluginDirectory).filePath("plugin.ztplugin");
-        const auto pending = QDir(pluginDirectory).filePath(".ztgui-pending-deletions/plugin.ztplugin");
+        const auto metadataRoot = QDir(root).filePath(".zto");
+        const auto package = QDir(pluginDirectory).filePath("plugin.z2plugin");
+        const auto pending = QDir(pluginDirectory).filePath(".zto-pending-deletions/plugin.z2plugin");
         const auto recordPath = QDir(metadataRoot).filePath("pending-deletions/test-dynamic.json");
         const auto dataDirectory = QDir(dataRoot).filePath("id-test-dynamic");
         const auto createMovedCase = [&](bool reinstall) {
@@ -503,7 +503,7 @@ private slots:
             saved.write("{\"keep\":true}");
             saved.close();
             if (reinstall)
-                QVERIFY(QFile::copy(FIXTURE_GOOD, QDir(pluginDirectory).filePath("reinstalled.ztplugin")));
+                QVERIFY(QFile::copy(FIXTURE_GOOD, QDir(pluginDirectory).filePath("reinstalled.z2plugin")));
             QVERIFY(writeJson(recordPath, pendingDeletionRecord(root, pluginDirectory, dataRoot, package,
                                                                 pending, "moved")));
         };
@@ -537,7 +537,7 @@ private slots:
             PluginLoader loader;
             QCOMPARE(loader.recoverPendingDeletions(pluginDirectory, dataRoot), 1);
             QVERIFY(QFileInfo::exists(QDir(dataDirectory).filePath("config.json")));
-            QVERIFY(QFileInfo::exists(QDir(pluginDirectory).filePath("reinstalled.ztplugin")));
+            QVERIFY(QFileInfo::exists(QDir(pluginDirectory).filePath("reinstalled.z2plugin")));
             QVERIFY(!QFileInfo::exists(pending));
             QVERIFY(!QFileInfo::exists(recordPath));
         }
@@ -574,8 +574,8 @@ private slots:
             QVERIFY(keep.open(QIODevice::WriteOnly));
             keep.write("legacy");
         }
-        QVERIFY(QFile::copy(FIXTURE_TWIN_A, QDir(pluginDirectory).filePath("twin-a.ztplugin")));
-        QVERIFY(QFile::copy(FIXTURE_TWIN_B, QDir(pluginDirectory).filePath("twin-b.ztplugin")));
+        QVERIFY(QFile::copy(FIXTURE_TWIN_A, QDir(pluginDirectory).filePath("twin-a.z2plugin")));
+        QVERIFY(QFile::copy(FIXTURE_TWIN_B, QDir(pluginDirectory).filePath("twin-b.z2plugin")));
         const auto storage = storage::StorageContext::forTesting(root);
         PluginRegistry registry;
         PluginLoader loader;
@@ -631,8 +631,8 @@ private slots:
             QVERIFY(keep.open(QIODevice::WriteOnly));
             keep.write("legacy");
         }
-        QVERIFY(QFile::copy(FIXTURE_TWIN_A, QDir(pluginDirectory).filePath("twin-a.ztplugin")));
-        QVERIFY(QFile::copy(FIXTURE_TWIN_B, QDir(pluginDirectory).filePath("twin-b.ztplugin")));
+        QVERIFY(QFile::copy(FIXTURE_TWIN_A, QDir(pluginDirectory).filePath("twin-a.z2plugin")));
+        QVERIFY(QFile::copy(FIXTURE_TWIN_B, QDir(pluginDirectory).filePath("twin-b.z2plugin")));
         const auto storage = storage::StorageContext::forTesting(root);
         const auto metadata = storage.metadataDirectory();
         const auto corruptRecord = QDir(metadata).filePath("plugins/test-twin-b.json");
@@ -706,8 +706,8 @@ private slots:
             QVERIFY(keep.open(QIODevice::WriteOnly));
             keep.write("legacy");
         }
-        QVERIFY(QFile::copy(FIXTURE_TWIN_A, QDir(pluginDirectory).filePath("twin-a.ztplugin")));
-        const auto corrupt = QDir(pluginDirectory).filePath("broken.ztplugin");
+        QVERIFY(QFile::copy(FIXTURE_TWIN_A, QDir(pluginDirectory).filePath("twin-a.z2plugin")));
+        const auto corrupt = QDir(pluginDirectory).filePath("broken.z2plugin");
         {
             QFile package(corrupt);
             QVERIFY(package.open(QIODevice::WriteOnly));
@@ -775,9 +775,9 @@ private slots:
         const auto root = base.filePath("case");
         const auto pluginDirectory = QDir(root).filePath("plugins");
         const auto dataRoot = QDir(root).filePath("plugins-data");
-        const auto metadataRoot = QDir(root).filePath(".ztgui");
-        const auto package = QDir(pluginDirectory).filePath("plugin.ztplugin");
-        const auto pending = QDir(pluginDirectory).filePath(".ztgui-pending-deletions/plugin.ztplugin");
+        const auto metadataRoot = QDir(root).filePath(".zto");
+        const auto package = QDir(pluginDirectory).filePath("plugin.z2plugin");
+        const auto pending = QDir(pluginDirectory).filePath(".zto-pending-deletions/plugin.z2plugin");
         const auto recordPath = QDir(metadataRoot).filePath("pending-deletions/test-dynamic.json");
         const auto dataDirectory = QDir(dataRoot).filePath("id-test-dynamic");
         const auto leaseFile = QDir(metadataRoot).filePath("leases/id-test-dynamic/run-other.json");
@@ -829,9 +829,9 @@ private slots:
         const auto root = base.filePath("case");
         const auto pluginDirectory = QDir(root).filePath("plugins");
         const auto dataRoot = QDir(root).filePath("plugins-data");
-        const auto metadataRoot = QDir(root).filePath(".ztgui");
-        const auto package = QDir(pluginDirectory).filePath("plugin.ztplugin");
-        const auto pending = QDir(pluginDirectory).filePath(".ztgui-pending-deletions/plugin.ztplugin");
+        const auto metadataRoot = QDir(root).filePath(".zto");
+        const auto package = QDir(pluginDirectory).filePath("plugin.z2plugin");
+        const auto pending = QDir(pluginDirectory).filePath(".zto-pending-deletions/plugin.z2plugin");
         const auto recordPath = QDir(metadataRoot).filePath("pending-deletions/test-dynamic.json");
         const auto dataDirectory = QDir(dataRoot).filePath("id-test-dynamic");
         const auto createCase = [&](const QString &stage, bool original, bool waiting, bool dataPresent,
@@ -921,7 +921,7 @@ private slots:
             // A record whose pending path is outside the controlled directory
             // is never deleted recursively or moved.
             createCase("moved", false, false, true, false);
-            const auto stray = QDir(pluginDirectory).filePath("stray.ztplugin");
+            const auto stray = QDir(pluginDirectory).filePath("stray.z2plugin");
             QVERIFY(QFile::copy(FIXTURE_GOOD, stray));
             QVERIFY(writeJson(recordPath, pendingDeletionRecord(root, pluginDirectory, dataRoot, package,
                                                                 stray, "moved")));
@@ -956,9 +956,9 @@ private slots:
     void api03PackageIsRejectedBeforeEntry() {        const auto p=package::inspect(FIXTURE_GOOD); QVERIFY(p.ok());
         std::unique_ptr<QTemporaryDir> extracted; std::unique_ptr<QLockFile> lock; QString library;
         QVERIFY(package::extract(p,extracted,library,lock).isEmpty());
-        QTemporaryDir temp; const auto path=temp.filePath("api03.ztplugin"),log=temp.filePath("trace");
+        QTemporaryDir temp; const auto path=temp.filePath("api03.z2plugin"),log=temp.filePath("trace");
         auto oldInfo=p.info; oldInfo["apiVersion"]="0.3";
-        QVERIFY(package::write(library,path,oldInfo).isEmpty()); qputenv("ZTGUI_PLUGIN_LIFETIME_FILE",log.toUtf8());
+        QVERIFY(package::write(library,path,oldInfo).isEmpty()); qputenv("ZTO_PLUGIN_LIFETIME_FILE",log.toUtf8());
         PluginRegistry registry; PluginLoader loader; const auto result=load(loader,path,registry);
         QCOMPARE(result.error,Error::InvalidPlugin); QVERIFY(result.message.contains("API version"));
         QVERIFY(registry.plugins().isEmpty()); QVERIFY(trace(log).isEmpty());
@@ -967,16 +967,16 @@ private slots:
         auto p=package::inspect(FIXTURE_GOOD); QVERIFY(p.ok());
         std::unique_ptr<QTemporaryDir> extracted; std::unique_ptr<QLockFile> lock; QString library;
         QVERIFY(package::extract(p,extracted,library,lock).isEmpty());
-        QTemporaryDir temp; const auto path=temp.filePath("legacy-v1.ztplugin");
+        QTemporaryDir temp; const auto path=temp.filePath("legacy-v1.z2plugin");
         QVERIFY(package::writeLegacy(library,path,p.info).isEmpty());
         PluginRegistry registry; PluginLoader loader; QVERIFY(load(loader,path,registry).ok());
         QCOMPARE(registry.plugins().size(),1); QVERIFY(loader.unload("test-dynamic",registry).ok()); QTRY_VERIFY(registry.plugins().isEmpty());
     }
     void initTestCase() {
-        QCoreApplication::setOrganizationName("ZTGUI-Package-Tests"); QCoreApplication::setApplicationName("LoaderTests");
+        QCoreApplication::setOrganizationName("ZTOrbit-Package-Tests"); QCoreApplication::setApplicationName("LoaderTests");
         QSettings::setDefaultFormat(QSettings::IniFormat); QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settings.path());
     }
-    void cleanup() { QSettings().clear(); qunsetenv("ZTGUI_PLUGIN_DESTROY_THROWS"); qunsetenv("ZTGUI_PLUGIN_NESTED_CALLBACK"); qunsetenv("ZTGUI_PLUGIN_LIFETIME_FILE"); qunsetenv("ZTGUI_PLUGIN_CREATE_STEPS"); qunsetenv("ZTGUI_PLUGIN_PREPARATION_STARTED_FILE"); }
+    void cleanup() { QSettings().clear(); qunsetenv("ZTO_PLUGIN_DESTROY_THROWS"); qunsetenv("ZTO_PLUGIN_NESTED_CALLBACK"); qunsetenv("ZTO_PLUGIN_LIFETIME_FILE"); qunsetenv("ZTO_PLUGIN_CREATE_STEPS"); qunsetenv("ZTO_PLUGIN_PREPARATION_STARTED_FILE"); }
     void validPackageRoundTripAndReload() {
         QTemporaryDir directory; const auto path=copy(FIXTURE_GOOD,directory); QVERIFY(!path.isEmpty());
         PluginRegistry registry; PluginLoader loader; QQmlEngine engine; QQuickItem parent;
@@ -995,7 +995,7 @@ private slots:
         const auto original=package::inspect(FIXTURE_GOOD); QVERIFY(original.ok());
         std::unique_ptr<QTemporaryDir> extracted; std::unique_ptr<QLockFile> lock; QString library;
         QVERIFY(package::extract(original,extracted,library,lock).isEmpty());
-        QTemporaryDir directory; const auto data=directory.filePath("data"),path=directory.filePath("large.ztplugin");
+        QTemporaryDir directory; const auto data=directory.filePath("data"),path=directory.filePath("large.z2plugin");
         QFile resource(data); QVERIFY(resource.open(QIODevice::WriteOnly));
         const QByteArray block(1024*1024,'x');
         for(int i=0;i<64;++i) QCOMPARE(resource.write(block),block.size()); resource.close();
@@ -1020,7 +1020,7 @@ private slots:
     }
     void shutdownBeforePackageStartsSkipsPluginEntry() {
         QTemporaryDir directory; const auto path=copy(FIXTURE_GOOD,directory),log=directory.filePath("trace");
-        qputenv("ZTGUI_PLUGIN_LIFETIME_FILE",log.toUtf8());
+        qputenv("ZTO_PLUGIN_LIFETIME_FILE",log.toUtf8());
         PluginRegistry registry; PluginLoader loader;
         QSignalSpy finished(&loader,&PluginLoader::loadFinished);
         QVERIFY(loader.loadFile(path,registry).ok()); loader.requestShutdown();
@@ -1048,10 +1048,10 @@ private slots:
     void incompatibleBuildAndInvalidIdsRejectedBeforeEntry() {
         const auto pkg=package::inspect(FIXTURE_GOOD); QVERIFY(pkg.ok()); auto info=pkg.info;
         for(const auto &key:{"host","platform","architecture","compilerAbi","qtVersion","iid","apiVersion"}) {
-            auto changed=info; changed[key]="invalid"; QVERIFY(!package::validate(changed,"client",ApiVersion,ZTGUI_PLUGIN_IID).isEmpty());
+            auto changed=info; changed[key]="invalid"; QVERIFY(!package::validate(changed,"client",ApiVersion,ZTO_PLUGIN_IID).isEmpty());
         }
         for(const auto &id:{"with.dot","builtin","../escape","中文","with space"}) {
-            auto changed=info; changed["id"]=id; QVERIFY(!package::validate(changed,"client",ApiVersion,ZTGUI_PLUGIN_IID).isEmpty());
+            auto changed=info; changed["id"]=id; QVERIFY(!package::validate(changed,"client",ApiVersion,ZTO_PLUGIN_IID).isEmpty());
         }
         PluginRegistry registry; MenuContribution menu; menu.id="overview"; menu.title="Title"; menu.createPage=[](QQmlEngine *,QQuickItem *p) { auto *item=new QQuickItem(p);item->setParent(p);return item; };
         QVERIFY(registry.registerPlugin({{"Mixed-Id","First","1"},{menu}}).ok());
@@ -1060,7 +1060,7 @@ private slots:
     void runtimeUnloadDuringInitializationIsResponsive() {
         QTemporaryDir directory; const auto path=copy(FIXTURE_CANCELLABLE_BLOCKED,directory); QVERIFY(!path.isEmpty());
         const auto marker=directory.filePath("started"),log=directory.filePath("trace");
-        qputenv("ZTGUI_PLUGIN_PREPARATION_STARTED_FILE",marker.toUtf8()); qputenv("ZTGUI_PLUGIN_LIFETIME_FILE",log.toUtf8());
+        qputenv("ZTO_PLUGIN_PREPARATION_STARTED_FILE",marker.toUtf8()); qputenv("ZTO_PLUGIN_LIFETIME_FILE",log.toUtf8());
         PluginRegistry registry; PluginLoader loader; QVERIFY(loader.loadFile(path,registry).ok()); QTRY_VERIFY(QFileInfo::exists(marker));
         int ticks=0; QTimer timer; connect(&timer,&QTimer::timeout,this,[&] { ++ticks; }); timer.start(10);
         QElapsedTimer elapsed; elapsed.start(); QVERIFY(loader.unload("test-cancellable_blocked",registry).ok()); QVERIFY(elapsed.elapsed()<50);
@@ -1072,7 +1072,7 @@ private slots:
     }
     void activePageAndFactoriesDieBeforeDestroy() {
         QTemporaryDir directory; const auto path=copy(FIXTURE_LIFECYCLE,directory); const auto log=directory.filePath("trace");
-        qputenv("ZTGUI_PLUGIN_LIFETIME_FILE",log.toUtf8()); PluginRegistry registry; PluginLoader loader; QQmlEngine engine; QQuickItem parent;
+        qputenv("ZTO_PLUGIN_LIFETIME_FILE",log.toUtf8()); PluginRegistry registry; PluginLoader loader; QQmlEngine engine; QQuickItem parent;
         QVERIFY(load(loader,path,registry).ok()); QTRY_COMPARE(registry.preparationState("test-lifecycle"),PreparationState::Ready);
         QVERIFY(registry.page("test-lifecycle/overview",&engine,&parent).result.ok()); QVERIFY(registry.activateMenu("test-lifecycle/overview").ok());
         QVERIFY(registry.activateMenu(SettingsMenuId).ok()); QVERIFY(registry.activateMenu("test-lifecycle/overview").ok());
@@ -1083,7 +1083,7 @@ private slots:
     }
     void nestedDataCallbackKeepsLibraryAliveUntilReturn() {
         QTemporaryDir directory; const auto path=copy(FIXTURE_LIFECYCLE,directory); const auto log=directory.filePath("trace");
-        qputenv("ZTGUI_PLUGIN_LIFETIME_FILE",log.toUtf8()); qputenv("ZTGUI_PLUGIN_NESTED_CALLBACK","1");
+        qputenv("ZTO_PLUGIN_LIFETIME_FILE",log.toUtf8()); qputenv("ZTO_PLUGIN_NESTED_CALLBACK","1");
         PluginRegistry registry; PluginLoader loader; QVERIFY(load(loader,path,registry).ok()); QTRY_COMPARE(registry.preparationState("test-lifecycle"),PreparationState::Ready);
         QTimer trigger; trigger.setInterval(5); connect(&trigger,&QTimer::timeout,this,[&] {
             if(trace(log).contains("callback-start")) { trigger.stop(); QVERIFY(loader.unload("test-lifecycle",registry).ok()); }
@@ -1094,13 +1094,13 @@ private slots:
     void cleanupFailureRetainsLibraryAndPreventsReload() {
         QTemporaryDir directory; const auto path=copy(FIXTURE_LIFECYCLE,directory);
         PluginRegistry registry; PluginLoader loader; QVERIFY(load(loader,path,registry).ok()); QTRY_COMPARE(registry.preparationState("test-lifecycle"),PreparationState::Ready);
-        qputenv("ZTGUI_PLUGIN_DESTROY_THROWS","1"); QSignalSpy finished(&loader,&PluginLoader::unloadFinished);
+        qputenv("ZTO_PLUGIN_DESTROY_THROWS","1"); QSignalSpy finished(&loader,&PluginLoader::unloadFinished);
         QVERIFY(loader.unload("test-lifecycle",registry).ok()); QTRY_COMPARE(finished.size(),1);
         QVERIFY(!finished.first()[1].toBool()); QVERIFY(finished.first()[2].toString().contains("cleanup")); QVERIFY(registry.plugins().isEmpty());
         QCOMPARE(load(loader,path,registry).error,Error::DuplicatePlugin); loader.requestShutdown(); QTest::qWait(100); QVERIFY(!loader.shutdownComplete());
     }
     void initializationFailureCleansOnce() {
-        QTemporaryDir directory; const auto path=copy(FIXTURE_LIFECYCLE_FAILED,directory); const auto log=directory.filePath("trace"); qputenv("ZTGUI_PLUGIN_LIFETIME_FILE",log.toUtf8());
+        QTemporaryDir directory; const auto path=copy(FIXTURE_LIFECYCLE_FAILED,directory); const auto log=directory.filePath("trace"); qputenv("ZTO_PLUGIN_LIFETIME_FILE",log.toUtf8());
         PluginRegistry registry; PluginLoader loader; QSignalSpy finished(&loader,&PluginLoader::loadFinished); QVERIFY(loader.loadFile(path,registry).ok());
         QTRY_COMPARE(finished.size(),1); QVERIFY(!finished.first()[1].toBool());
         QTRY_VERIFY(!loader.catalog().first().toMap()["loading"].toBool() && !loader.catalog().first().toMap()["loaded"].toBool());
@@ -1108,8 +1108,8 @@ private slots:
         const auto text=trace(log); QCOMPARE(text.count("destroy\n"),1); QCOMPARE(text.count("entry\n"),1);
     }
     void shutdownCancelsQueuedTasksAndUnloadsBeforeCompletion() {
-        QTemporaryDir directory; const auto log=directory.filePath("trace"); qputenv("ZTGUI_PLUGIN_LIFETIME_FILE",log.toUtf8()); qputenv("ZTGUI_PLUGIN_CREATE_STEPS","1000");
-        QVERIFY(QFile::copy(FIXTURE_CANCELLABLE,directory.filePath("a.ztplugin"))); QVERIFY(QFile::copy(FIXTURE_CANCELLABLE_SECOND,directory.filePath("b.ztplugin"))); QVERIFY(QFile::copy(FIXTURE_CANCELLABLE_QUEUED,directory.filePath("c.ztplugin")));
+        QTemporaryDir directory; const auto log=directory.filePath("trace"); qputenv("ZTO_PLUGIN_LIFETIME_FILE",log.toUtf8()); qputenv("ZTO_PLUGIN_CREATE_STEPS","1000");
+        QVERIFY(QFile::copy(FIXTURE_CANCELLABLE,directory.filePath("a.z2plugin"))); QVERIFY(QFile::copy(FIXTURE_CANCELLABLE_SECOND,directory.filePath("b.z2plugin"))); QVERIFY(QFile::copy(FIXTURE_CANCELLABLE_QUEUED,directory.filePath("c.z2plugin")));
         PluginRegistry registry; PluginLoader loader; loader.scan(directory.path(),registry);
         QTRY_VERIFY(trace(log).contains("started:test-cancellable\n")); QTRY_VERIFY(trace(log).contains("started:test-cancellable_second\n"));
         QTRY_COMPARE(registry.plugins().size(),3);

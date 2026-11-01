@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if (!(Test-Path -LiteralPath $Probe -PathType Leaf)) { throw "Probe executable not found: $Probe" }
 
-$root = Join-Path ([IO.Path]::GetTempPath()) ('ztgui-readonly-' + [guid]::NewGuid().ToString('N'))
+$root = Join-Path ([IO.Path]::GetTempPath()) ('zto-readonly-' + [guid]::NewGuid().ToString('N'))
 $shared = Join-Path $root 'application'
 $personal = Join-Path $root 'user-data'
 New-Item -ItemType Directory -Path $shared -Force | Out-Null
@@ -53,7 +53,7 @@ try {
     }
     $resolved = [IO.Path]::GetFullPath($root)
     $parent = [IO.Path]::GetDirectoryName($resolved)
-    if (![IO.Path]::GetFileName($resolved).StartsWith('ztgui-readonly-') -or
+    if (![IO.Path]::GetFileName($resolved).StartsWith('zto-readonly-') -or
         $parent -ne [IO.Path]::GetTempPath().TrimEnd('\', '/')) {
         throw 'Unsafe test cleanup'
     }

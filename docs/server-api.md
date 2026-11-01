@@ -1,20 +1,20 @@
 # 服务端插件 API 与传输协议
 
-宿主是 Java 25 + Netty 的 `zt-server`。公开 SDK 在 `src/server/api/`（Maven 模块 `ztserver-api`），实现位于 `src/server/main/`（模块 `ztserver`），Java 插件默认在 `src/plugins/<name>/server/`。服务端程序版本由客户端侧维护的根 `SERVER_VERSION` 指定，当前程序 `0.2.1`、API `0.2`；Java 插件必须精确匹配完整 API 版本（含预发布后缀）。客户端与服务端版本相互独立。
+宿主是 Java 25 + Netty 的 `ztohub`。公开 SDK 在 `src/server/api/`（Maven 模块 `ztohub-api`），实现位于 `src/server/main/`（模块 `ztohub`），Java 插件默认在 `src/plugins/<name>/server/`。服务端程序版本由客户端侧维护的根 `SERVER_VERSION` 指定，当前程序 `0.2.2`、API `0.2`；Java 插件必须精确匹配完整 API 版本（含预发布后缀）。客户端与服务端版本相互独立。
 
-旧 C++ 服务端与 C++ `.ztplugin` 已归档到 `src/server-old/`，不再由宿主加载。
+旧 C++ 服务端与 C++ `.z2plugin` 已归档到 `src/server-old/`，不再由宿主加载。
 
 ## 独立 SDK
 
-发布构建生成 `build/dist/ZTServer-api-v0.2.zip`，目录本身是 Maven 仓库根：
+发布构建生成 `build/dist/Z2Hub-api-v0.2.zip`，目录本身是 Maven 仓库根：
 
 ```text
-ZTServer-api-v0.2/
-  vusiif/ztgui/ztserver-api/0.2/
-    ztserver-api-0.2.jar
-    ztserver-api-0.2-sources.jar
-    ztserver-api-0.2-javadoc.jar
-    ztserver-api-0.2.pom
+Z2Hub-api-v0.2/
+  vusiif/ztohub/ztohub-api/0.2/
+    ztohub-api-0.2.jar
+    ztohub-api-0.2-sources.jar
+    ztohub-api-0.2-javadoc.jar
+    ztohub-api-0.2.pom
   sample/           最小插件项目
   sdk.json          API/程序版本、JDK 要求、输入指纹
   README.md         SDK 说明与独立消费示例
@@ -24,8 +24,8 @@ ZTServer-api-v0.2/
 
 ```xml
 <dependency>
-  <groupId>vusiif.ztgui</groupId>
-  <artifactId>ztserver-api</artifactId>
+  <groupId>vusiif.ztohub</groupId>
+  <artifactId>ztohub-api</artifactId>
   <version>0.2</version>
   <scope>provided</scope>
 </dependency>
@@ -34,12 +34,12 @@ ZTServer-api-v0.2/
 `provided` 表示运行时由宿主提供 API、Jackson 与 Netty，插件 JAR 不应 shade 这些依赖。SDK 的 `sample/pom.xml` 通过 `file:` 仓库直接引用解压目录，可在临时本地仓库验证：
 
 ```bash
-mvn -f build/dist/ZTServer-api-v0.2/sample/pom.xml package
+mvn -f build/dist/Z2Hub-api-v0.2/sample/pom.xml package
 ```
 
 ## 插件格式与加载
 
-插件是 `plugins/*.jar`（直接子文件、非符号链接、按文件名排序）。JAR 内 `META-INF/ztserver-plugin.json`：
+插件是 `plugins/*.jar`（直接子文件、非符号链接、按文件名排序）。JAR 内 `META-INF/ztohub-plugin.json`：
 
 ```json
 {
@@ -49,17 +49,17 @@ mvn -f build/dist/ZTServer-api-v0.2/sample/pom.xml package
   "name": "语音聊天",
   "version": "0.1.0",
   "apiVersion": "0.2",
-  "mainClass": "vusiif.ztgui.voicechat.VoiceChatPlugin"
+  "mainClass": "vusiif.ztohub.voicechat.VoiceChatPlugin"
 }
 ```
 
-校验规则：`formatVersion==1`、`host=="server"`、ID 匹配 `[A-Za-z0-9_-]{1,128}` 且大小写不敏感地不等于 `builtin`、显示名去空白非空、版本非空、`apiVersion` 精确等于宿主 API（当前 `0.2`，含预发布后缀）、`mainClass` 非空；JAR 最大 256 MiB，manifest 最大 64 KiB。仅接受直接子目录中的 `.jar`，拒绝符号链接和非普通文件；发现 `.ztplugin` 时记录 `unsupported package, use .jar`。
+校验规则：`formatVersion==1`、`host=="server"`、ID 匹配 `[A-Za-z0-9_-]{1,128}` 且大小写不敏感地不等于 `builtin`、显示名去空白非空、版本非空、`apiVersion` 精确等于宿主 API（当前 `0.2`，含预发布后缀）、`mainClass` 非空；JAR 最大 256 MiB，manifest 最大 64 KiB。仅接受直接子目录中的 `.jar`，拒绝符号链接和非普通文件；发现 `.z2plugin` 时记录 `unsupported package, use .jar`。
 
 宿主用 `URLClassLoader`（parent 为宿主 classloader）实例化 mainClass（无参构造），实例必须实现 `ServerPlugin`，`info()` 的 `id/name/version` 必须与 manifest 完全一致。重复 ID 或重复显示名（大小写不敏感）拒绝后加载的插件。加载失败关闭 classloader；启动失败保留已加载对象但不 ready，停止时仍调用 `onStop` 并关闭 classloader。只在启动时扫描，增减插件后重启。
 
 ## API 签名
 
-包名 `vusiif.ztgui.server.api`：
+包名 `vusiif.ztohub.api`：
 
 ```java
 public interface ServerPlugin {
@@ -106,6 +106,7 @@ public interface ZeroTierQueries {
 - `onStart`、`onTcpPacket`、`onUdpPacket`、`onConnectionClosed` 及所有查询/发送/网络回调在单一宿主事件线程执行；插件必须快速返回。
 - `onStart` 返回的 `StartTask` 在虚拟线程执行；返回 `StartResult.ok()` 后插件才 ready，失败则记录并保持不 ready。
 - `files()`/`logs()` 线程安全；`sendTcp/sendUdp/disconnect/queuedTcpBytes/scheduler()` 线程安全；其余方法限事件线程。
+- `sendUdp` 使用所有插件共享的宿主在途预算：最多 1 MiB 且最多 1024 个报文同时计费，每个报文按完整 ZTS1 字节数加 256 字节固定开销计费。跨线程调用先原子预留、再向 Netty 事件线程提交，事件线程任务队列不会绕过上限。超预算立即返回 `false`，不排队等待；`true` 只表示接纳排队，不表示已写入、已发送或已送达。完成、失败、取消、提交异常和停机竞态都只释放一次；停机期间拒绝新预留，已接纳写操作结束后预算归零。插件必须为 `false` 自行计数并按业务规则丢弃。
 - `onStop` 在取消查询/订阅/初始化任务并等待任务后调用；插件必须停止并等待自己的线程与定时器。
 - `scheduler()` 返回宿主事件线程调度器；`onStop` 中取消所有任务。
 
@@ -115,7 +116,7 @@ public interface ZeroTierQueries {
 
 插件数据目录为启动目录的 `plugins-data/<插件显示名>/`，插件日志在 `plugins-data/<显示名>/logs/YYMMDD-N.log`。文件名/目录名校验拒绝空、`.`、`..`、结尾点/空格、`/\\:*?"<>|`、控制字符、Windows 设备名和符号链接；`plugins-data` 必须是普通目录。相对路径拒绝绝对路径、盘符/冒号、NUL、空段、`.`/`..`、结尾点/空格，并逐段检查符号链接与类型；写入自动创建父目录并原子替换。
 
-插件 `logs().write(level,message)` 同时写宿主日志（行带 `[plugin-id]`）和插件日志，返回 `hostError/pluginError`；级别为 DEBUG/INFO/WARNING/ERROR，宿主日志级别名 WARN。宿主日志为启动目录 `logs/YYMMDD-N.log`，进程生命周期内固定文件；启动时写入 `服务启动 zt-server v<version>` 与 Java 运行时版本。
+插件 `logs().write(level,message)` 同时写宿主日志（行带 `[plugin-id]`）和插件日志，返回 `hostError/pluginError`；级别为 DEBUG/INFO/WARNING/ERROR，宿主日志级别名 WARN。宿主日志为启动目录 `logs/YYMMDD-N.log`，进程生命周期内固定文件；启动时写入 `服务启动 ztohub v<version>` 与 Java 运行时版本。
 
 ## ZTS1 外层协议
 
@@ -152,11 +153,11 @@ ID 字符集 `[A-Za-z0-9_-]{1,128}`，`builtin` 为保留路由。TCP 在包前�
 | `controller.networks` | 控制器网络列表（`/controller/network`） |
 | `controller.members` | 指定网络成员，返回 `nodeId/name/authorized/ipAssignments` |
 
-`controller.members` 的 `networkId` 必须匹配 `^[0-9a-f]{16}$`；最多 10000 个成员，4 并发、15 秒总期限；任一成员失败即返回错误；空列表返回 `[]`。宿主直连 `http://127.0.0.1:9993`，从 `/var/lib/zerotier-one/authtoken.secret` 读取 `X-ZT1-Auth`，禁用代理、不跟随重定向、10 秒超时、响应上限 4 MiB，不输出 token。最多 64 个待处理查询，超出返回 `Too many pending queries`。测试/运维可通过环境变量覆盖服务地址和 token：`ZTSERVER_ZT_API`、`ZTSERVER_ZT_TOKEN`（不写入公开 API）。
+`controller.members` 的 `networkId` 必须匹配 `^[0-9a-f]{16}$`；最多 10000 个成员，4 并发、15 秒总期限；任一成员失败即返回错误；空列表返回 `[]`。宿主直连 `http://127.0.0.1:9993`，从 `/var/lib/zerotier-one/authtoken.secret` 读取 `X-ZT1-Auth`，禁用代理、不跟随重定向、10 秒超时、响应上限 4 MiB，不输出 token。最多 64 个待处理查询，超出返回 `Too many pending queries`。测试/运维可通过环境变量覆盖服务地址和 token：`ZTOHUB_ZT_API`、`ZTOHUB_ZT_TOKEN`（不写入公开 API）。
 
 ## 网络中转
 
-完整保留旧 `src/shared/network/NetworkTransport.cpp` 行为，Java 实现在 `src/server/main/src/main/java/vusiif/ztgui/server/main/network/`。每网络使用 16 位 hex 网络 ID/10 位成员 ID、本机首个 IPv4、控制器 `.1`（/24）；测试可用 `transportController/transportControllerPort` 覆盖。服务器每网络 UDP socket 绑定本机 IP + 端口 0；客户端接收端口 18101，服务器接收端口 18100。
+完整保留旧 `src/shared/network/NetworkTransport.cpp` 行为，Java 实现在 `src/server/main/src/main/java/vusiif/ztohub/main/network/`。每网络使用本机首个 IPv4，ID、控制器地址与部署端口遵循[网络约定](network-conventions.md)；测试可用 `transportController/transportControllerPort` 覆盖，但覆盖入口不扩大部署支持范围。服务器每网络 UDP socket 绑定本机 IP + 端口 0；客户端接收端口 18101，服务器接收端口 18100。
 
 每 2 秒刷新 `controller.members`（20 秒期限）、`network.relays`、中转探活（1 秒超时），清理 30 秒 binding 和 reserved；成员缓存 30 秒、端点 10 秒、binding 30 秒。`network.relays` 验证来源 IP 是网络成员，返回 `relays.json` 配置、主 `.1:18100` 与 10 秒内活动接收端点。`network.register` 只接受 18100/18101，同一节点优先客户端接收器，10 秒内旧端点不覆盖。`network.forward` 校验插件 ID、16 字节消息 ID、base64 负载上限、目标 ≤4096 并去重，通过每网络 socket 发送 `ZTD1` 到目标端点（默认 18101）。
 
@@ -164,7 +165,7 @@ ID 字符集 `[A-Za-z0-9_-]{1,128}`，`builtin` 为保留路由。TCP 在包前�
 
 ## 安装与卸载
 
-宿主 CLI 不再包含 `--install/-i`、`--uninstall/-u`、`--moon/-m`、`--ip`、`--force`、`--yes`、`--dry-run`。安装/卸载/Moon 由发行包内的独立 `zt-installer.sh` 负责，旧命令映射见 [ZTServer 部署说明](../src/server/DEPLOYMENT.md)。
+宿主 CLI 不再包含 `--install/-i`、`--uninstall/-u`、`--moon/-m`、`--ip`、`--force`、`--yes`、`--dry-run`。安装/卸载/Moon 由发行包内的独立 `z2-installer.sh` 负责，旧命令映射见 [ZTOrbitHub 部署说明](../src/server/DEPLOYMENT.md)。
 
 ## 相关文档
 

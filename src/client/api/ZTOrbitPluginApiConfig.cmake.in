@@ -1,0 +1,17 @@
+@PACKAGE_INIT@
+set(_zto_sdk_prefix "${PACKAGE_PREFIX_DIR}")
+set(ZTO_API_VERSION "@ZTO_API_VERSION@")
+include(CMakeFindDependencyMacro)
+if(ZTOrbitPluginApi_FIND_COMPONENTS STREQUAL "Services")
+    find_dependency(Qt6 6.8 COMPONENTS Core Network)
+else()
+    find_dependency(Qt6 6.8 COMPONENTS Quick Qml Network)
+endif()
+set(ZTOrbitPluginApi_Services_FOUND TRUE)
+include("${CMAKE_CURRENT_LIST_DIR}/ZTOrbitPluginApiTargets.cmake")
+check_required_components(ZTOrbitPluginApi)
+
+set(ZTO_PACKAGE_TOOL "${_zto_sdk_prefix}/bin/z2plugin_pack@CMAKE_EXECUTABLE_SUFFIX@")
+set(ZTO_HOST_CONTRACT_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/contracts")
+set(ZTO_PACKAGE_FORMATS 1 2 3)
+include("${CMAKE_CURRENT_LIST_DIR}/PackagePlugin.cmake")

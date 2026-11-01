@@ -3,4 +3,4 @@
 #else
 #define EXPORT __attribute__((visibility("default")))
 #endif
-extern "C" EXPORT int ztguiRuntimeProbe() { return 42; }
+extern "C" EXPORT int ztoRuntimeProbe() { return 42; }

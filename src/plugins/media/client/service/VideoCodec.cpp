@@ -4,7 +4,7 @@
 extern "C" {
 #include <libavutil/opt.h>
 }
-namespace vusiif::ztgui::media::engine {
+namespace vusiif::zto::media::engine {
 namespace {
 QString avError(int code) {
     char buffer[AV_ERROR_MAX_STRING_SIZE]{};
@@ -42,13 +42,19 @@ QString VideoCodec::open(const TrackConfig &c, const ExtensionRegistry &registry
         context->colorspace = AVCOL_SPC_BT709;
         context->color_primaries = AVCOL_PRI_BT709;
         context->color_trc = AVCOL_TRC_BT709;
-    } else if (!c.codec.initializationData.isEmpty()) {
+    } else {
+        // Frame threading retains the first IDR until another packet arrives.
+        // Desktop capture can be static indefinitely; slice threading keeps
+        // the negotiated no-B-frame stream decodable one packet at a time.
+        context->thread_type = FF_THREAD_SLICE;
+        if (!c.codec.initializationData.isEmpty()) {
         context->extradata_size = int(c.codec.initializationData.size());
         context->extradata =
             static_cast<uint8_t *>(av_mallocz(context->extradata_size + AV_INPUT_BUFFER_PADDING_SIZE));
         if (!context->extradata)
             return "Cannot allocate codec initialization data";
         std::memcpy(context->extradata, c.codec.initializationData.constData(), context->extradata_size);
+        }
     }
     int status = avcodec_open2(context, codec, nullptr);
     if (status < 0)
@@ -107,6 +113,7 @@ QList<EncodedPacket> VideoCodec::encode(const QImage &source, qint64 pts, QStrin
         firstPts = pts;
     frame->pts = std::max(nextPts, av_rescale_q(pts - firstPts, {1, 1000000}, context->time_base));
     nextPts = frame->pts + 1;
+    const auto inputFramePts = frame->pts;
     frame->pict_type = forceKeyFrame ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
     forceKeyFrame = false;
     auto *processed = processors.process(frame, error);
@@ -128,9 +135,13 @@ QList<EncodedPacket> VideoCodec::encode(const QImage &source, qint64 pts, QStrin
         EncodedPacket p;
         p.codec = "h264";
         p.sequence = sequence++;
-        p.pts = firstPts + av_rescale_q(packet->pts, context->time_base, {1, 1000000});
+        // OpenH264 has no encoder delay: packets belong to this submitted
+        // frame. Its integer frame grid must not move a forced refresh into
+        // the future (e.g. a refresh after 100ms on a 1fps track). Preserve
+        // actual input time, retaining any processor-relative PTS offset.
+        p.pts = pts + av_rescale_q(packet->pts - inputFramePts, context->time_base, {1, 1000000});
         if (packet->dts != AV_NOPTS_VALUE)
-            p.dts = firstPts + av_rescale_q(packet->dts, context->time_base, {1, 1000000});
+            p.dts = pts + av_rescale_q(packet->dts - inputFramePts, context->time_base, {1, 1000000});
         p.duration = 1000000 / config.codec.frameRate;
         p.keyFrame = (packet->flags & AV_PKT_FLAG_KEY) != 0;
         if (context->extradata_size)
@@ -211,4 +222,4 @@ QList<QPair<QImage, qint64>> VideoCodec::decode(const EncodedPacket &p, QString 
         error = avError(result);
     return frames;
 }
-} // namespace vusiif::ztgui::media::engine
+} // namespace vusiif::zto::media::engine

@@ -2,7 +2,7 @@
 #include <QByteArray>
 #include <QtEndian>
 
-namespace vusiif::ztgui::protocol {
+namespace vusiif::zto::protocol {
 inline constexpr quint8 Version = 1;
 inline constexpr int MaxTcpBytes = 1024 * 1024;
 inline constexpr int MaxUdpBytes = 1232;

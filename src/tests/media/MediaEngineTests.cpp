@@ -1,4 +1,6 @@
 #include "VideoCodec.h"
+#include "VideoCanvas.h"
+#include "VideoFramePacer.h"
 #include "AudioMath.h"
 #include "MediaClock.h"
 #include "ClipAudio.h"
@@ -10,8 +12,77 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QtEndian>
-using namespace vusiif::ztgui;
+#include <QPainter>
+using namespace vusiif::zto;
 namespace {
+// Deterministic test picture: four colour blocks, a white grid, a cyan circle
+// and a white label on a black band. It is used both directly on the composed
+// canvas and through the H.264 encoder/decoder.
+QImage testPattern(int width, int height)
+{
+    QImage image(width, height, QImage::Format_ARGB32);
+    if (image.isNull())
+        return image;
+    image.fill(Qt::black);
+    QPainter painter(&image);
+    const int halfWidth = width / 2, halfHeight = height / 2;
+    painter.fillRect(QRect(0, 0, halfWidth, halfHeight), QColor(220, 30, 30));
+    painter.fillRect(QRect(halfWidth, 0, width - halfWidth, halfHeight), QColor(30, 200, 60));
+    painter.fillRect(QRect(0, halfHeight, halfWidth, height - halfHeight), QColor(40, 60, 220));
+    painter.fillRect(QRect(halfWidth, halfHeight, width - halfWidth, height - halfHeight),
+                     QColor(230, 210, 40));
+    painter.setPen(QPen(Qt::white, std::max(1, width / 160)));
+    for (int i = 1; i < 8; ++i) {
+        painter.drawLine(width * i / 8, 0, width * i / 8, height);
+        painter.drawLine(0, height * i / 8, width, height * i / 8);
+    }
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(0, 220, 220));
+    const auto radius = std::min(width, height) / 6.0;
+    painter.drawEllipse(QPointF(width / 2.0, height / 2.0), radius, radius);
+    const int bandTop = height * 86 / 100;
+    painter.fillRect(QRect(0, bandTop, width, height - bandTop), Qt::black);
+    painter.setPen(Qt::white);
+    QFont font(QStringLiteral("Arial"));
+    font.setPixelSize(std::max(8, (height - bandTop) * 3 / 4));
+    font.setBold(true);
+    painter.setFont(font);
+    painter.drawText(QRect(0, bandTop, width, height - bandTop), Qt::AlignCenter,
+                     QStringLiteral("ZTOrbit"));
+    painter.end();
+    return image;
+}
+// Content rectangle of an aspect-preserving composition; used to locate sample
+// points inside the picture, not to re-implement the assertion.
+QRect contentRect(QSize source, QSize canvas)
+{
+    const auto scaled = source.scaled(canvas, Qt::KeepAspectRatio);
+    return QRect(QPoint((canvas.width() - scaled.width()) / 2,
+                        (canvas.height() - scaled.height()) / 2),
+                 scaled);
+}
+QColor sampleColor(const QImage &image, const QRect &content, int xNum, int xDen, int yNum, int yDen)
+{
+    const int x = std::clamp(content.x() + content.width() * xNum / xDen, 0, image.width() - 1);
+    const int y = std::clamp(content.y() + content.height() * yNum / yDen, 0, image.height() - 1);
+    return image.pixelColor(x, y);
+}
+bool colorNear(const QColor &actual, const QColor &expected, int tolerance)
+{
+    return std::abs(actual.red() - expected.red()) <= tolerance &&
+           std::abs(actual.green() - expected.green()) <= tolerance &&
+           std::abs(actual.blue() - expected.blue()) <= tolerance;
+}
+int brightPixels(const QImage &image, const QRect &area, int threshold = 200)
+{
+    int count = 0;
+    const auto rect = area.intersected(image.rect());
+    for (int y = rect.top(); y <= rect.bottom(); y += 2)
+        for (int x = rect.left(); x <= rect.right(); x += 2)
+            if (image.pixelColor(x, y).lightness() > threshold)
+                ++count;
+    return count;
+}
 QByteArray makeWav(int frames, quint16 format = 1, quint16 channels = 1, quint32 rate = 48000,
                    quint16 bits = 16, int dataBytes = -1, bool padding = false)
 {
@@ -52,6 +123,268 @@ QByteArray makeWav(int frames, quint16 format = 1, quint16 channels = 1, quint32
 class MediaEngineTests : public QObject {
     Q_OBJECT
   private slots:
+    void capturePacingRateBound_data() {
+        QTest::addColumn<int>("hz");
+        for (int hz : {1, 10, 24, 30, 60, 120, 1000})
+            QTest::newRow(qPrintable(QString::number(hz))) << hz;
+    }
+    void capturePacingRateBound() {
+        QFETCH(int, hz);
+        media::VideoFramePacer pacer;
+        int admitted = 0;
+        for (int i = 0; i < hz * 60; ++i) {
+            const qint64 pts = qint64(i) * 1000000 / hz;
+            admitted += pacer.admit(pts, 30);
+            if (i == hz * 10 - 1)
+                qInfo() << "inputHz" << hz << "admittedIn10s" << admitted << "configuredHz" << 30;
+            // Prefix conservation, including the two-frame burst allowance.
+            QVERIFY2(admitted <= 2 + pts * 30 / 1000000, "duplicated elapsed-time credit");
+        }
+        QVERIFY(admitted >= std::min(hz, 30) * 60 - 1);
+        qInfo() << "inputHz" << hz << "admittedIn60s" << admitted;
+    }
+    void capturePacingJitterAndBursts() {
+        media::VideoFramePacer pacer;
+        int admitted = 0;
+        qint64 previous = -1;
+        // Alternating early/late 30Hz arrivals and 12-frame microbursts.
+        for (int i = 0; i < 1800; ++i) {
+            const qint64 pts = qint64(i) * 1000000 / 30 + (i % 2 ? 6000 : 0);
+            admitted += pacer.admit(pts, 30);
+            for (int b = 1; b <= 12; ++b) admitted += pacer.admit(pts + b, 30);
+            QVERIFY(admitted <= 2 + (pts + 12) * 30 / 1000000);
+            previous = pts + 12;
+        }
+        QVERIFY(admitted >= 1798);
+        // A long idle period can bank only two frames, never minutes of work.
+        const auto later = previous + 3600000000LL;
+        int burst = 0;
+        for (int i = 0; i < 1000; ++i) burst += pacer.admit(later + i, 30);
+        QCOMPARE(burst, 2);
+    }
+    void capturePacingTimestampAndLifetime() {
+        media::VideoFramePacer pacer;
+        QVERIFY(!pacer.admit(-1, 30));
+        QVERIFY(pacer.admit(0, 30));
+        QVERIFY(!pacer.admit(0, 30));
+        QVERIFY(pacer.admit(1, 30));
+        QVERIFY(!pacer.admit(10000, 30));
+        QVERIFY(!pacer.admit(9000, 30));
+        QVERIFY(!pacer.admit(20000, 30));
+        QCOMPARE(pacer.lastEncodedPts(), qint64(1));
+        QVERIFY(pacer.admit(33334, 30));
+        for (int i = 0; i < 1000; ++i) QVERIFY(!pacer.admit(33334, 30));
+        QVERIFY(!pacer.admit(1, 30));
+        QVERIFY(pacer.admit(66667, 30));
+        pacer.reset(); // stop/start resets the two-frame budget and PTS epoch.
+        QVERIFY(pacer.admit(0, 30));
+        QVERIFY(pacer.admit(1, 30));
+        // Extreme pauses saturate without arithmetic overflow.
+        QVERIFY(pacer.admit(std::numeric_limits<qint64>::max() - 1, 30));
+        QVERIFY(pacer.admit(std::numeric_limits<qint64>::max(), 30));
+        QVERIFY(!pacer.admit(std::numeric_limits<qint64>::max(), 30));
+    }
+    void canvasPreservesAspectRatio_data() {
+        QTest::addColumn<int>("sourceWidth");
+        QTest::addColumn<int>("sourceHeight");
+        QTest::addColumn<int>("canvasWidth");
+        QTest::addColumn<int>("canvasHeight");
+        QTest::newRow("4:3-720p") << 640 << 480 << 1280 << 720;
+        QTest::newRow("16:10-720p") << 1280 << 800 << 1280 << 720;
+        QTest::newRow("ultrawide-720p") << 2560 << 1080 << 1280 << 720;
+        QTest::newRow("portrait-720p") << 480 << 854 << 1280 << 720;
+        QTest::newRow("non-integer-720p") << 1000 << 563 << 1280 << 720;
+        QTest::newRow("4:3-1080p") << 640 << 480 << 1920 << 1080;
+    }
+    void canvasPreservesAspectRatio() {
+        QFETCH(int, sourceWidth);
+        QFETCH(int, sourceHeight);
+        QFETCH(int, canvasWidth);
+        QFETCH(int, canvasHeight);
+        const auto source = testPattern(sourceWidth, sourceHeight);
+        const auto canvas = media::engine::composeVideoCanvas(source, canvasWidth, canvasHeight);
+        QVERIFY(!canvas.isNull());
+        QCOMPARE(canvas.size(), QSize(canvasWidth, canvasHeight));
+        QCOMPARE(canvas.format(), QImage::Format_ARGB32);
+        const auto content = contentRect(QSize(sourceWidth, sourceHeight),
+                                         QSize(canvasWidth, canvasHeight));
+        QVERIFY(content.width() > 8 && content.height() > 8);
+        // The composed content keeps the source aspect ratio instead of being
+        // stretched to the track format.
+        QVERIFY(qAbs(double(content.width()) / content.height() -
+                     double(sourceWidth) / sourceHeight) < 0.02);
+        // The unused area is a black bar on the corresponding side.
+        if (content.left() > 5) {
+            QCOMPARE(canvas.pixelColor(1, canvasHeight / 2), QColor(Qt::black));
+            QCOMPARE(canvas.pixelColor(content.left() - 3, canvasHeight / 2), QColor(Qt::black));
+        }
+        if (content.top() > 5) {
+            QCOMPARE(canvas.pixelColor(canvasWidth / 2, 1), QColor(Qt::black));
+            QCOMPARE(canvas.pixelColor(canvasWidth / 2, content.top() - 3), QColor(Qt::black));
+        }
+        if (content.right() < canvasWidth - 5)
+            QCOMPARE(canvas.pixelColor(canvasWidth - 2, canvasHeight / 2), QColor(Qt::black));
+        if (content.bottom() < canvasHeight - 5)
+            QCOMPARE(canvas.pixelColor(canvasWidth / 2, canvasHeight - 2), QColor(Qt::black));
+        // Colour blocks keep their quadrant positions.
+        QVERIFY(colorNear(sampleColor(canvas, content, 1, 16, 1, 16), QColor(220, 30, 30), 2));
+        QVERIFY(colorNear(sampleColor(canvas, content, 15, 16, 1, 16), QColor(30, 200, 60), 2));
+        QVERIFY(colorNear(sampleColor(canvas, content, 1, 16, 13, 16), QColor(40, 60, 220), 2));
+        QVERIFY(colorNear(sampleColor(canvas, content, 15, 16, 13, 16), QColor(230, 210, 40), 2));
+        // Circle, grid line and label survive the composition.
+        QVERIFY(colorNear(sampleColor(canvas, content, 1, 2, 1, 2), QColor(0, 220, 220), 2));
+        const auto grid = sampleColor(canvas, content, 3, 8, 1, 16);
+        QVERIFY2(grid.lightness() > 220, qPrintable(grid.name()));
+        const QRect band(content.x(), content.y() + content.height() * 88 / 100, content.width(),
+                         content.height() * 12 / 100);
+        QVERIFY2(brightPixels(canvas, band) > 20, "label text lost");
+    }
+    void canvasHandlesMissingOrDegenerateSource() {
+        using namespace media::engine;
+        const auto blank = composeVideoCanvas(QImage(), 1280, 720);
+        QCOMPARE(blank.size(), QSize(1280, 720));
+        QCOMPARE(blank.pixelColor(0, 0), QColor(Qt::black));
+        QCOMPARE(blank.pixelColor(1279, 719), QColor(Qt::black));
+        QVERIFY(composeVideoCanvas(testPattern(64, 64), 1, 720).isNull());
+        QVERIFY(composeVideoCanvas(testPattern(64, 64), 1280, 1).isNull());
+        const auto same = composeVideoCanvas(testPattern(1280, 720), 1280, 720);
+        QCOMPARE(same.size(), QSize(1280, 720));
+        QCOMPARE(same.format(), QImage::Format_ARGB32);
+    }
+    void videoProfilesKeepCanvasThroughCodec_data() {
+        QTest::addColumn<int>("width");
+        QTest::addColumn<int>("height");
+        QTest::addColumn<int>("bitrate");
+        QTest::addColumn<QString>("name");
+        QTest::newRow("720p30") << 1280 << 720 << 2000000 << QStringLiteral("720p30");
+        QTest::newRow("1080p30") << 1920 << 1080 << 4000000 << QStringLiteral("1080p30");
+    }
+    void videoProfilesKeepCanvasThroughCodec() {
+        using namespace media::engine;
+        QFETCH(int, width);
+        QFETCH(int, height);
+        QFETCH(int, bitrate);
+        QFETCH(QString, name);
+        ExtensionRegistry registry;
+        media::TrackConfig config;
+        config.kind = "video";
+        config.direction = "send";
+        config.source = "synthetic";
+        config.video.width = width;
+        config.video.height = height;
+        config.codec.codec = "h264";
+        config.codec.bitrate = bitrate;
+        config.codec.frameRate = 30;
+        config.codec.keyFrameInterval = 30;
+        VideoCodec encoder, decoder;
+        QVERIFY2(encoder.open(config, registry).isEmpty(), qPrintable(name));
+        auto receive = config;
+        receive.direction = "receive";
+        receive.source.clear();
+        QVERIFY2(decoder.open(receive, registry).isEmpty(), qPrintable(name));
+        const auto canvas = media::engine::composeVideoCanvas(testPattern(640, 480), width, height);
+        QVERIFY(!canvas.isNull());
+        const auto markerArea = contentRect(QSize(640,480),QSize(width,height));
+        QString error;
+        QList<media::EncodedPacket> packets;
+        int decoded = 0;
+        QImage last;
+        for (int frame = 0; frame < 10; ++frame) {
+            // A moving marker keeps the encoder from skipping identical frames,
+            // so keyframe requests can be observed.
+            auto picture = canvas;
+            QPainter marker(&picture);
+            // Keep animation inside the content. The old x=2 marker painted
+            // over the black-bar assertion in frame 9; decoder frame threading
+            // used to conceal this by withholding the final decoded picture.
+            marker.fillRect(QRect(markerArea.x()+markerArea.width()*3/4,
+                                  markerArea.y()+(frame*37)%(markerArea.height()-48),40,40),Qt::white);
+            marker.end();
+            if (frame == 5)
+                encoder.keyFrame();
+            for (auto &packet : encoder.encode(picture, qint64(frame) * 33333, error)) {
+                QVERIFY2(error.isEmpty(), qPrintable(error));
+                QCOMPARE(packet.codec, QStringLiteral("h264"));
+                QCOMPARE(packet.duration, qint64(33333));
+                QCOMPARE(packet.timeBase.denominator, 1000000);
+                packets.append(packet);
+                for (auto &frameImage : decoder.decode(packet, error)) {
+                    QVERIFY2(error.isEmpty(), qPrintable(error));
+                    ++decoded;
+                    last = frameImage.first;
+                }
+            }
+        }
+        QVERIFY(error.isEmpty());
+        QVERIFY(decoded > 0);
+        QVERIFY(!packets.isEmpty());
+        QVERIFY2(packets.first().keyFrame, "first packet must be a key frame");
+        bool requestedDueKeyFrame = false;
+        for (qsizetype i = 1; i < packets.size(); ++i)
+            if (packets[i].keyFrame && packets[i].sequence > packets.first().sequence)
+                requestedDueKeyFrame = true;
+        QVERIFY2(requestedDueKeyFrame, "requestKeyFrame must produce a new IDR packet");
+        QVERIFY(!last.isNull());
+        QCOMPARE(last.size(), QSize(width, height));
+        const auto content = contentRect(QSize(640, 480), QSize(width, height));
+        QCOMPARE(content.size().height(), height);
+        if (content.left() > 5)
+            QVERIFY(last.pixelColor(2, height / 2).lightness() < 30);
+        QVERIFY(colorNear(sampleColor(last, content, 1, 16, 1, 16), QColor(220, 30, 30), 45));
+        QVERIFY(colorNear(sampleColor(last, content, 15, 16, 1, 16), QColor(30, 200, 60), 45));
+        QVERIFY(colorNear(sampleColor(last, content, 1, 16, 13, 16), QColor(40, 60, 220), 45));
+        QVERIFY(colorNear(sampleColor(last, content, 15, 16, 13, 16), QColor(230, 210, 40), 45));
+        QVERIFY(colorNear(sampleColor(last, content, 1, 2, 1, 2), QColor(0, 220, 220), 45));
+        const QRect band(content.x(), content.y() + content.height() * 88 / 100, content.width(),
+                         content.height() * 12 / 100);
+        QVERIFY2(brightPixels(last, band, 180) > 10, "label text lost through H.264");
+    }
+    void firstKeyFrameDecodesWithoutFollowingPacket_data() {
+        videoProfilesKeepCanvasThroughCodec_data();
+    }
+    void firstKeyFrameDecodesWithoutFollowingPacket() {
+        using namespace media::engine;
+        QFETCH(int, width);
+        QFETCH(int, height);
+        QFETCH(int, bitrate);
+        ExtensionRegistry registry;
+        media::TrackConfig config;
+        config.kind = "video";
+        config.codec.codec = "h264";
+        config.codec.bitrate = bitrate;
+        config.video.width = width;
+        config.video.height = height;
+        VideoCodec encoder, decoder;
+        QVERIFY(encoder.open(config, registry).isEmpty());
+        config.direction = "receive";
+        QVERIFY(decoder.open(config, registry).isEmpty());
+        QString error;
+        const auto packets = encoder.encode(testPattern(width, height), 1000000, error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QVERIFY(!packets.isEmpty());
+        QVERIFY(packets.first().keyFrame);
+        const auto frames = decoder.decode(packets.first(), error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QVERIFY2(!frames.isEmpty(), "A static source must not need another packet to display its first IDR");
+        QCOMPARE(frames.first().first.size(), QSize(width, height));
+        QCOMPARE(frames.first().second, qint64(1000000));
+    }
+    void forcedKeyFrameKeepsActualCaptureTimestamp() {
+        using namespace media::engine;
+        ExtensionRegistry registry;media::TrackConfig config;
+        config.kind="video";config.codec.codec="h264";config.codec.frameRate=1;
+        config.codec.bitrate=500000;config.video.width=320;config.video.height=180;
+        VideoCodec encoder,decoder;QVERIFY(encoder.open(config,registry).isEmpty());
+        config.direction="receive";QVERIFY(decoder.open(config,registry).isEmpty());
+        QImage image(320,180,QImage::Format_ARGB32);image.fill(Qt::blue);QString error;
+        const auto initial=encoder.encode(image,1000000,error);QVERIFY(!initial.isEmpty());
+        QVERIFY(!decoder.decode(initial.first(),error).isEmpty());
+        encoder.keyFrame();const auto refresh=encoder.encode(image,1100000,error);
+        QVERIFY2(error.isEmpty(),qPrintable(error));QVERIFY(!refresh.isEmpty());QVERIFY(refresh.first().keyFrame);
+        QCOMPARE(refresh.first().pts,qint64(1100000));
+        const auto frames=decoder.decode(refresh.first(),error);QVERIFY(!frames.isEmpty());
+        QCOMPARE(frames.first().second,qint64(1100000));
+    }
     void packetMetadataRoundtrip() {
         media::EncodedPacket p;
         p.track = "epoch-track";
@@ -366,7 +699,7 @@ class MediaEngineTests : public QObject {
         QTemporaryDir root;
         QVERIFY(root.isValid());
         QVERIFY(QDir(root.path()).mkpath("extensions/flip"));
-        const auto extension=qEnvironmentVariable("ZTGUI_MEDIA_EXTENSION_PATH",QString::fromUtf8(MEDIA_FLIP));
+        const auto extension=qEnvironmentVariable("ZTO_MEDIA_EXTENSION_PATH",QString::fromUtf8(MEDIA_FLIP));
         QVERIFY(QFile::copy(extension, root.path() + "/extensions/flip/flip.dll"));
         QFile manifest(root.path() + "/extensions.json");
         QVERIFY(manifest.open(QIODevice::WriteOnly));

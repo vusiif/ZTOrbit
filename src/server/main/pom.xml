@@ -5,22 +5,22 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>vusiif.ztgui</groupId>
-        <artifactId>ztserver-parent</artifactId>
+        <groupId>vusiif.ztohub</groupId>
+        <artifactId>ztohub-parent</artifactId>
         <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>ztserver</artifactId>
+    <artifactId>ztohub</artifactId>
     <version>${revision}</version>
     <packaging>jar</packaging>
-    <name>ZTServer Host</name>
+    <name>ZTOrbitHub Host</name>
     <description>ZeroTier plugin server host (Java 25 + Netty)</description>
 
     <dependencies>
         <dependency>
-            <groupId>vusiif.ztgui</groupId>
-            <artifactId>ztserver-api</artifactId>
+            <groupId>vusiif.ztohub</groupId>
+            <artifactId>ztohub-api</artifactId>
             <version>${apiVersion}</version>
         </dependency>
         <dependency>
@@ -55,7 +55,7 @@
     </dependencies>
 
     <build>
-        <finalName>zt-server</finalName>
+        <finalName>Z2Hub</finalName>
         <resources>
             <resource>
                 <directory>src/main/resources</directory>
@@ -88,15 +88,15 @@
                         </goals>
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
-                            <finalName>zt-server</finalName>
+                            <finalName>Z2Hub</finalName>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>vusiif.ztgui.server.main.Main</mainClass>
+                                    <mainClass>vusiif.ztohub.main.Main</mainClass>
                                     <manifestEntries>
-                                        <Implementation-Title>ZTServer</Implementation-Title>
+                                        <Implementation-Title>ZTOrbitHub</Implementation-Title>
                                         <Implementation-Version>${revision}</Implementation-Version>
-                                        <Implementation-Vendor>ZTGUI</Implementation-Vendor>
-                                        <X-ZTServer-Api-Version>${apiVersion}</X-ZTServer-Api-Version>
+                                        <Implementation-Vendor>ZTOrbit</Implementation-Vendor>
+                                        <X-ZTOrbitHub-Api-Version>${apiVersion}</X-ZTOrbitHub-Api-Version>
                                     </manifestEntries>
                                 </transformer>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>

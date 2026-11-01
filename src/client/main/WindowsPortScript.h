@@ -1,7 +1,7 @@
 #pragma once
 #include <QString>
 
-namespace vusiif::ztgui::zerotier {
+namespace vusiif::zto::zerotier {
 // Runs only inside the already elevated service operation. Do not stop WinNAT
 // or delete system reservations: select a ZeroTier port outside those ranges.
 inline QString windowsPortPreflight() {
@@ -67,7 +67,7 @@ if (Test-ZtReserved $ztPort) {
     try {
         [IO.File]::WriteAllText($ztTemporary, $ztJson, [Text.UTF8Encoding]::new($false))
         if (Test-Path -LiteralPath $ztConfigPath) {
-            [IO.File]::Replace($ztTemporary, $ztConfigPath, ($ztConfigPath + '.ztgui-backup'))
+            [IO.File]::Replace($ztTemporary, $ztConfigPath, ($ztConfigPath + '.zto-backup'))
         } else { [IO.File]::Move($ztTemporary, $ztConfigPath) }
     } finally { if (Test-Path -LiteralPath $ztTemporary) { Remove-Item -LiteralPath $ztTemporary -Force } }
     Write-Output "ZeroTier primaryPort: $ztPort -> $ztNewPort (other settings preserved)"

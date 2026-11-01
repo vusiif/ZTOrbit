@@ -6,7 +6,7 @@
 #include <QTemporaryDir>
 #include <QLockFile>
 #include <memory>
-namespace vusiif::ztgui::package {
+namespace vusiif::zto::package {
 // Explicit extract-cache ownership. The client supplies its active root and
 // stable user/run identifiers; the archived server and packaging tools select
 // the legacy process-private temporary strategy.

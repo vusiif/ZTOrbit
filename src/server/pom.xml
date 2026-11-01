@@ -4,11 +4,11 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>vusiif.ztgui</groupId>
-    <artifactId>ztserver-parent</artifactId>
+    <groupId>vusiif.ztohub</groupId>
+    <artifactId>ztohub-parent</artifactId>
     <version>${revision}</version>
     <packaging>pom</packaging>
-    <name>ZTServer</name>
+    <name>ZTOrbitHub</name>
     <description>ZeroTier plugin server (Java 25 + Netty)</description>
 
     <modules>
@@ -17,7 +17,7 @@
     </modules>
 
     <properties>
-        <revision>0.2.1</revision>
+        <revision>0.2.2</revision>
         <apiVersion>0.2</apiVersion>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -143,11 +143,11 @@
                             <rules>
                                 <requireJavaVersion>
                                     <version>[25,)</version>
-                                    <message>ZTServer requires JDK 25 or newer (maven.compiler.release=25).</message>
+                                    <message>ZTOrbitHub requires JDK 25 or newer (maven.compiler.release=25).</message>
                                 </requireJavaVersion>
                                 <requireMavenVersion>
                                     <version>[3.9,)</version>
-                                    <message>ZTServer requires Maven 3.9 or newer.</message>
+                                    <message>ZTOrbitHub requires Maven 3.9 or newer.</message>
                                 </requireMavenVersion>
                             </rules>
                         </configuration>

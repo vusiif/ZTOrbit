@@ -32,7 +32,7 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 480
     visible: true
-    title: "ZTGUI"
+    title: "Z2"
     color: Theme.window
     palette.window: Theme.window
     palette.windowText: Theme.text
@@ -78,13 +78,13 @@ ApplicationWindow {
         detailLoader.ensure().title = "详细信息 — " + name
         detailLoader.open()
     }
-    function exportMoon(id) { exportNetworkId = id; exportLoader.ensure().currentFile = "file:///" + id + ".ztbundle"; exportLoader.open() }
+    function exportMoon(id) { exportNetworkId = id; exportLoader.ensure().currentFile = "file:///" + id + ".z2bundle"; exportLoader.open() }
 
     Platform.SystemTrayIcon {
         id: tray
         objectName: "systemTrayIcon"
         visible: true
-        tooltip: backend.closing ? "ZTGUI · 正在退出" : "ZTGUI"
+        tooltip: backend.closing ? "ZTOrbit · 正在退出" : "ZTOrbit"
         icon.source: "qrc:/assets/app-icon.png"
         onActivated: reason => { if (reason === Platform.SystemTrayIcon.Trigger || reason === Platform.SystemTrayIcon.DoubleClick) backend.restoreWindow() }
         menu: Platform.Menu {
@@ -136,7 +136,7 @@ ApplicationWindow {
                         HoverHandler { id: statusHover }
                         Behavior on color { enabled: !Theme.transitioning; ColorAnimation { duration: 140 } }
                     }
-                    Label { text: "ZTGUI"; font.pixelSize: 24; font.bold: true; color: Theme.accent; Layout.fillWidth: true }
+                    Label { text: "ZTOrbit"; font.pixelSize: 24; font.bold: true; color: Theme.accent; Layout.fillWidth: true }
                     Label { objectName: "sidebarVersionLabel"; text: "v" + backend.version; font.pixelSize: 11; color: Theme.muted }
                 }
                 ListView {
@@ -562,7 +562,7 @@ ApplicationWindow {
             ColumnLayout {
                 anchors.fill: parent
                 spacing: 12
-                Label { text: "ZTGUI"; font.pixelSize: 24; font.bold: true }
+                Label { text: "ZTOrbit"; font.pixelSize: 24; font.bold: true }
                 Label { objectName: "aboutVersionLabel"; text: "v" + backend.version }
                 Label { text: "API " + backend.apiVersion }
                 Label { objectName: "aboutServerVersionLabel"; text: "服务端 " + backend.serverVersion + "（API " + backend.serverApiVersion + "）" }
@@ -589,7 +589,7 @@ ApplicationWindow {
     }
     LazyPopup {
         id: importBundleLoader
-        sourceComponent: FileDialog { id: importBundleFile; title: "导入中转站"; nameFilters: ["中转站配置 (*.ztbundle *.moon)"]; onAccepted: backend.importConfiguration(selectedFile) }
+        sourceComponent: FileDialog { id: importBundleFile; title: "导入中转站"; nameFilters: ["中转站配置 (*.z2bundle *.moon)"]; onAccepted: backend.importConfiguration(selectedFile) }
 
     }
     LazyPopup {
@@ -599,12 +599,12 @@ ApplicationWindow {
     }
     LazyPopup {
         id: exportLoader
-        sourceComponent: FileDialog { id: exportFile; title: "导出中转站"; fileMode: FileDialog.SaveFile; nameFilters: ["中转站配置包 (*.ztbundle)"]; onAccepted: backend.exportConfiguration(window.exportNetworkId, selectedFile) }
+        sourceComponent: FileDialog { id: exportFile; title: "导出中转站"; fileMode: FileDialog.SaveFile; nameFilters: ["中转站配置包 (*.z2bundle)"]; onAccepted: backend.exportConfiguration(window.exportNetworkId, selectedFile) }
 
     }
     LazyPopup {
         id: pluginFileLoader
-        sourceComponent: FileDialog { id: pluginFile; title: "导入插件"; nameFilters: ["插件 (*.ztplugin)"]; onAccepted: backend.importPlugin(selectedFile) }
+        sourceComponent: FileDialog { id: pluginFile; title: "导入插件"; nameFilters: ["插件 (*.z2plugin)"]; onAccepted: backend.importPlugin(selectedFile) }
 
     }
 }

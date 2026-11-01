@@ -4,7 +4,7 @@
 #include <ztprotocol/NetworkDelivery.h>
 #include <QCoreApplication>
 #include <QJsonObject>
-namespace vusiif::ztgui::network {
+namespace vusiif::zto::network {
 namespace {
 // Cancellation releases demand even if the subscription object remains owned
 // by the plugin's context until later.

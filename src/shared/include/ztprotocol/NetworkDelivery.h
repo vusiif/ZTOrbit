@@ -6,7 +6,7 @@
 #include <QHostAddress>
 #include <QRegularExpression>
 
-namespace vusiif::ztgui::protocol {
+namespace vusiif::zto::protocol {
 inline constexpr quint16 ClientNetworkPort = 18101;
 inline bool validNetworkId(const QString &id) {
     static const QRegularExpression re("\\A[0-9a-fA-F]{16}\\z"); return re.match(id).hasMatch();

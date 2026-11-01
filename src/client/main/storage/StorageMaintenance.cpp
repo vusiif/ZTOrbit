@@ -16,7 +16,7 @@
 #include <QSet>
 #include <algorithm>
 
-namespace vusiif::ztgui::storage {
+namespace vusiif::zto::storage {
 namespace {
 constexpr qint64 LogRetentionDays = 30;
 constexpr qint64 LogOwnerBytes = 100LL * 1024 * 1024;
@@ -390,4 +390,4 @@ CleanupReport StorageMaintenance::cleanupOrphanData(const QStringList &ids)
     return report;
 }
 
-} // namespace vusiif::ztgui::storage
+} // namespace vusiif::zto::storage

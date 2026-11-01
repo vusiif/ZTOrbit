@@ -1,19 +1,22 @@
 #pragma once
 #include <ztmedia/MediaTypes.h>
 #include <ztmedia/SharedFrames.h>
-#include <ztgui/PluginServices.h>
+#include <zto/PluginServices.h>
 #include <ztprotocol/BulkChannel.h>
 #include <QPointer>
 #include <QTimer>
 #include <QSet>
 #include <map>
 
-namespace vusiif::ztgui::media {
+namespace vusiif::zto::media {
 class MediaSession final : public QObject {
   public:
     std::function<void(const EncodedPacket &)> packet;
     std::function<void(const FrameView &)> frame;
     std::function<void(const MediaError &)> error;
+    // Receiving track needs a fresh baseline/key frame after loss. The
+    // application forwards this request to its corresponding sender.
+    std::function<void(QString)> keyFrameRequired;
     std::function<void()> sourcesChanged;
     explicit MediaSession(std::shared_ptr<util::ServiceLease> lease, QObject *parent = nullptr)
         : QObject(parent), m_lease(std::move(lease)) {
@@ -133,6 +136,11 @@ class MediaSession final : public QObject {
         clearFrames(id);
         action("track.remove", id, ctx, std::move(done));
     }
+    // Video send tracks only. With a running sender and a cached capture,
+    // refreshes that canvas as an IDR even if the source has stopped producing
+    // frames. Refreshes are bounded to the configured frame interval. Without
+    // a cached capture, marks the next input frame as a key frame. Acceptance
+    // does not guarantee packet delivery or prove the capture source is alive.
     void requestKeyFrame(const QString &id, QObject *ctx, Completion<bool> done = {}) {
         action("track.keyframe", id, ctx, std::move(done));
     }
@@ -163,6 +171,7 @@ class MediaSession final : public QObject {
         m_closing = true;
         packet = {};
         frame = {};
+        keyFrameRequired = {};
         sourcesChanged = {};
         m_channel.close();
         m_frames.clear();
@@ -229,6 +238,11 @@ class MediaSession final : public QObject {
             }
             return;
         }
+        if (h["type"] == "keyframe-required") {
+            auto callback = keyFrameRequired;
+            if (callback) callback(h["track"].toString());
+            return;
+        }
         if (h["type"] == "packet") {
             auto callback = packet;
             if (callback)
@@ -271,6 +285,8 @@ class MediaSession final : public QObject {
         v.duration = h["duration"].toString().toLongLong();
         v.video.width = h["width"].toInt();
         v.video.height = h["height"].toInt();
+        // Preview pixels are full-range BGRA, including H.264's RGB conversion.
+        v.video.colorRange = QStringLiteral("full");
         v.decoded = h["decoded"].toBool();
         v.data = data;
         v.size = size;
@@ -283,4 +299,4 @@ class MediaSession final : public QObject {
             callback(v);
     }
 };
-} // namespace vusiif::ztgui::media
+} // namespace vusiif::zto::media

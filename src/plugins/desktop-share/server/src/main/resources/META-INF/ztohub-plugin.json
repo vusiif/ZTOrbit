@@ -1,0 +1,9 @@
+{
+  "formatVersion": 1,
+  "host": "server",
+  "id": "desktop-share",
+  "name": "桌面共享",
+  "version": "${pluginVersion}",
+  "apiVersion": "${apiVersion}",
+  "mainClass": "vusiif.ztohub.desktopshare.DesktopSharePlugin"
+}

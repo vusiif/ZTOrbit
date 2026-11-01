@@ -8,7 +8,7 @@
 
 #include <functional>
 
-namespace vusiif::ztgui::media::engine {
+namespace vusiif::zto::media::engine {
 
 // Drives one short clip from the accepted request to exactly one terminal
 // outcome: finished() after the device mix queue and the sink backlog drained,
@@ -80,4 +80,4 @@ private:
     qint64 m_watchdogDeadline = 0;
 };
 
-} // namespace vusiif::ztgui::media::engine
+} // namespace vusiif::zto::media::engine

@@ -1,6 +1,6 @@
 #pragma once
 #include "PluginPackage.h"
-namespace vusiif::ztgui::package {
+namespace vusiif::zto::package {
 // Host private; dependencies outlive every business plugin and QApplication.
 QJsonObject hostRuntimeContract();
 QString validateRuntime(const PackageResult &);

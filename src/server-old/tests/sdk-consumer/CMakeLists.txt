@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21.1)
 project(server_sdk_consumer LANGUAGES CXX)
-find_package(ZTServerPluginApi 0.4 EXACT CONFIG REQUIRED)
+find_package(ZTOrbitHubPluginApi 0.4 EXACT CONFIG REQUIRED)
 add_executable(server_sdk_consumer Consumer.cpp)
-target_link_libraries(server_sdk_consumer PRIVATE ZTServer::Api)
+target_link_libraries(server_sdk_consumer PRIVATE ZTOrbitHub::Api)

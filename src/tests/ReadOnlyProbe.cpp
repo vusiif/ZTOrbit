@@ -9,9 +9,9 @@
 #include <QTextStream>
 
 namespace {
-QString modeName(vusiif::ztgui::storage::StorageContext::Mode mode)
+QString modeName(vusiif::zto::storage::StorageContext::Mode mode)
 {
-    using vusiif::ztgui::storage::StorageContext;
+    using vusiif::zto::storage::StorageContext;
     switch (mode) {
     case StorageContext::Mode::Personal: return QStringLiteral("personal");
     case StorageContext::Mode::Ephemeral: return QStringLiteral("ephemeral");
@@ -37,7 +37,7 @@ int main(int argc, char **argv)
     if (shared.isEmpty() || personal.isEmpty()) return 2;
     if (!QFileInfo(shared).isDir()) return 3;
 
-    auto context = vusiif::ztgui::storage::StorageContext::resolveForTesting(shared, personal);
+    auto context = vusiif::zto::storage::StorageContext::resolveForTesting(shared, personal);
     QString error;
     const bool prepared = context.isValid() && context.prepare(error);
     QJsonObject result{{"valid", context.isValid()},
@@ -50,7 +50,7 @@ int main(int argc, char **argv)
                        {"error", error}};
     if (!context.warnings().isEmpty()) result["warnings"] = QJsonArray::fromStringList(context.warnings());
     QTextStream(stdout) << QJsonDocument(result).toJson(QJsonDocument::Compact) << '\n';
-    const bool personalRoot = context.mode() == vusiif::ztgui::storage::StorageContext::Mode::Personal
+    const bool personalRoot = context.mode() == vusiif::zto::storage::StorageContext::Mode::Personal
         && !personal.isEmpty()
         && QDir::cleanPath(context.activeRoot()).startsWith(QDir::cleanPath(personal) + '/');
     return prepared && personalRoot ? 0 : 1;

@@ -9,12 +9,12 @@ param(
 $ErrorActionPreference = 'Stop'
 $taskRuntime = (Resolve-Path -LiteralPath $RuntimeDirectory).Path
 Copy-Item -LiteralPath $FakeCli -Destination (Join-Path $taskRuntime 'zerotier-cli.exe') -Force
-if (!(Test-Path -LiteralPath (Join-Path $taskRuntime 'ZTGUI.exe'))) { throw 'RuntimeDirectory must contain ZTGUI.exe' }
+if (!(Test-Path -LiteralPath (Join-Path $taskRuntime 'Z2.exe'))) { throw 'RuntimeDirectory must contain Z2.exe' }
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
-public static class ZTGUIResourceWindows {
+public static class ZTOrbitResourceWindows {
     public delegate bool Visitor(IntPtr window, IntPtr state);
     [DllImport("user32.dll")] public static extern bool EnumWindows(Visitor callback, IntPtr state);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
@@ -26,7 +26,7 @@ public static class ZTGUIResourceWindows {
         EnumWindows((window,state)=>{
             uint owner; GetWindowThreadProcessId(window,out owner);
             var title=new StringBuilder(128); GetWindowText(window,title,title.Capacity);
-            if (owner==pid && title.ToString()=="ZTGUI") { found=window; return false; }
+            if (owner==pid && title.ToString()=="Z2") { found=window; return false; }
             return true;
         },IntPtr.Zero);
         return found;
@@ -39,17 +39,17 @@ if ($VoicePlugin) { $taskCases += @{Name='compact_voice';Mode='compact-lists';Vo
 foreach ($taskCase in $taskCases) {
     $taskPluginDir = Join-Path $taskRuntime 'plugins'
     # The harness owns only this copied test DLL; never alter the real plugin directory.
-    # Historical 0.3.2 flow: current hosts scan only *.ztplugin and voice audio runs
-    # in the media worker. To reproduce current voice usage, package the .ztplugin
+    # Historical 0.3.2 flow: current hosts scan only *.z2plugin and voice audio runs
+    # in the media worker. To reproduce current voice usage, package the .z2plugin
     # and media worker instead of this bare DLL copy.
-    $taskPluginCopy = Join-Path $taskPluginDir 'ztgui_voice_chat.dll'
+    $taskPluginCopy = Join-Path $taskPluginDir 'z2_voice_chat.dll'
     if ($taskCase.Voice) {
         New-Item -ItemType Directory -Path $taskPluginDir -Force | Out-Null
         Copy-Item -LiteralPath $VoicePlugin -Destination $taskPluginCopy -Force
     } elseif (Test-Path -LiteralPath $taskPluginCopy) { Remove-Item -LiteralPath $taskPluginCopy }
     for ($taskRepeat=0; $taskRepeat -lt $Repeats; $taskRepeat++) {
         $taskInfo = [System.Diagnostics.ProcessStartInfo]::new()
-        $taskInfo.FileName = Join-Path $taskRuntime 'ZTGUI.exe'
+        $taskInfo.FileName = Join-Path $taskRuntime 'Z2.exe'
         if ($LowMemory) { $taskInfo.Arguments = '--disable-gpu-acceleration' }
         $taskInfo.WorkingDirectory = $taskRuntime
         $taskInfo.UseShellExecute = $false
@@ -72,13 +72,13 @@ foreach ($taskCase in $taskCases) {
         try {
             $taskWindow=[IntPtr]::Zero
             for ($taskTry=0; $taskTry -lt 30 -and !$taskProcess.HasExited; $taskTry++) {
-                $taskWindow=[ZTGUIResourceWindows]::Find($taskProcess.Id)
+                $taskWindow=[ZTOrbitResourceWindows]::Find($taskProcess.Id)
                 if ($taskWindow -ne [IntPtr]::Zero) { break }
                 [void]$taskProcess.WaitForExit(100)
             }
             if ($taskProcess.HasExited -or $taskWindow -eq [IntPtr]::Zero) { throw 'Profile process did not create its own window' }
             # Expose without taking focus so the normal D3D scene graph renders.
-            [void][ZTGUIResourceWindows]::ShowWindow($taskWindow,4)
+            [void][ZTOrbitResourceWindows]::ShowWindow($taskWindow,4)
             if ($taskProcess.WaitForExit(6000)) { throw 'Profile process exited during startup' }
             if (!(Test-Path -LiteralPath $taskQueryLog) -or
                 !(Select-String -LiteralPath $taskQueryLog -SimpleMatch 'listnetworks') -or
@@ -88,7 +88,7 @@ foreach ($taskCase in $taskCases) {
             foreach ($taskStage in @('visible','tray')) {
                 if ($taskStage -eq 'tray') {
                     $taskMessageResult=[UIntPtr]::Zero
-                    [void][ZTGUIResourceWindows]::SendMessageTimeout($taskWindow,0x112,[UIntPtr]0xf060,[IntPtr]1,2,2000,[ref]$taskMessageResult)
+                    [void][ZTOrbitResourceWindows]::SendMessageTimeout($taskWindow,0x112,[UIntPtr]0xf060,[IntPtr]1,2,2000,[ref]$taskMessageResult)
                     if ($taskProcess.WaitForExit(1500)) { throw 'Caption close exited instead of hiding' }
                 }
                 $taskProcess.Refresh()
@@ -97,7 +97,7 @@ foreach ($taskCase in $taskCases) {
         } finally {
             if (!$taskProcess.HasExited -and $taskWindow -ne [IntPtr]::Zero) {
                 $taskCloseResult=[UIntPtr]::Zero
-                [void][ZTGUIResourceWindows]::SendMessageTimeout($taskWindow,0x10,[UIntPtr]::Zero,[IntPtr]::Zero,2,2000,[ref]$taskCloseResult)
+                [void][ZTOrbitResourceWindows]::SendMessageTimeout($taskWindow,0x10,[UIntPtr]::Zero,[IntPtr]::Zero,2,2000,[ref]$taskCloseResult)
             }
             if (!$taskProcess.WaitForExit(3000)) { $taskProcess.Kill(); $taskProcess.WaitForExit() }
             $taskErrorTask.GetAwaiter().GetResult() | Set-Content -LiteralPath (Join-Path $taskRuntime "profile-$($taskCase.Name)-$taskRepeat.stderr.txt") -Encoding utf8

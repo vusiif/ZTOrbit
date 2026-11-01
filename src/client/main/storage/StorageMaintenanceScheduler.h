@@ -9,7 +9,7 @@
 
 #include <functional>
 
-namespace vusiif::ztgui::storage {
+namespace vusiif::zto::storage {
 
 // Single scheduler for automatic retention work. Startup, the daily timer, log
 // rotation and business-cache writes all funnel through this class, and only
@@ -44,7 +44,7 @@ public:
     void notifyCacheWrite(const QString &relativePath);
 
 signals:
-    void cleanupFinished(const vusiif::ztgui::storage::CleanupReport &report);
+    void cleanupFinished(const vusiif::zto::storage::CleanupReport &report);
     void cleanupFailed(const QString &error);
 
 private:
@@ -69,4 +69,4 @@ private:
     QDateTime m_lastRun;
 };
 
-} // namespace vusiif::ztgui::storage
+} // namespace vusiif::zto::storage

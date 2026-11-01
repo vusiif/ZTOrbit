@@ -2,15 +2,42 @@
 
 ## 未发布
 
+- 构建产物统一使用 `Z2`／`Z2Hub`：客户端为 `Z2.exe`、`Z2.app`，发行目录及压缩包、SDK、插件文件前缀和服务端 JAR／systemd unit／安装脚本同步改名；客户端扩展名改为 `.z2plugin`／`.z2bundle`，导入、扫描、删除、文件选择器与导出保持一致。代码内 `zto`／`ztohub` 的目标、命名空间、Maven 坐标、宏、IID、插件 ID 和协议不变，版本文件不变；已有插件包可改扩展名后继续使用。
+- 删除历史验证归档目录，清理相关文档引用及归档样本复算用例；维护文档只保留当前约定，验证结果写入交付说明。
+- 精简 README 的编译与插件编写说明，保留环境要求、命令和步骤，删除旧版说明、接口实现细节及具体插件介绍。
+- 客户端主窗口与启动错误窗口的标题改为 `Z2`。
+- Gitee 远程仓库名称和路径更新为 `ZTOrbit`，本地 `origin` 同步使用 `https://gitee.com/vusiif/ZTOrbit.git`。
+- 集中网络部署与默认连接约定到 `docs/network-conventions.md`：明确网络 ID／服务器 ZTID／Moon ID 的对应关系、ZeroTier 9993/UDP、ZTServer 18100/TCP+UDP、Pylon 9443/TCP、ztncui 网络 IPv4 /24 与服务器固定 `.1` 地址。相关文档统一引用，并明确约定之外的设置由部署者自行负责；本次仅调整文档。
+
+- 客户端 `0.5.1-261030`／API `0.5-261030`（2026-10-30）：仅增加日期 qualifier，核心代际 5 不变，服务端 `0.2.1`／API `0.2` 不变。客户端主程序与宿主 SDK 按新完整 API 重建；media、voice-chat、desktop-share 三个客户端插件用新 SDK 重编，插件自身版本不变；CMake 包版本仍为数字基版本 `0.5`，完整 API 用于插件元数据和 SDK 目录 `build/dist/ZTGUI-api-v0.5-261030`。旧 `0.5` 插件不再匹配，需要重编。
+
+- 桌面共享文档整理与临时产物清理（2026-10-30）：客户端与服务端插件文档收敛为功能简要说明和当前遗留问题，媒体插件补充对应限制；删除阶段开发文档、历史验证目录与临时构建产物，并修正 README、验证索引和本文件中失效的链接与历史条目。产品代码、`VERSION`、`SERVER_VERSION`、插件版本、验收目标和阈值均未改。阶段七仍未关闭；RSS 未定位、原生环境未覆盖、正式旧媒体包受保护窗口可能冻结、候选来源关闭后的释放失败等限制仍然存在，详见插件文档。
+
+## 0.5.2（客户端 API 0.5）／0.2.2（服务端 API 0.2）
+
+- 媒体共享帧映射的名称与键长度校验改为从同一个前缀常量派生，避免 `ztgui` 缩短为 `zto` 后继续按旧长度校验而无法读取预览帧。
+- 项目与客户端更名为 `ZTOrbit`（`zto`），服务端更名为 `ZTOrbitHub`（`ztohub`）；统一程序身份、窗口和文件元数据、QML 模块、头文件目录、命名空间、插件 IID、Java 包／Maven 坐标、SDK、构建脚本、systemd 服务及当前文档。技能目录同步改为 `zto-build`／`zto-plugin-dev`。不保留旧接口别名，受影响插件需使用新 SDK 重编；历史证据与旧设置导入来源保留，详见[命名及迁移规则](docs/naming.md)。
+- 按开发者指定将客户端版本更正为 `0.5.2`，客户端 API 同步移除日期后缀为 `0.5`；服务端更新为 `0.2.2`，服务端 API 保持 `0.2`。插件自身版本和两端核心代际不变，版本继续由根版本文件派生。
+
+## 0.5.2-261030（客户端 API 0.5-261030）／0.2.1（服务端 API 0.2）
+
+- 开发者指定将客户端 `0.5.1-261030` 的补丁号加 1 为 `0.5.2-261030`，保留日期 qualifier；客户端 API 仍为 `0.5-261030`，核心代际 5 不变，服务端 `0.2.1`／API `0.2` 不变。补丁变化不改变插件兼容性，SDK 与插件无需因版本号重编。
+- 设置页新增本机 ZeroTier `local.conf` 管理，直接读取和写入 Windows `C:\ProgramData\ZeroTier\One`、macOS `/Library/Application Support/ZeroTier/One`、Linux `/var/lib/zerotier-one` 的真实系统文件。文件不存在时按文档初始内容创建；已有文件、`primaryPort`、其他已知和未知字段不会被启动默认值覆盖，非法 JSON 或错误类型只报错并保留原文件。
+- 新增“允许TCP回退”“强制TCP回退”开关，首次读取显示实际值；关闭允许时同时关闭强制，开启强制时保证允许开启，两个字段一次写入。保存失败后重新读取实际文件，初始化／刷新／绑定更新不会误触发保存。强制 TCP 时不再把“正在使用 TCP 中继”显示为网络故障。
+- 新增“切换TCP回退中转服务器”下拉列表：按与 `.ztbundle` 导出相同的资格判断筛出网络，异步读取 `listnetworks` 和 `listmoons`，从对应 Moon 服务器根节点的 `stableEndpoints` 解析公网 IPv4，固定使用 `9443/TCP`；无法可靠确定地址的网络项禁用并说明原因。界面显示 `IP:9443`，`local.conf` 写入 `IP/9443`。切换成功后提示手动重启 ZeroTier，不提供自动重启，也不改动两个开关。
+- 设置页底部新增低强调“打开本地配置文件”按钮，在资源管理器（Windows `/select`）、Finder（macOS `open -R`）或文件管理器（Linux `FileManager1`／`xdg-open`）中定位文件；文件尚未创建或定位失败时显示真实错误。
+- `.ztbundle` `version=1` 新增可选顶层字段 `tcpFallbackRelay: "IP:9443"`。导出时重新读取 `local.conf`，仅当解析后的 IP／端口与导出网络对应服务器完全匹配时携带；导入时先校验字段，缺失则保留本地值，有效则只覆写 `settings.tcpFallbackRelay`，非法值拒绝。Moon 替换确认取消时不修改 TCP 配置；配置与 Moon 复制、服务重启合并在同一次提权操作中，配置在该次重启前写入，不为新字段额外重启。
+- 增加隔离目录测试覆盖缺文件创建、已有文件不覆盖、非法 JSON、字段保留、开关联动与保存失败恢复、候选筛选与 Moon 地址解析、导出匹配／省略、导入覆写／保留／拒绝、手动重启提示与文件定位参数；设置页补测深浅主题、720×480 最小窗口、下拉菜单和禁用状态。未读写开发机真实 `local.conf`，未重启开发机真实 ZeroTier 服务。
+
 ## 0.5.1（客户端 API 0.5）／0.2.1（服务端 API 0.2）
 
 - 开发者指定客户端 `0.5.1`、服务端 `0.2.1`，分别去除 `alpha`／`beta` 后缀；客户端 API 同步为 `0.5`，服务端 API 同步为 `0.2`，数字代际不变。旧 `0.5-alpha`／`0.2-beta` 插件元数据与新宿主不匹配，需要使用对应 SDK 重编；根 `VERSION`／`SERVER_VERSION` 继续作为版本来源。
-- 两端主程序、SDK 及配套媒体／语音插件按新 API 重建；Windows 正式包、独立 SDK 消费者和针对性真实插件加载通过，Linux 105 项自动化验证通过，产物哈希与验证边界见[本轮记录](docs/validation/release-0.5.1-0.2.1.md)。修正启动脚本测试的缺 Java 场景，使其 PATH 真正隔离系统 Java，避免已安装 JDK 的机器上误判。
-- 完成客户端存储、插件清理与语音提示阶段的文档收尾：移除已完成的根目标／任务清单，将五组验证与审计记录统一收录到[阶段归档](docs/validation/storage-voice-2026-10-21/README.md)，保留原始证据、最终关闭结果和未验证边界。
+- 两端主程序、SDK 及配套媒体／语音插件按新 API 重建；Windows 正式包、独立 SDK 消费者和针对性真实插件加载通过，Linux 105 项自动化验证通过。修正启动脚本测试的缺 Java 场景，使其 PATH 真正隔离系统 Java，避免已安装 JDK 的机器上误判。
+- 完成客户端存储、插件清理与语音提示阶段的文档收尾，移除已完成的根目标／任务清单。
 - 服务端独立安装脚本的全量安装新增 pylon reflect 容器（`ztpylon`，`zerotier/pylon:latest`，9443/TCP 映射至容器 443/TCP），新增选项 4「仅安装pylon」和 7「仅卸载pylon」，全量卸载改为选项 8 并清理 pylon 容器与镜像；仅卸载 ZeroTier 改为 `--action 9`。支持容器复用、启动与 `--force` 重建，pylon 独立安装/卸载不依赖 ZeroTier 或 ztncui，清理失败停止后续卸载。
 - 修正 pylon 与 ZeroTier 本地管理 API 同时占用 9993/TCP 导致安装失败：pylon 默认宿主端口改为 9443，新增 `--pylon-port`、TCP 端口预检和已有映射校验；端口冲突时保留现有容器，启动失败遗留的 `created` 容器可清理或按新端口重建，状态汇总显示实际映射端口。
 - 新增一键清理入口 `scripts/clean-build-temp.ps1`：删除 `*.previous-*` 构建备份并清空 `.tmp/` 内容，`-Exclude` 可保留指定文件或文件夹（支持通配符），`-WhatIf` 仅预览；实现位于构建技能。
-- 整理文档结构：插件服务迁移总结与实施交接、0.3.2 资源测量、0.3.3／API 0.3 运行依赖证据归档到 `docs/validation/` 日期目录，新增[验证记录索引](docs/validation/README.md)；`qml-migration.md` 更名为 `qml.md`，相关入链同步更新。
+- QML 维护文档由 `qml-migration.md` 更名为 `qml.md`，同步更新相关引用。
 - 测试截图与媒体卸载 CSV 改写到 `.tmp/screenshots/`，避免从仓库根目录直接运行 GUI／语音测试时重新创建根 `screenshots/`；现有截图已迁移到该目录。
 - 客户端新增 `StorageContext`／`SettingsStore`：统一活动存储根（程序目录或当前用户 profile）、安装路由、所有权记录和只读回退；宿主设置写入活动根 `settings.ini`，QML 窗口／侧栏／列宽共用同一文件，GPU 启动时序和命令行临时覆盖不变，旧 `ZeroTierGUI/ZTGUI`／`ZeroTierGUI/ZeroTier GUI` 白名单设置自动补缺迁移并保留损坏文件。
 - 插件数据改为按稳定 ID 的 `plugins-data/id-<ID>/` 目录，支持旧显示名目录的歧义感知迁移、ID 级进程租约、`.ztgui/plugins/<id>.json` 所有权与删除墓碑，以及删除前关闭旧配置导入、移出待删包、再删数据的顺序。
@@ -40,17 +67,17 @@
 - 插件扫描在后台发现阶段、任何实例启动前，用全部已认证安装包（含禁用、不兼容）登记 `.ztgui/plugins/<id>.json` 的显示名归属；同名不同 ID 的首次加载不再由先启动者认领旧目录，两个 ID 都会保留旧数据并提示人工处理。
 - 个人根迁移按类别排除插件 `id-*/cache/` 与 `id-*/logs/`，并在迁移项记录 `excluded` 数量；根级日志和缓存本来就未迁移。
 - 待删记录写入真实插件数据根而不是其父目录，并记录授权时包文件的 SHA-256；启动恢复遵守安装目录包锁，重新认证当前安装清单、所有权记录与租约，重装同 ID 包时保留其数据，包内容与授权时不一致时保守保留记录，活租约下不先移走原包。
-- 更正：10-18／10-19 记录中“未重新打包”导致发行 SDK、媒体包与语音包早于当前源码（含共享包实现与语音旧源键清除）；本轮按宿主 SDK → 媒体 SDK／包 → 语音消费者／包顺序重新交付，并重新构建主程序与 Windows 发行目录。输入指纹与产物哈希见 [2026-10-21 修复验证](docs/validation/storage-voice-2026-10-21/followup-2026-10-21/README.md)。
+- 更正：10-18／10-19 记录中“未重新打包”导致发行 SDK、媒体包与语音包早于当前源码（含共享包实现与语音旧源键清除）；本轮按宿主 SDK → 媒体 SDK／包 → 语音消费者／包顺序重新交付，并重新构建主程序与 Windows 发行目录。
 - 2026-10-21 再次复核修复：`StorageContext::settingsMigrationPending()` 按 `migration.json` 的 `settings` 项暴露未结算状态，`SettingsStore::guardStorageMigration()` 据此拒绝宿主 INI 的全部持久写入且不创建目标文件，旧注册表导入也不写完成标记；重启重试复制成功后才恢复写入，避免个人根迁移失败后新建的 `settings.ini` 让重试跳过原主题与名称。
 - QML 窗口尺寸、侧栏宽度和表格列宽改由 `backend.hostSetting()`／`setHostSetting()` 经 `SettingsStore` 读写同一 `settings.ini`（键名不变），移除两处 QML `Settings` 元素：该元素在加载时就会把声明的默认属性写入文件，会在迁移失败期间抢先创建目标并绕过宿主的写入保护。
 - 启动恢复待删事务时，租约复查、所有权记录复查、旧配置导入墓碑、移包和删数据改为在同一个已持有的数据根协调锁区间内完成（包锁 → 协调锁顺序不变）；等待协调锁期间由加载方登记的新租约不再被漏检，`hasOtherLeases()` 也不在锁外先行判断。
 - 完整认证安装清单的显示名归属同时保留在内存中并交给每个插件消费者；登记失败、锁竞争、相关所有权记录不可读或安装目录内存在无法认证的包时视为归属无法确认，保留旧显示名目录并提示，不再只告警后继续自动迁移。损坏记录与损坏包本身继续原样保留。
-- 上述修复只改宿主私有实现、QML 与测试，不改变公共 SDK、插件版本、媒体／语音包或服务端；主程序已重新构建并重打 Windows 发行目录与 ZIP，证据见 [同日第二轮修复](docs/validation/storage-voice-2026-10-21/followup-2026-10-21/remaining-fixes.md)。
+- 上述修复只改宿主私有实现、QML 与测试，不改变公共 SDK、插件版本、媒体／语音包或服务端；主程序已重新构建并重打 Windows 发行目录与 ZIP。
 
 ## 0.5.1-alpha（客户端 API 0.5-alpha）／0.2.1-beta（服务端 API 0.2-beta）
 
 - 开发者指定客户端 `0.5.1-alpha`（API `0.5-alpha`）、服务端 `0.2.1-beta`（API `0.2-beta`）。客户端版本源为根 `VERSION`，服务端版本由客户端侧维护的根 `SERVER_VERSION` 指定；同端 API 使用程序版本前两段数字和相同预发布后缀，客户端与服务端版本独立。客户端关于界面显示目标服务端版本；客户端 API 0.4 与服务端 API 0.4 插件须用新 SDK 重编。归档 C++ 服务端保留 0.4.1／API 0.4。
-- 重新构建并发布客户端、服务端、两端 SDK、媒体与语音插件；Windows 主程序 191 个文件、Linux 服务端包 6 个顶层文件加 `licenses/`，测试和产物哈希见 [版本验证](docs/validation/release-0.5.1-alpha-0.2.1-beta.md)。
+- 重新构建并发布客户端、服务端、两端 SDK、媒体与语音插件；Windows 主程序 191 个文件、Linux 服务端包 6 个顶层文件加 `licenses/`。
 - 构建工具修复：`Invoke-Checked` 不再把 windeployqt 的非致命 stderr 提示当作失败；Linux 打包改用原生临时目录，WSL/drvfs 下的 tar 保留 755/644 权限。
 
 - Linux 服务端迁移为 Java 25 + Netty 4.2（Maven、`maven.compiler.release=25`、`zt-server.jar`），宿主继续提供 `ZTS1`、`builtin`、`ZTD1`、`ZTV1` 兼容行为、只读 ZeroTier 查询和网络中转；旧 C++/Qt6 项目、测试和 C++ 语音插件归档到 `src/server-old/`，根 CMake 仅在显式 `ZTGUI_BUILD_SERVER_OLD=ON` 时构建。
@@ -181,7 +208,7 @@
 ## 0.2.2（API 0.2）
 
 - 新增 `src/client/plugins/`，用于维护独立插件项目。
-- 新增项目内 `.agents/skills/ztgui-plugin-dev/SKILL.md`，说明创建目录、引用 API、编写插件和独立编译的完整流程。
+- 新增项目内 `.agents/skills/zto-plugin-dev/SKILL.md`，说明创建目录、引用 API、编写插件和独立编译的完整流程。
 - 在维护规则中接入插件开发 SKILL，并同步说明当前进程内注册与外部 DLL 加载的边界。
 
 ## 0.2.1（API 0.2）

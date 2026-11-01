@@ -5,7 +5,7 @@
 #include <QString>
 #include <functional>
 
-namespace vusiif::ztgui::zerotier {
+namespace vusiif::zto::zerotier {
 enum class PingState {
     Success,
     Unreachable,

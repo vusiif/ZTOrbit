@@ -4,7 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 
-namespace vusiif::ztgui::storage {
+namespace vusiif::zto::storage {
 
 CoordinationLock::CoordinationLock(const QString &metadataRoot)
     : m_lock(QDir(metadataRoot).filePath(QStringLiteral("coord.lock")))
@@ -47,4 +47,4 @@ QString cacheReadLockPath(const QString &metadataRoot, const QString &filePath)
         .filePath(QString::fromLatin1(digest) + QStringLiteral(".lock"));
 }
 
-} // namespace vusiif::ztgui::storage
+} // namespace vusiif::zto::storage

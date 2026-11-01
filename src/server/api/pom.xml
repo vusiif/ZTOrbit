@@ -5,17 +5,17 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>vusiif.ztgui</groupId>
-        <artifactId>ztserver-parent</artifactId>
+        <groupId>vusiif.ztohub</groupId>
+        <artifactId>ztohub-parent</artifactId>
         <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>ztserver-api</artifactId>
+    <artifactId>ztohub-api</artifactId>
     <version>${apiVersion}</version>
     <packaging>jar</packaging>
-    <name>ZTServer Plugin API</name>
-    <description>Public Java plugin SDK for ZTServer (API ${apiVersion})</description>
+    <name>ZTOrbitHub Plugin API</name>
+    <description>Public Java plugin SDK for ZTOrbitHub (API ${apiVersion})</description>
 
     <dependencies>
         <dependency>

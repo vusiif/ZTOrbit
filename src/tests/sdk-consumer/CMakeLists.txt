@@ -1,15 +1,15 @@
 cmake_minimum_required(VERSION 3.21.1)
-project(ztgui_sdk_consumer LANGUAGES CXX)
+project(zto_sdk_consumer LANGUAGES CXX)
 # Configure this outside the host build to verify the installed SDK boundary.
-set(ZTGUI_REQUIRED_API "0.5" CACHE STRING "Required plugin API generation")
-find_package(ZTGUIPluginApi ${ZTGUI_REQUIRED_API} EXACT CONFIG REQUIRED)
+set(ZTO_REQUIRED_API "0.5" CACHE STRING "Required plugin API generation")
+find_package(ZTOrbitPluginApi ${ZTO_REQUIRED_API} EXACT CONFIG REQUIRED)
 add_executable(sdk_consumer ApiConsumer.cpp)
-target_link_libraries(sdk_consumer PRIVATE ZTGUI::Api)
+target_link_libraries(sdk_consumer PRIVATE ZTO::Api)
 set(CMAKE_AUTOMOC ON)
 configure_file(sdk-plugin.json.in "${CMAKE_CURRENT_BINARY_DIR}/sdk-plugin.json" @ONLY)
 qt_add_plugin(sdk_sample SHARED CLASS_NAME SdkSample)
 target_sources(sdk_sample PRIVATE SdkPlugin.cpp)
 target_include_directories(sdk_sample PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-target_link_libraries(sdk_sample PRIVATE ZTGUI::Api)
-ztgui_package_plugin(sdk_sample HOST client ID SDK-sample NAME "SDK sample" VERSION 1
-    API "${ZTGUI_API_VERSION}" IID "vusiif.ztgui.api.PluginInterface/3.0")
+target_link_libraries(sdk_sample PRIVATE ZTO::Api)
+zto_package_plugin(sdk_sample HOST client ID SDK-sample NAME "SDK sample" VERSION 1
+    API "${ZTO_API_VERSION}" IID "vusiif.zto.api.PluginInterface/3.0")

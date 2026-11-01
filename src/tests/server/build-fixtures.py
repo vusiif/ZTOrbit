@@ -35,7 +35,7 @@ def api_version(explicit, root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--api", required=True, help="ztserver-api jar")
+    parser.add_argument("--api", required=True, help="ztohub-api jar")
     parser.add_argument("--source", default=str(Path(__file__).resolve().parent / "fixtures"))
     parser.add_argument("--output", required=True, help="directory receiving the fixture jars")
     parser.add_argument("--api-version", help="API version (defaults to SERVER_VERSION)")
@@ -79,7 +79,7 @@ def main():
             with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as jar:
                 for compiled_file in compiled:
                     jar.write(compiled_file, compiled_file.relative_to(classes).as_posix())
-                jar.writestr("META-INF/ztserver-plugin.json",
+                jar.writestr("META-INF/ztohub-plugin.json",
                              json.dumps(manifest, ensure_ascii=False, indent=2))
             print(archive)
 

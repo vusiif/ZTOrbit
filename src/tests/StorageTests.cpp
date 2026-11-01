@@ -24,7 +24,7 @@
 #include <unistd.h>
 #endif
 
-using namespace vusiif::ztgui::storage;
+using namespace vusiif::zto::storage;
 
 class StorageTests : public QObject {
     Q_OBJECT
@@ -46,7 +46,7 @@ private slots:
     void initTestCase()
     {
         QVERIFY(m_settings.isValid());
-        QCoreApplication::setOrganizationName("ZTGUI-Storage-Tests");
+        QCoreApplication::setOrganizationName("ZTOrbit-Storage-Tests");
         QCoreApplication::setApplicationName("StorageTests");
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settings.path());
@@ -60,8 +60,8 @@ private slots:
         QCOMPARE(id, StorageContext::installKey(QCoreApplication::applicationDirPath()));
         QCOMPARE(StorageContext::userKey().size(), 64);
 #ifdef Q_OS_WIN
-        const auto upper = StorageContext::installKey(QStringLiteral("C:/Program Files/ZTGUI").toUpper());
-        const auto lower = StorageContext::installKey(QStringLiteral("C:/Program Files/ZTGUI"));
+        const auto upper = StorageContext::installKey(QStringLiteral("C:/Program Files/ZTOrbit").toUpper());
+        const auto lower = StorageContext::installKey(QStringLiteral("C:/Program Files/ZTOrbit"));
         QCOMPARE(upper, lower);
 #endif
         QCOMPARE(StorageContext::pluginDataDirectoryName("Voice-Chat"), QStringLiteral("id-voice-chat"));
@@ -265,7 +265,7 @@ private slots:
         const auto personalBase = directory.filePath("user-data");
         QVERIFY(QDir().mkpath(shared));
         QVERIFY(QDir().mkpath(QDir(shared).filePath("plugins-data/id-voice-chat")));
-        QVERIFY(QDir().mkpath(QDir(shared).filePath(".ztgui/plugins")));
+        QVERIFY(QDir().mkpath(QDir(shared).filePath(".zto/plugins")));
         QVERIFY(QDir().mkpath(QDir(shared).filePath("logs")));
         {
             QSettings settings(QDir(shared).filePath("settings.ini"), QSettings::IniFormat);
@@ -279,7 +279,7 @@ private slots:
             config.write("{\"volume\":35}");
         }
         {
-            QFile owner(QDir(shared).filePath(".ztgui/plugins/voice-chat.json"));
+            QFile owner(QDir(shared).filePath(".zto/plugins/voice-chat.json"));
             QVERIFY(owner.open(QIODevice::WriteOnly));
             owner.write("{\"id\":\"voice-chat\",\"names\":[\"语音\"]}");
         }
@@ -331,7 +331,7 @@ private slots:
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const auto dataRoot = directory.filePath("plugins-data");
-        const auto metadataRoot = directory.filePath(".ztgui");
+        const auto metadataRoot = directory.filePath(".zto");
         QVERIFY(QDir().mkpath(QDir(dataRoot).filePath(QStringLiteral("旧名字"))));
         {
             QFile config(QDir(dataRoot).filePath(QStringLiteral("旧名字/config.json")));
@@ -373,7 +373,7 @@ private slots:
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const auto dataRoot = directory.filePath("plugins-data");
-        const auto metadataRoot = directory.filePath(".ztgui");
+        const auto metadataRoot = directory.filePath(".zto");
         const auto legacy = QDir(dataRoot).filePath(QStringLiteral("旧名字"));
         QVERIFY(QDir().mkpath(legacy));
         {
@@ -420,7 +420,7 @@ private slots:
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const auto dataRoot = directory.filePath("plugins-data");
-        const auto metadataRoot = directory.filePath(".ztgui");
+        const auto metadataRoot = directory.filePath(".zto");
         const auto legacy = QDir(dataRoot).filePath(QStringLiteral("旧名字"));
         QVERIFY(QDir().mkpath(legacy));
         {
@@ -478,7 +478,7 @@ private slots:
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const auto dataRoot = directory.filePath("plugins-data");
-        const auto metadataRoot = directory.filePath(".ztgui");
+        const auto metadataRoot = directory.filePath(".zto");
         QVERIFY(QDir().mkpath(QDir(dataRoot).filePath("Shared")));
         QVERIFY(QDir().mkpath(QDir(metadataRoot).filePath("plugins")));
         for (const auto &id : {QStringLiteral("alpha"), QStringLiteral("beta")}) {
@@ -500,7 +500,7 @@ private slots:
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const auto dataRoot = directory.filePath("plugins-data");
-        const auto metadataRoot = directory.filePath(".ztgui");
+        const auto metadataRoot = directory.filePath(".zto");
         const auto outside = directory.filePath("outside");
         QVERIFY(QDir().mkpath(outside));
         {
@@ -540,7 +540,7 @@ private slots:
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const auto dataRoot = QDir(directory.path()).filePath("plugins-data");
-        const auto metadataRoot = QDir(directory.path()).filePath(".ztgui");
+        const auto metadataRoot = QDir(directory.path()).filePath(".zto");
         const auto migrationPath = QDir(metadataRoot).filePath("migration.json");
         const auto writeMigration = [&](const QByteArray &bytes) -> bool {
             if (!QDir().mkpath(metadataRoot)) return false;
@@ -584,7 +584,7 @@ private slots:
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const auto dataRoot = directory.filePath("plugins-data");
-        const auto metadataRoot = directory.filePath(".ztgui");
+        const auto metadataRoot = directory.filePath(".zto");
         PluginDataStore store(dataRoot, metadataRoot, "run-a", "user-a");
         QString error;
         QVERIFY(!store.prepare("voice-chat", QStringLiteral("语音"), error).isEmpty());
@@ -663,7 +663,7 @@ private slots:
         QVERIFY(!QFileInfo::exists(QDir(dataRoot).filePath("id-orphan")));
         QVERIFY(QFileInfo::exists(QDir(dataRoot).filePath("id-installed")));
         QVERIFY(QFileInfo::exists(QDir(dataRoot).filePath(QStringLiteral("旧名字"))));
-        QVERIFY(QFileInfo::exists(QDir(root).filePath(".ztgui/plugins/orphan.json")));
+        QVERIFY(QFileInfo::exists(QDir(root).filePath(".zto/plugins/orphan.json")));
         QVERIFY(!maintenance.orphans({"installed"}).isEmpty());
     }
 
@@ -699,7 +699,7 @@ private slots:
         QVERIFY(cacheFile.open(QIODevice::ReadWrite));
         QVERIFY(cacheFile.setFileTime(idle, QFileDevice::FileModificationTime));
         cacheFile.close();
-        vusiif::ztgui::util::log::registerActiveFile(activeLog);
+        vusiif::zto::util::log::registerActiveFile(activeLog);
         const auto context = StorageContext::forTesting(root);
         StorageMaintenance maintenance(context);
         // The preview applies the same age/size rules without deleting
@@ -721,8 +721,8 @@ private slots:
         QVERIFY(QFileInfo::exists(recentCache));
         QVERIFY(cacheReport.released.contains(oldCache));
         QVERIFY(maintenance.previewRetention().empty());
-        vusiif::ztgui::util::log::unregisterActiveFile(activeLog);
-        QCOMPARE(vusiif::ztgui::util::log::maximumFileBytes(), qint64(10 * 1024 * 1024));
+        vusiif::zto::util::log::unregisterActiveFile(activeLog);
+        QCOMPARE(vusiif::zto::util::log::maximumFileBytes(), qint64(10 * 1024 * 1024));
     }
 
     void personalMigrationRetriesSettledItemsAndCopiesOwnership()
@@ -733,11 +733,11 @@ private slots:
         const auto personalBase = directory.filePath("user-data");
         const auto dataSource = QDir(shared).filePath("plugins-data/id-voice-chat");
         QVERIFY(QDir().mkpath(dataSource));
-        QVERIFY(QDir().mkpath(QDir(shared).filePath(".ztgui/plugins")));
+        QVERIFY(QDir().mkpath(QDir(shared).filePath(".zto/plugins")));
         QVERIFY(QDir().mkpath(QDir(shared).filePath("logs")));
         QVERIFY(QDir().mkpath(QDir(shared).filePath("cache")));
-        QVERIFY(QDir().mkpath(QDir(shared).filePath(".ztgui/leases/id-voice-chat")));
-        QVERIFY(QDir().mkpath(QDir(shared).filePath(".ztgui/pending-deletions")));
+        QVERIFY(QDir().mkpath(QDir(shared).filePath(".zto/leases/id-voice-chat")));
+        QVERIFY(QDir().mkpath(QDir(shared).filePath(".zto/pending-deletions")));
         {
             QSettings settings(QDir(shared).filePath("settings.ini"), QSettings::IniFormat);
             settings.setValue("appearance/theme", "dark");
@@ -750,14 +750,14 @@ private slots:
             return file.write(bytes) == bytes.size();
         };
         QVERIFY(write(QDir(dataSource).filePath("config.json"), "{\"volume\":35}"));
-        QVERIFY(write(QDir(shared).filePath(".ztgui/plugins/voice-chat.json"),
+        QVERIFY(write(QDir(shared).filePath(".zto/plugins/voice-chat.json"),
                       "{\"format\":1,\"id\":\"voice-chat\",\"names\":[\"Voice\"]}"));
-        QVERIFY(write(QDir(shared).filePath(".ztgui/settings-migration.json"),
+        QVERIFY(write(QDir(shared).filePath(".zto/settings-migration.json"),
                       "{\"format\":1,\"completed\":true}"));
         QVERIFY(write(QDir(shared).filePath("logs/250101-1.log"), "shared log"));
         QVERIFY(write(QDir(shared).filePath("cache/session.bin"), "cache"));
-        QVERIFY(write(QDir(shared).filePath(".ztgui/leases/id-voice-chat/run-b.json"), "{}"));
-        QVERIFY(write(QDir(shared).filePath(".ztgui/pending-deletions/old.json"), "{}"));
+        QVERIFY(write(QDir(shared).filePath(".zto/leases/id-voice-chat/run-b.json"), "{}"));
+        QVERIFY(write(QDir(shared).filePath(".zto/pending-deletions/old.json"), "{}"));
         // Pre-record the personal route so the selection is deterministic.
         const auto routeDirectory = QDir(personalBase).filePath(
             QStringLiteral("installations/") + StorageContext::installKey(shared));
@@ -898,7 +898,7 @@ private slots:
         const auto shared = directory.filePath("application");
         const auto personalBase = directory.filePath("user-data");
         QVERIFY(QDir().mkpath(shared));
-        QVERIFY(QDir().mkpath(QDir(shared).filePath(".ztgui/plugins")));
+        QVERIFY(QDir().mkpath(QDir(shared).filePath(".zto/plugins")));
         {
             QSettings settings(QDir(shared).filePath("settings.ini"), QSettings::IniFormat);
             settings.setValue("appearance/theme", "dark");
@@ -906,12 +906,12 @@ private slots:
         }
         const auto routeDirectory = QDir(personalBase).filePath(
             QStringLiteral("installations/") + StorageContext::installKey(shared));
-        QVERIFY(QDir().mkpath(QDir(routeDirectory).filePath("profile/.ztgui")));
+        QVERIFY(QDir().mkpath(QDir(routeDirectory).filePath("profile/.zto")));
         {
             QFile route(QDir(routeDirectory).filePath("route.json"));
             QVERIFY(route.open(QIODevice::WriteOnly));
             route.write(QJsonDocument(QJsonObject{{"format", 1}, {"mode", "personal"}}).toJson());
-            QFile record(QDir(routeDirectory).filePath("profile/.ztgui/migration.json"));
+            QFile record(QDir(routeDirectory).filePath("profile/.zto/migration.json"));
             QVERIFY(record.open(QIODevice::WriteOnly));
             record.write("{broken");
         }
@@ -1022,7 +1022,7 @@ private slots:
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const auto dataRoot = QDir(directory.path()).filePath("plugins-data");
-        const auto metadataRoot = QDir(directory.path()).filePath(".ztgui");
+        const auto metadataRoot = QDir(directory.path()).filePath(".zto");
         const auto legacy = QDir(dataRoot).filePath(QStringLiteral("Shared Name"));
         QVERIFY(QDir().mkpath(legacy));
         const auto writeKeep = [](const QString &path) {
@@ -1065,7 +1065,7 @@ private slots:
         QTemporaryDir memoryOnly;
         QVERIFY(memoryOnly.isValid());
         const auto memoryDataRoot = QDir(memoryOnly.path()).filePath("plugins-data");
-        const auto memoryMetadataRoot = QDir(memoryOnly.path()).filePath(".ztgui");
+        const auto memoryMetadataRoot = QDir(memoryOnly.path()).filePath(".zto");
         const auto memoryLegacy = QDir(memoryDataRoot).filePath(QStringLiteral("Shared Name"));
         QVERIFY(QDir().mkpath(memoryLegacy));
         QVERIFY(writeKeep(memoryLegacy));
@@ -1087,7 +1087,7 @@ private slots:
         QTemporaryDir direct;
         QVERIFY(direct.isValid());
         const auto directDataRoot = QDir(direct.path()).filePath("plugins-data");
-        const auto directMetadataRoot = QDir(direct.path()).filePath(".ztgui");
+        const auto directMetadataRoot = QDir(direct.path()).filePath(".zto");
         const auto directLegacy = QDir(directDataRoot).filePath(QStringLiteral("Shared Name"));
         QVERIFY(QDir().mkpath(directLegacy));
         QVERIFY(writeKeep(directLegacy));

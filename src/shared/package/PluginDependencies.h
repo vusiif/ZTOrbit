@@ -3,7 +3,7 @@
 #include <QMap>
 #include <QSet>
 #include <QStringList>
-namespace vusiif::ztgui::package {
+namespace vusiif::zto::package {
 QString validateServiceManifest(const QJsonObject &info);
 bool versionMatches(const QString &version, const QString &range, QString *error = nullptr);
 struct DependencyPlan { QStringList order; QString error; bool ok() const { return error.isEmpty(); } };

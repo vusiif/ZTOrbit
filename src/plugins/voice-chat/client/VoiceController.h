@@ -7,7 +7,7 @@
 #include <QJsonValue>
 #include <memory>
 #include <functional>
-namespace vusiif::ztgui::voice_chat {
+namespace vusiif::zto::voice_chat {
 class VoiceSession;
 class AudioDeviceCache;
 class VoiceController final : public QObject {

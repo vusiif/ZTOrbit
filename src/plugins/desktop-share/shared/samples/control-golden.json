@@ -1,0 +1,630 @@
+{
+  "format": "zds-control-golden/1",
+  "description": "桌面共享控制协议共享金样例。合法样例的 bytes 即规范编码；C++ 与 Java 必须逐字节重编码一致。",
+  "valid": [
+    {
+      "name": "tiles-stream-configure-request",
+      "kind": "request",
+      "op": "stream.configure",
+      "bytes": "{\"v\":1,\"id\":4,\"op\":\"stream.configure\",\"data\":{\"roomId\":\"7\",\"codec\":\"bgra-tiles\",\"width\":1280,\"height\":720,\"fps\":30,\"bitrate\":2000000,\"initializationData\":\"\"}}",
+      "expect": {
+        "id": 4,
+        "op": "stream.configure",
+        "roomId": "7",
+        "formatWidth": 1280,
+        "formatHeight": 720,
+        "formatFps": 30,
+        "formatBitrate": 2000000,
+        "formatInit": "",
+        "formatEpoch": "0",
+        "formatCodec": "bgra-tiles"
+      }
+    },
+    {
+      "name": "tiles-stream-config-event",
+      "kind": "event",
+      "event": "stream.config",
+      "bytes": "{\"v\":1,\"event\":\"stream.config\",\"data\":{\"roomId\":\"7\",\"format\":{\"codec\":\"bgra-tiles\",\"width\":1280,\"height\":720,\"fps\":30,\"bitrate\":2000000,\"initializationData\":\"\",\"streamEpoch\":\"1\"}}}",
+      "expect": {
+        "event": "stream.config",
+        "roomId": "7",
+        "formatWidth": 1280,
+        "formatHeight": 720,
+        "formatFps": 30,
+        "formatBitrate": 2000000,
+        "formatInit": "",
+        "formatEpoch": "1",
+        "formatCodec": "bgra-tiles"
+      }
+    },
+    {
+      "name": "tiles-join-response-720p-format",
+      "kind": "response",
+      "op": "join",
+      "bytes": "{\"v\":1,\"id\":3,\"ok\":true,\"data\":{\"roomId\":\"7\",\"roomCode\":\"00123456\",\"profile\":\"720p30\",\"role\":\"viewer\",\"token\":\"00112233445566778899aabbccddeeff\",\"format\":{\"codec\":\"bgra-tiles\",\"width\":1280,\"height\":720,\"fps\":30,\"bitrate\":2000000,\"initializationData\":\"\",\"streamEpoch\":\"1\"}}}",
+      "expect": {
+        "id": 3,
+        "ok": true,
+        "roomId": "7",
+        "roomCode": "00123456",
+        "profile": "720p30",
+        "role": "viewer",
+        "token": "00112233445566778899aabbccddeeff",
+        "formatWidth": 1280,
+        "formatHeight": 720,
+        "formatFps": 30,
+        "formatBitrate": 2000000,
+        "formatInit": "",
+        "formatEpoch": "1",
+        "formatCodec": "bgra-tiles"
+      }
+    },
+    {
+      "name": "hello-request",
+      "kind": "request",
+      "op": "hello",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"hello\",\"data\":{}}",
+      "expect": {
+        "id": 1,
+        "op": "hello"
+      }
+    },
+    {
+      "name": "hello-response",
+      "kind": "response",
+      "op": "hello",
+      "bytes": "{\"v\":1,\"id\":1,\"ok\":true,\"data\":{\"sessionId\":\"1\",\"udpPort\":18100,\"capabilities\":{\"profiles\":[\"720p30\",\"1080p30\"],\"maxViewers\":8}}}",
+      "expect": {
+        "id": 1,
+        "ok": true,
+        "sessionId": "1",
+        "udpPort": 18100,
+        "profiles": [
+          "720p30",
+          "1080p30"
+        ],
+        "maxViewers": 8
+      }
+    },
+    {
+      "name": "create-request",
+      "kind": "request",
+      "op": "create",
+      "bytes": "{\"v\":1,\"id\":2,\"op\":\"create\",\"data\":{\"profile\":\"720p30\"}}",
+      "expect": {
+        "id": 2,
+        "op": "create",
+        "profile": "720p30"
+      }
+    },
+    {
+      "name": "create-response",
+      "kind": "response",
+      "op": "create",
+      "bytes": "{\"v\":1,\"id\":2,\"ok\":true,\"data\":{\"roomId\":\"7\",\"roomCode\":\"00123456\",\"profile\":\"720p30\",\"role\":\"publisher\",\"token\":\"00112233445566778899aabbccddeeff\"}}",
+      "expect": {
+        "id": 2,
+        "ok": true,
+        "roomId": "7",
+        "roomCode": "00123456",
+        "profile": "720p30",
+        "role": "publisher",
+        "token": "00112233445566778899aabbccddeeff"
+      }
+    },
+    {
+      "name": "join-request",
+      "kind": "request",
+      "op": "join",
+      "bytes": "{\"v\":1,\"id\":3,\"op\":\"join\",\"data\":{\"roomCode\":\"00123456\"}}",
+      "expect": {
+        "id": 3,
+        "op": "join",
+        "roomCode": "00123456"
+      }
+    },
+    {
+      "name": "join-response-preparing",
+      "kind": "response",
+      "op": "join",
+      "bytes": "{\"v\":1,\"id\":3,\"ok\":true,\"data\":{\"roomId\":\"7\",\"roomCode\":\"00123456\",\"profile\":\"720p30\",\"role\":\"viewer\",\"token\":\"00112233445566778899aabbccddeeff\"}}",
+      "expect": {
+        "id": 3,
+        "ok": true,
+        "roomId": "7",
+        "roomCode": "00123456",
+        "profile": "720p30",
+        "role": "viewer",
+        "token": "00112233445566778899aabbccddeeff"
+      }
+    },
+    {
+      "name": "join-response-720p-format",
+      "kind": "response",
+      "op": "join",
+      "bytes": "{\"v\":1,\"id\":3,\"ok\":true,\"data\":{\"roomId\":\"7\",\"roomCode\":\"00123456\",\"profile\":\"720p30\",\"role\":\"viewer\",\"token\":\"00112233445566778899aabbccddeeff\",\"format\":{\"codec\":\"h264\",\"width\":1280,\"height\":720,\"fps\":30,\"bitrate\":2000000,\"initializationData\":\"000000016742002a\",\"streamEpoch\":\"1\"}}}",
+      "expect": {
+        "id": 3,
+        "ok": true,
+        "roomId": "7",
+        "roomCode": "00123456",
+        "profile": "720p30",
+        "role": "viewer",
+        "token": "00112233445566778899aabbccddeeff",
+        "formatWidth": 1280,
+        "formatHeight": 720,
+        "formatFps": 30,
+        "formatBitrate": 2000000,
+        "formatInit": "000000016742002a",
+        "formatEpoch": "1"
+      }
+    },
+    {
+      "name": "join-response-1080p-format",
+      "kind": "response",
+      "op": "join",
+      "bytes": "{\"v\":1,\"id\":4,\"ok\":true,\"data\":{\"roomId\":\"8\",\"roomCode\":\"00000001\",\"profile\":\"1080p30\",\"role\":\"viewer\",\"token\":\"00112233445566778899aabbccddeeff\",\"format\":{\"codec\":\"h264\",\"width\":1920,\"height\":1080,\"fps\":30,\"bitrate\":4000000,\"initializationData\":\"000000016742002a\",\"streamEpoch\":\"1\"}}}",
+      "expect": {
+        "id": 4,
+        "ok": true,
+        "roomId": "8",
+        "roomCode": "00000001",
+        "profile": "1080p30",
+        "role": "viewer",
+        "token": "00112233445566778899aabbccddeeff",
+        "formatWidth": 1920,
+        "formatHeight": 1080,
+        "formatFps": 30,
+        "formatBitrate": 4000000,
+        "formatInit": "000000016742002a",
+        "formatEpoch": "1"
+      }
+    },
+    {
+      "name": "room-not-found-error",
+      "kind": "response",
+      "op": "join",
+      "bytes": "{\"v\":1,\"id\":3,\"ok\":false,\"error\":{\"code\":\"ROOM_NOT_FOUND\",\"message\":\"房间不存在或已结束\"}}",
+      "expect": {
+        "id": 3,
+        "ok": false,
+        "errorCode": "ROOM_NOT_FOUND",
+        "errorMessage": "房间不存在或已结束"
+      }
+    },
+    {
+      "name": "stream-configure-request",
+      "kind": "request",
+      "op": "stream.configure",
+      "bytes": "{\"v\":1,\"id\":4,\"op\":\"stream.configure\",\"data\":{\"roomId\":\"7\",\"codec\":\"h264\",\"width\":1280,\"height\":720,\"fps\":30,\"bitrate\":2000000,\"initializationData\":\"000000016742002a\"}}",
+      "expect": {
+        "id": 4,
+        "op": "stream.configure",
+        "roomId": "7",
+        "formatWidth": 1280,
+        "formatHeight": 720,
+        "formatFps": 30,
+        "formatBitrate": 2000000,
+        "formatInit": "000000016742002a",
+        "formatEpoch": "0"
+      }
+    },
+    {
+      "name": "stream-configure-response",
+      "kind": "response",
+      "op": "stream.configure",
+      "bytes": "{\"v\":1,\"id\":4,\"ok\":true,\"data\":{\"roomId\":\"7\",\"streamEpoch\":\"1\"}}",
+      "expect": {
+        "id": 4,
+        "ok": true,
+        "roomId": "7",
+        "streamEpoch": "1"
+      }
+    },
+    {
+      "name": "stream-ready-request",
+      "kind": "request",
+      "op": "stream.ready",
+      "bytes": "{\"v\":1,\"id\":5,\"op\":\"stream.ready\",\"data\":{\"roomId\":\"7\",\"streamEpoch\":\"1\"}}",
+      "expect": {
+        "id": 5,
+        "op": "stream.ready",
+        "roomId": "7",
+        "streamEpoch": "1"
+      }
+    },
+    {
+      "name": "stream-keyframe-request",
+      "kind": "request",
+      "op": "stream.keyframe",
+      "bytes": "{\"v\":1,\"id\":6,\"op\":\"stream.keyframe\",\"data\":{\"roomId\":\"7\",\"streamEpoch\":\"1\"}}",
+      "expect": {
+        "id": 6,
+        "op": "stream.keyframe",
+        "roomId": "7",
+        "streamEpoch": "1"
+      }
+    },
+    {
+      "name": "stream-feedback-request",
+      "kind": "request",
+      "op": "stream.feedback",
+      "bytes": "{\"v\":1,\"id\":7,\"op\":\"stream.feedback\",\"data\":{\"roomId\":\"7\",\"streamEpoch\":\"1\",\"completePackets\":\"120\",\"missingFragments\":\"2\",\"decodedFrames\":\"119\",\"displayedFrames\":\"118\",\"waiting\":false,\"receivedBytes\":\"456789\"}}",
+      "expect": {
+        "id": 7,
+        "op": "stream.feedback",
+        "roomId": "7",
+        "streamEpoch": "1",
+        "completePackets": "120",
+        "missingFragments": "2",
+        "decodedFrames": "119",
+        "displayedFrames": "118",
+        "waiting": false,
+        "receivedBytes": "456789"
+      }
+    },
+    {
+      "name": "leave-request",
+      "kind": "request",
+      "op": "leave",
+      "bytes": "{\"v\":1,\"id\":8,\"op\":\"leave\",\"data\":{\"roomId\":\"7\"}}",
+      "expect": {
+        "id": 8,
+        "op": "leave",
+        "roomId": "7"
+      }
+    },
+    {
+      "name": "leave-response",
+      "kind": "response",
+      "op": "leave",
+      "bytes": "{\"v\":1,\"id\":8,\"ok\":true,\"data\":{}}",
+      "expect": {
+        "id": 8,
+        "ok": true
+      }
+    },
+    {
+      "name": "stop-request",
+      "kind": "request",
+      "op": "stop",
+      "bytes": "{\"v\":1,\"id\":9,\"op\":\"stop\",\"data\":{\"roomId\":\"7\"}}",
+      "expect": {
+        "id": 9,
+        "op": "stop",
+        "roomId": "7"
+      }
+    },
+    {
+      "name": "stop-response",
+      "kind": "response",
+      "op": "stop",
+      "bytes": "{\"v\":1,\"id\":9,\"ok\":true,\"data\":{}}",
+      "expect": {
+        "id": 9,
+        "ok": true
+      }
+    },
+    {
+      "name": "ping-request",
+      "kind": "request",
+      "op": "ping",
+      "bytes": "{\"v\":1,\"id\":10,\"op\":\"ping\",\"data\":{}}",
+      "expect": {
+        "id": 10,
+        "op": "ping"
+      }
+    },
+    {
+      "name": "ping-response",
+      "kind": "response",
+      "op": "ping",
+      "bytes": "{\"v\":1,\"id\":10,\"ok\":true,\"data\":{}}",
+      "expect": {
+        "id": 10,
+        "ok": true
+      }
+    },
+    {
+      "name": "room-state-event",
+      "kind": "event",
+      "event": "room.state",
+      "bytes": "{\"v\":1,\"event\":\"room.state\",\"data\":{\"roomId\":\"7\",\"state\":\"running\",\"viewerCount\":1}}",
+      "expect": {
+        "event": "room.state",
+        "roomId": "7",
+        "state": "running",
+        "viewerCount": 1
+      }
+    },
+    {
+      "name": "stream-config-event",
+      "kind": "event",
+      "event": "stream.config",
+      "bytes": "{\"v\":1,\"event\":\"stream.config\",\"data\":{\"roomId\":\"7\",\"format\":{\"codec\":\"h264\",\"width\":1280,\"height\":720,\"fps\":30,\"bitrate\":2000000,\"initializationData\":\"000000016742002a\",\"streamEpoch\":\"1\"}}}",
+      "expect": {
+        "event": "stream.config",
+        "roomId": "7",
+        "formatWidth": 1280,
+        "formatHeight": 720,
+        "formatFps": 30,
+        "formatBitrate": 2000000,
+        "formatInit": "000000016742002a",
+        "formatEpoch": "1"
+      }
+    },
+    {
+      "name": "stream-keyframe-event",
+      "kind": "event",
+      "event": "stream.keyframe",
+      "bytes": "{\"v\":1,\"event\":\"stream.keyframe\",\"data\":{\"roomId\":\"7\",\"streamEpoch\":\"1\"}}",
+      "expect": {
+        "event": "stream.keyframe",
+        "roomId": "7",
+        "streamEpoch": "1"
+      }
+    },
+    {
+      "name": "room-closed-event",
+      "kind": "event",
+      "event": "room.closed",
+      "bytes": "{\"v\":1,\"event\":\"room.closed\",\"data\":{\"roomId\":\"7\",\"reason\":\"owner_stopped\"}}",
+      "expect": {
+        "event": "room.closed",
+        "roomId": "7",
+        "reason": "owner_stopped"
+      }
+    },
+    {
+      "name": "room-closed-timeout-event",
+      "kind": "event",
+      "event": "room.closed",
+      "bytes": "{\"v\":1,\"event\":\"room.closed\",\"data\":{\"roomId\":\"7\",\"reason\":\"config_timeout\"}}",
+      "expect": {
+        "event": "room.closed",
+        "roomId": "7",
+        "reason": "config_timeout"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "tiles-nonempty-initialization",
+      "kind": "request",
+      "op": "stream.configure",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":4,\"op\":\"stream.configure\",\"data\":{\"roomId\":\"7\",\"codec\":\"bgra-tiles\",\"width\":1280,\"height\":720,\"fps\":30,\"bitrate\":2000000,\"initializationData\":\"00\"}}"
+    },
+    {
+      "name": "wrong-version",
+      "kind": "request",
+      "op": "hello",
+      "error": "PROTOCOL_VERSION",
+      "bytes": "{\"v\":2,\"id\":1,\"op\":\"hello\",\"data\":{}}"
+    },
+    {
+      "name": "missing-version",
+      "kind": "request",
+      "op": "hello",
+      "error": "PROTOCOL_VERSION",
+      "bytes": "{\"id\":1,\"op\":\"hello\",\"data\":{}}"
+    },
+    {
+      "name": "version-as-string",
+      "kind": "request",
+      "op": "hello",
+      "error": "PROTOCOL_VERSION",
+      "bytes": "{\"v\":\"1\",\"id\":1,\"op\":\"hello\",\"data\":{}}"
+    },
+    {
+      "name": "missing-id",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"op\":\"hello\",\"data\":{}}"
+    },
+    {
+      "name": "id-zero",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":0,\"op\":\"hello\",\"data\":{}}"
+    },
+    {
+      "name": "id-too-large",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":4294967296,\"op\":\"hello\",\"data\":{}}"
+    },
+    {
+      "name": "id-string",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":\"1\",\"op\":\"hello\",\"data\":{}}"
+    },
+    {
+      "name": "id-float",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1.0,\"op\":\"hello\",\"data\":{}}"
+    },
+    {
+      "name": "missing-op",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"data\":{}}"
+    },
+    {
+      "name": "unknown-op",
+      "kind": "request",
+      "op": "hello",
+      "error": "UNKNOWN_OPERATION",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"explode\",\"data\":{}}"
+    },
+    {
+      "name": "missing-data",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"hello\"}"
+    },
+    {
+      "name": "data-array",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"hello\",\"data\":[]}"
+    },
+    {
+      "name": "hello-extra-field",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"hello\",\"data\":{\"x\":1}}"
+    },
+    {
+      "name": "create-bad-profile",
+      "kind": "request",
+      "op": "create",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"create\",\"data\":{\"profile\":\"720p29\"}}"
+    },
+    {
+      "name": "join-short-room-code",
+      "kind": "request",
+      "op": "join",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"join\",\"data\":{\"roomCode\":\"1234567\"}}"
+    },
+    {
+      "name": "join-letter-room-code",
+      "kind": "request",
+      "op": "join",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"join\",\"data\":{\"roomCode\":\"00123A56\"}}"
+    },
+    {
+      "name": "leave-room-id-zero",
+      "kind": "request",
+      "op": "leave",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"leave\",\"data\":{\"roomId\":\"0\"}}"
+    },
+    {
+      "name": "room-id-leading-zero",
+      "kind": "request",
+      "op": "leave",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"leave\",\"data\":{\"roomId\":\"07\"}}"
+    },
+    {
+      "name": "room-id-float-text",
+      "kind": "request",
+      "op": "leave",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"leave\",\"data\":{\"roomId\":\"7.0\"}}"
+    },
+    {
+      "name": "configure-dimension-mismatch",
+      "kind": "request",
+      "op": "stream.configure",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"stream.configure\",\"data\":{\"roomId\":\"7\",\"codec\":\"h264\",\"width\":1280,\"height\":1080,\"fps\":30,\"bitrate\":2000000,\"initializationData\":\"\"}}"
+    },
+    {
+      "name": "configure-odd-init",
+      "kind": "request",
+      "op": "stream.configure",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"stream.configure\",\"data\":{\"roomId\":\"7\",\"codec\":\"h264\",\"width\":1280,\"height\":720,\"fps\":30,\"bitrate\":2000000,\"initializationData\":\"0\"}}"
+    },
+    {
+      "name": "response-ok-with-error",
+      "kind": "response",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"ok\":true,\"data\":{},\"error\":{\"code\":\"INTERNAL\",\"message\":\"x\"}}"
+    },
+    {
+      "name": "response-error-with-data",
+      "kind": "response",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"ok\":false,\"data\":{},\"error\":{\"code\":\"INTERNAL\",\"message\":\"x\"}}"
+    },
+    {
+      "name": "response-missing-ok",
+      "kind": "response",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"data\":{}}"
+    },
+    {
+      "name": "response-unknown-error-code",
+      "kind": "response",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"ok\":false,\"error\":{\"code\":\"NOPE\",\"message\":\"x\"}}"
+    },
+    {
+      "name": "event-with-id",
+      "kind": "event",
+      "op": "room.state",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"event\":\"room.state\",\"data\":{\"roomId\":\"7\",\"state\":\"running\",\"viewerCount\":0}}"
+    },
+    {
+      "name": "unknown-event",
+      "kind": "event",
+      "op": "room.state",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"event\":\"room.explode\",\"data\":{\"roomId\":\"7\"}}"
+    },
+    {
+      "name": "event-bad-state",
+      "kind": "event",
+      "op": "room.state",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"event\":\"room.state\",\"data\":{\"roomId\":\"7\",\"state\":\"zombie\",\"viewerCount\":0}}"
+    },
+    {
+      "name": "event-bad-reason",
+      "kind": "event",
+      "op": "room.closed",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"event\":\"room.closed\",\"data\":{\"roomId\":\"7\",\"reason\":\"opened\"}}"
+    },
+    {
+      "name": "trailing-json",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"op\":\"hello\",\"data\":{}} {}"
+    },
+    {
+      "name": "empty",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": ""
+    },
+    {
+      "name": "duplicate-key",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytes": "{\"v\":1,\"id\":1,\"id\":2,\"op\":\"hello\",\"data\":{}}"
+    },
+    {
+      "name": "invalid-utf8",
+      "kind": "request",
+      "op": "hello",
+      "error": "INVALID_REQUEST",
+      "bytesHex": "7b2276223a312c226964223a312c226f70223a2268656c6c6f222c2264617461223a7b2278223a22ff227d7d"
+    }
+  ]
+}

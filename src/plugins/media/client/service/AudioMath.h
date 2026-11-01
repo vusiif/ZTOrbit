@@ -12,7 +12,7 @@ extern "C" {
 #include <libswresample/swresample.h>
 #include <libavutil/channel_layout.h>
 }
-namespace vusiif::ztgui::media {
+namespace vusiif::zto::media {
 inline float clampSample(float value) { return std::isfinite(value) ? std::clamp(value, -1.0f, 1.0f) : 0.0f; }
 inline void applyGain(QVector<float> &samples, float gain) {
     gain = std::isfinite(gain) ? std::clamp(gain, 0.0f, 2.0f) : 0.0f;
@@ -209,4 +209,4 @@ class JitterStream {
         return output;
     }
 };
-} // namespace vusiif::ztgui::media
+} // namespace vusiif::zto::media

@@ -3,10 +3,10 @@
 #include "VoiceSoundPlayer.h"
 #include <ztmedia/MediaSession.h>
 #include <ztmedia/AudioClipClient.h>
-#include <ztgui/ZeroTierService.h>
-#include <ztgui/PluginFiles.h>
+#include <zto/ZeroTierService.h>
+#include <zto/PluginFiles.h>
 #include <memory>
-namespace vusiif::ztgui::voice_chat {
+namespace vusiif::zto::voice_chat {
 struct VoiceDevice {QByteArray id;QString description;bool isDefault=false;};
 struct AudioDeviceSnapshot {bool ready=false;QList<VoiceDevice> inputs,outputs;};
 class AudioDeviceCache : public QObject {

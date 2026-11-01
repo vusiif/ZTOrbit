@@ -9,7 +9,7 @@
 #include <memory>
 #include <QPointer>
 
-namespace vusiif::ztgui::protocol::service {
+namespace vusiif::zto::protocol::service {
 // One authenticated channel per lease. Large messages are bounded and fragmented;
 // no application/media types are part of this transport.
 class BulkChannel final : public QObject {
@@ -38,7 +38,7 @@ class BulkChannel final : public QObject {
         lease = owner;
         generation = epoch;
         token = QUuid::createUuid().toString(QUuid::Id128) + QUuid::createUuid().toString(QUuid::Id128);
-        auto name = "ztgui-bulk-" + QUuid::createUuid().toString(QUuid::Id128);
+        auto name = "zto-bulk-" + QUuid::createUuid().toString(QUuid::Id128);
         server.setSocketOptions(QLocalServer::UserAccessOption);
         if (!server.listen(name))
             return {};
@@ -198,4 +198,4 @@ class BulkChannel final : public QObject {
             fail("Bulk read limit exceeded");
     }
 };
-} // namespace vusiif::ztgui::protocol::service
+} // namespace vusiif::zto::protocol::service

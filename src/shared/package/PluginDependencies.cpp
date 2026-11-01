@@ -6,7 +6,7 @@
 #include <QRegularExpression>
 #include <array>
 #include <functional>
-namespace vusiif::ztgui::package {
+namespace vusiif::zto::package {
 static bool semver(const QString &s,std::array<quint64,3> &v) {
     static const QRegularExpression re("\\A(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\z");
     const auto m=re.match(s); if(!m.hasMatch()) return false;

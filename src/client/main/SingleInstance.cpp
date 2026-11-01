@@ -12,7 +12,7 @@
 #include <windows.h>
 #endif
 
-namespace vusiif::ztgui::platform {
+namespace vusiif::zto::platform {
 SingleInstance::SingleInstance(QObject *parent, const QString &identitySuffix) : QObject(parent) {
     QString identity = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
 #ifdef Q_OS_WIN
@@ -23,7 +23,7 @@ SingleInstance::SingleInstance(QObject *parent, const QString &identitySuffix) :
     identity += '/' + qEnvironmentVariable("DISPLAY") + '/' + qEnvironmentVariable("WAYLAND_DISPLAY");
 #endif
     identity += identitySuffix;
-    m_key = "ztgui-instance-" + QString::fromLatin1(QCryptographicHash::hash(identity.toUtf8(), QCryptographicHash::Sha256).toHex().left(24));
+    m_key = "zto-instance-" + QString::fromLatin1(QCryptographicHash::hash(identity.toUtf8(), QCryptographicHash::Sha256).toHex().left(24));
     m_lock = std::make_unique<QLockFile>(QDir::temp().filePath(m_key + ".lock"));
     m_lock->setStaleLockTime(0);
     m_server.setSocketOptions(QLocalServer::UserAccessOption);

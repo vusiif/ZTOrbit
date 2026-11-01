@@ -5,7 +5,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace vusiif::ztgui::storage {
+namespace vusiif::zto::storage {
 
 // Resolves the writable storage root once per process. The application
 // directory is shared by every user of an installation; when it cannot be
@@ -100,4 +100,4 @@ private:
     void addWarning(const QString &message);
 };
 
-} // namespace vusiif::ztgui::storage
+} // namespace vusiif::zto::storage

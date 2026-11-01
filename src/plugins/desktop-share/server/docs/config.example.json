@@ -1,0 +1,10 @@
+{
+  "maxRooms": 8,
+  "maxViewersPerRoom": 8,
+  "maxMembersPerServer": 72,
+  "egressBudgetMbps": 160,
+  "controlRequestsPerSecond": 20,
+  "controlRequestBurst": 20,
+  "joinFailureLimitPerMinute": 10,
+  "joinFailureSources": 4096
+}

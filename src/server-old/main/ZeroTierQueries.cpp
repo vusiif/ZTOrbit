@@ -9,7 +9,7 @@
 #include <QRegularExpression>
 #include <QThread>
 #include <memory>
-namespace vusiif::ztgui::server {
+namespace vusiif::ztohub {
 ZeroTierQueries::ZeroTierQueries(QObject *parent, QUrl base, QString token)
     : QObject(parent), m_base(std::move(base)), m_token(std::move(token)) {
     m_network.setProxy(QNetworkProxy::NoProxy);

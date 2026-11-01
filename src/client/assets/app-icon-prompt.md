@@ -1,4 +1,4 @@
-# ZeroTier GUI application icon
+# ZTOrbit application icon
 
 Generated using the built-in image_gen tool. The PNG is the original output; the ICO contains 16, 24, 32, 48, 64, 96, 128, and 256 pixel versions converted from that output.
 

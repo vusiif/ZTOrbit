@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoordinationLock.h"
-#include "ztgui/PluginStorage.h"
+#include "zto/PluginStorage.h"
 
 #include <QJsonObject>
 #include <QList>
@@ -9,7 +9,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace vusiif::ztgui::storage {
+namespace vusiif::zto::storage {
 
 using util::LegacyImportState;
 using util::StorageResult;
@@ -19,7 +19,7 @@ using util::StorageResult;
 class PluginDataStore {
 public:
     // Display-name claims of every authenticated package in the same install
-    // directory. Registration also writes them to .ztgui/plugins/<id>.json; the
+    // directory. Registration also writes them to .zto/plugins/<id>.json; the
     // in-memory copy keeps the migration decision correct when that write is
     // impossible or when one record cannot be read.
     struct InstalledNameClaims {
@@ -92,4 +92,4 @@ private:
     void addWarning(const QString &warning) const;
 };
 
-} // namespace vusiif::ztgui::storage
+} // namespace vusiif::zto::storage

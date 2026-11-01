@@ -1,6 +1,6 @@
 """Run the standalone installer script with sandboxed paths and fake system commands.
 
-Run on Linux/WSL: python3 src/tests/server/InstallerTests.py --script src/server/scripts/zt-installer.sh
+Run on Linux/WSL: python3 src/tests/server/InstallerTests.py --script src/server/scripts/z2-installer.sh
 No real ZeroTier/ztncui/pylon installation or uninstallation is performed.
 """
 import argparse

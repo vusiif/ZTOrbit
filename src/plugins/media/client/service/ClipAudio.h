@@ -6,7 +6,7 @@
 #include <QtEndian>
 #include <algorithm>
 
-namespace vusiif::ztgui::media::engine {
+namespace vusiif::zto::media::engine {
 // Strict RIFF/WAVE PCM16 48 kHz mono parser for short clips. Header-declared
 // lengths are never trusted without checking the actual payload and padding.
 struct ClipAudio {
@@ -85,4 +85,4 @@ inline ClipAudio parseClipWav(const QByteArray &wav)
     }
     return result;
 }
-} // namespace vusiif::ztgui::media::engine
+} // namespace vusiif::zto::media::engine

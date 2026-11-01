@@ -16,11 +16,13 @@
 #include <QStandardPaths>
 #include <QRegularExpression>
 #include <QJsonArray>
+#include <QJsonParseError>
 #include <QSaveFile>
 #include <QTemporaryDir>
 #include <QFileInfo>
 #include <QDir>
 #include <QBuffer>
+#include <QCryptographicHash>
 #include <algorithm>
 #include <limits>
 #ifdef Q_OS_WIN
@@ -28,7 +30,7 @@
 #include <commctrl.h>
 #endif
 
-namespace vusiif::ztgui::ui {
+namespace vusiif::zto::ui {
 namespace {
 #ifdef Q_OS_WIN
 LRESULT CALLBACK captionProcedure(HWND handle, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR id, DWORD_PTR data)
@@ -58,6 +60,10 @@ QStringList addresses(const QJsonArray &values)
 QString normalizeMoonId(const QString &id)
 {
     return QRegularExpression("^[0-9a-fA-F]{1,16}$").match(id).hasMatch() ? id.toLower().rightJustified(16, '0') : id;
+}
+QString sha256Hex(const QByteArray &bytes)
+{
+    return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
 }
 }
 AppController::AppController(QObject *parent, const QString &pluginDirectory, SystemOperations *operations,
@@ -199,13 +205,15 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
         m_shutdownReady = true;
         if (!m_busy) emit exitFinished();
     });
-#ifndef ZEROTIER_TESTING
+#ifndef ZTO_TESTING
     m_serviceMonitor = zerotier::createServiceMonitor(this);
     for (const auto &message : m_loader.scan(m_pluginDirectory, m_registry)) util::log::write(message);
 #else
     if (!pluginDirectory.isEmpty()) m_loader.scan(m_pluginDirectory, m_registry);
 #endif
     updateService(); refreshMoonFiles();
+    m_localConfigPath = zerotier::localConfigPath();
+    loadLocalConfig(true);
     refreshStorageUsage();
     m_maintenance = std::make_unique<storage::StorageMaintenanceScheduler>(m_storage, this);
     connect(m_maintenance.get(), &storage::StorageMaintenanceScheduler::cleanupFinished, this,
@@ -226,7 +234,7 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
     util::log::setRotationCallback([scheduler = QPointer<storage::StorageMaintenanceScheduler>(m_maintenance.get())] {
         if (scheduler) scheduler->notifyLogRotation();
     });
-#ifndef ZEROTIER_TESTING
+#ifndef ZTO_TESTING
     // GUI regressions use these controllers with temporary storage; automatic
     // maintenance is covered by dedicated scheduler tests instead of running
     // background filesystem scans during unrelated timing-sensitive cases.
@@ -246,7 +254,8 @@ QVariantMap AppController::service() const
 {
     QString warning;
     if (!m_serviceStatus.known && !m_serviceQueryPending) warning = QStringLiteral("无法读取服务状态，请检查管理员权限。");
-    else if (m_apiAvailable && m_info["tcpFallbackActive"].toBool()) warning = QStringLiteral("服务使用 TCP 中转，请检查网络连接。");
+    else if (m_apiAvailable && m_info["tcpFallbackActive"].toBool() && !m_localConfig.forceTcpRelay)
+        warning = QStringLiteral("服务使用 TCP 中转，请检查网络连接。");
     return {{"exists", m_serviceStatus.exists}, {"running", m_serviceStatus.running}, {"known", m_serviceStatus.known},
             {"available", m_apiAvailable}, {"warning", warning},
             {"action", !m_serviceStatus.exists ? QStringLiteral("安装") : m_serviceStatus.running ? QStringLiteral("停止") : QStringLiteral("启动")}};
@@ -310,8 +319,8 @@ void AppController::setHostSetting(const QString &key, const QVariant &value)
 }
 QString AppController::version() const { return QCoreApplication::applicationVersion(); }
 QString AppController::apiVersion() const { return QString::fromLatin1(api::ApiVersion); }
-QString AppController::serverVersion() const { return QStringLiteral(ZTGUI_SERVER_VERSION); }
-QString AppController::serverApiVersion() const { return QStringLiteral(ZTGUI_SERVER_API_VERSION); }
+QString AppController::serverVersion() const { return QStringLiteral(ZTOHUB_VERSION); }
+QString AppController::serverApiVersion() const { return QStringLiteral(ZTOHUB_API_VERSION); }
 QString AppController::qtVersion() const { return QString::fromLatin1(qVersion()); }
 QString AppController::storageMode() const
 {
@@ -623,7 +632,7 @@ void AppController::setWindow(QQuickWindow *window)
     connect(window, &QWindow::visibleChanged, this, &AppController::setVisible);
     connect(window, &QWindow::windowStateChanged, this, [this] { setVisible(m_window && m_window->isVisible() && m_window->windowState() != Qt::WindowMinimized); });
     setVisible(window->isVisible() && window->windowState() != Qt::WindowMinimized);
-#if defined(Q_OS_MACOS) && !defined(ZEROTIER_TESTING)
+#if defined(Q_OS_MACOS) && !defined(ZTO_TESTING)
     if (!zerotier::executable().isEmpty()) {
         setBusy(true);
         m_operations->runElevatedScript(QStringLiteral("授权读取 ZeroTier"), zerotier::wrapScript({}), [this](bool) { setBusy(false); refresh(); });
@@ -887,17 +896,407 @@ void AppController::refreshMoonFiles()
     return rows;
     }));
 }
+QVariantMap AppController::localConfig() const
+{
+    const auto parsedRelay = !m_localConfig.relayIp.isEmpty()
+        ? zerotier::localconfig::displayRelay(m_localConfig.relayIp, m_localConfig.relayPort) : QString();
+    return {{"path", m_localConfigPath},
+            {"exists", m_localConfig.exists},
+            {"loaded", m_localConfigLoaded},
+            {"busy", m_localConfigBusy},
+            {"valid", m_localConfig.valid()},
+            {"allowTcpFallbackRelay", m_localConfig.allowTcpFallbackRelay},
+            {"forceTcpRelay", m_localConfig.forceTcpRelay},
+            {"relay", parsedRelay},
+            {"relayText", zerotier::localconfig::relayText(m_localConfig)},
+            {"error", m_localConfigError.isEmpty() ? m_localConfig.error : m_localConfigError},
+            {"canRetry", !m_localConfigBusy && !m_localConfigError.isEmpty()}};
+}
+
+void AppController::loadLocalConfig(bool allowElevation)
+{
+    if (m_localConfigBusy || m_closing) return;
+    m_localConfigPath = zerotier::localConfigPath();
+    m_localConfigBusy = true;
+    emit localConfigChanged();
+    auto result = zerotier::localconfig::read(m_localConfigPath);
+    bool permissionDenied = result.permissionDenied;
+    QString error = result.error;
+    if (result.ok && !result.state.exists) {
+        const auto created = zerotier::localconfig::createDefault(m_localConfigPath);
+        if (!created.ok) {
+            permissionDenied = created.permissionDenied;
+            error = created.error;
+        } else {
+            result = zerotier::localconfig::read(m_localConfigPath);
+        }
+    }
+    if (result.ok && result.state.valid()) {
+        applyLocalConfig(result.state, QString());
+        return;
+    }
+    if (!result.ok) {
+        if (error.isEmpty()) error = result.error;
+        permissionDenied = permissionDenied || result.permissionDenied;
+    }
+    if (permissionDenied && allowElevation) {
+        beginElevatedLocalConfigRead();
+        return;
+    }
+    if (result.state.exists && !result.state.valid()) {
+        applyLocalConfig(result.state, error.isEmpty() ? result.state.error : error);
+        return;
+    }
+    recoverLocalConfig(error.isEmpty() ? QStringLiteral("无法读取 local.conf。") : error);
+}
+
+void AppController::beginElevatedLocalConfigRead()
+{
+    auto directory = std::make_shared<QTemporaryDir>(QDir::tempPath() + "/zto-localconf-XXXXXX");
+    if (!directory->isValid()) {
+        recoverLocalConfig(QStringLiteral("无法创建读取 local.conf 的临时目录。"));
+        return;
+    }
+    const auto snapshot = directory->filePath("local.conf");
+    const auto script = zerotier::localconfig::ensureScript(m_localConfigPath, snapshot);
+    if (script.isEmpty()) {
+        recoverLocalConfig(QStringLiteral("当前平台不支持自动提权读取 ZeroTier 系统配置，请以管理员权限运行或调整目录权限。"));
+        return;
+    }
+    m_localConfigBusy = true;
+    emit localConfigChanged();
+    m_operations->runElevatedScript(QStringLiteral("读取 ZeroTier 配置"), script, [this, directory, snapshot](bool ok) {
+        if (m_closing) return;
+        if (!ok) {
+            recoverLocalConfig(QStringLiteral("无法读取或创建 local.conf（授权被取消或权限不足）。"));
+            return;
+        }
+        const auto result = zerotier::localconfig::read(snapshot);
+        if (!result.ok || !result.state.exists) {
+            recoverLocalConfig(QStringLiteral("无法读取 local.conf 的系统配置快照。"));
+            return;
+        }
+        applyLocalConfig(result.state, result.state.valid() ? QString() : result.error);
+    });
+}
+
+void AppController::refreshLocalConfig()
+{
+    if (m_localConfigBusy || m_closing) return;
+    const auto result = zerotier::localconfig::read(m_localConfigPath);
+    if (result.ok && result.state.exists && result.state.valid()) {
+        applyLocalConfig(result.state, QString());
+        return;
+    }
+    if (result.ok && !result.state.exists) {
+        // Keep the startup rule: a missing file is created with the documented
+        // initial content rather than merely projecting defaults.
+        loadLocalConfig(false);
+        return;
+    }
+    // Reading the protected system file may require the authorization that the
+    // last load already obtained. Keep that snapshot instead of prompting on
+    // every settings-page navigation; the explicit re-read performs a new read.
+    if (!result.ok && result.permissionDenied && m_localConfigLoaded && m_localConfig.valid()) return;
+    loadLocalConfig(false);
+}
+
+void AppController::retryLocalConfig()
+{
+    if (m_localConfigBusy) return;
+    loadLocalConfig(true);
+}
+
+void AppController::applyLocalConfig(const zerotier::localconfig::State &state, const QString &error)
+{
+    m_localConfig = state;
+    m_localConfigLoaded = true;
+    m_localConfigBusy = false;
+    m_localConfigError = error.isEmpty() ? state.error : error;
+    emit localConfigChanged();
+    emit stateChanged();
+}
+
+void AppController::recoverLocalConfig(const QString &error)
+{
+    const auto result = zerotier::localconfig::read(m_localConfigPath);
+    if (result.ok) {
+        applyLocalConfig(result.state, error);
+        return;
+    }
+    if (result.state.exists && !result.state.valid()) {
+        applyLocalConfig(result.state, error + QLatin1Char('\n') + result.state.error);
+        return;
+    }
+    m_localConfigLoaded = false;
+    m_localConfigBusy = false;
+    m_localConfigError = error;
+    emit localConfigChanged();
+    emit stateChanged();
+}
+
+bool AppController::currentLocalConfigForUpdate(zerotier::localconfig::State &state, QString &expectedHash, QString &error)
+{
+    const auto result = zerotier::localconfig::read(m_localConfigPath);
+    if (result.ok) {
+        if (result.state.exists && !result.state.valid()) {
+            error = result.state.error;
+            return false;
+        }
+        state = result.state;
+        expectedHash = state.exists ? sha256Hex(state.raw) : QString();
+        error.clear();
+        return true;
+    }
+    // The app may have read the protected system file through its existing
+    // elevation path. Reuse that validated snapshot, and let the elevated
+    // installer verify the current file hash before replacing it.
+    if (result.permissionDenied && m_localConfigLoaded && m_localConfig.valid()) {
+        state = m_localConfig;
+        expectedHash = state.exists ? sha256Hex(state.raw) : QString();
+        error.clear();
+        return true;
+    }
+    error = result.error;
+    return false;
+}
+
+void AppController::writeLocalConfig(const QByteArray &content, const QString &expectedHash,
+                                     std::function<void(bool, const QString &)> finished)
+{
+    const auto direct = zerotier::localconfig::writeAtomic(m_localConfigPath, content);
+    if (direct.ok) {
+        applyLocalConfig(zerotier::localconfig::parse(content, true), QString());
+        if (finished) finished(true, QString());
+        return;
+    }
+    if (!direct.permissionDenied) {
+        recoverLocalConfig(direct.error);
+        if (finished) finished(false, direct.error);
+        return;
+    }
+    auto directory = std::make_shared<QTemporaryDir>(QDir::tempPath() + "/zto-localconf-save-XXXXXX");
+    if (!directory->isValid()) {
+        const auto message = QStringLiteral("无法创建保存 local.conf 的临时目录。");
+        recoverLocalConfig(message);
+        if (finished) finished(false, message);
+        return;
+    }
+    const auto proposed = directory->filePath("local.conf");
+    QFile file(proposed);
+    if (!file.open(QIODevice::WriteOnly) || file.write(content) != content.size() || !file.flush()) {
+        const auto message = QStringLiteral("无法准备 local.conf 的保存内容。");
+        recoverLocalConfig(message);
+        if (finished) finished(false, message);
+        return;
+    }
+    file.close();
+    const auto script = zerotier::localconfig::installScript({m_localConfigPath, proposed, expectedHash});
+    if (script.isEmpty()) {
+        const auto message = QStringLiteral("当前平台不支持自动提权写入 ZeroTier 系统配置，请以管理员权限运行或调整目录权限。");
+        recoverLocalConfig(message);
+        if (finished) finished(false, message);
+        return;
+    }
+    m_operations->runElevatedScript(QStringLiteral("保存 ZeroTier 配置"), script,
+        [this, directory, content, finished](bool ok) {
+            if (!ok) {
+                const auto message = QStringLiteral("无法保存 local.conf（授权被取消、权限不足，或文件已被其他程序修改）。");
+                recoverLocalConfig(message);
+                if (finished) finished(false, message);
+                return;
+            }
+            applyLocalConfig(zerotier::localconfig::parse(content, true), QString());
+            if (finished) finished(true, QString());
+        });
+}
+
+void AppController::setTcpFallbackSwitches(bool allow, bool force)
+{
+    if (m_localConfigBusy || m_closing) return;
+    if (!m_localConfigLoaded || !m_localConfig.valid()) {
+        feedback(QStringLiteral("本地 ZeroTier 配置当前不可用，未保存 TCP 回退设置。"));
+        return;
+    }
+    if (!allow) force = false;
+    if (allow == m_localConfig.allowTcpFallbackRelay && force == m_localConfig.forceTcpRelay) return;
+    m_localConfigBusy = true;
+    emit localConfigChanged();
+    zerotier::localconfig::State base;
+    QString expectedHash;
+    QString error;
+    if (!currentLocalConfigForUpdate(base, expectedHash, error)) {
+        recoverLocalConfig(error);
+        return;
+    }
+    QByteArray content;
+    if (!zerotier::localconfig::mergeSwitches(base, allow, force, content, error)) {
+        recoverLocalConfig(error);
+        return;
+    }
+    writeLocalConfig(content, expectedHash, [](bool, const QString &) {});
+}
+
+void AppController::refreshTcpFallbackServers()
+{
+    if (m_tcpFallbackServersBusy || m_closing) return;
+    m_tcpFallbackServersBusy = true;
+    m_tcpFallbackServersMessage = QStringLiteral("正在读取网络与 Moon 元数据…");
+    emit tcpFallbackServersChanged();
+    zerotier::command(this, {"-j", "listnetworks"}, [this](bool ok, const QString &output) {
+        if (m_closing) return;
+        if (!ok) {
+            m_tcpFallbackServersBusy = false;
+            m_tcpFallbackServersMessage = QStringLiteral("无法读取网络列表：%1").arg(output.isEmpty() ? QStringLiteral("ZeroTier 未响应") : output);
+            emit tcpFallbackServersChanged();
+            return;
+        }
+        QJsonParseError parseError;
+        const auto networks = QJsonDocument::fromJson(output.toUtf8(), &parseError);
+        if (parseError.error != QJsonParseError::NoError || !networks.isArray()) {
+            m_tcpFallbackServersBusy = false;
+            m_tcpFallbackServersMessage = QStringLiteral("网络列表响应无效。");
+            emit tcpFallbackServersChanged();
+            return;
+        }
+        zerotier::command(this, {"-j", "listmoons"}, [this, networks](bool moonOk, const QString &moonOutput) {
+            if (m_closing) return;
+            QJsonDocument moons;
+            QString moonError;
+            if (moonOk) {
+                QJsonParseError error;
+                moons = QJsonDocument::fromJson(moonOutput.toUtf8(), &error);
+                if (error.error != QJsonParseError::NoError || !moons.isArray()) {
+                    moonError = QStringLiteral("Moon 元数据响应无效。");
+                    moons = QJsonDocument(QJsonArray{});
+                }
+            } else {
+                moonError = QStringLiteral("无法读取 Moon 元数据：%1")
+                    .arg(moonOutput.isEmpty() ? QStringLiteral("ZeroTier 未响应") : moonOutput);
+            }
+            const auto list = zerotier::localconfig::candidates(networks.array(), moons,
+                [](const QString &id) { return !zerotier::matchingMoonFile(id).isEmpty(); }, m_localConfig);
+            m_tcpFallbackServers.clear();
+            for (const auto &candidate : list) {
+                m_tcpFallbackServers.append(QVariantMap{
+                    {"networkId", candidate.networkId},
+                    {"name", localName("networks", candidate.networkId, candidate.name)},
+                    {"ip", candidate.ip}, {"relay", candidate.relay},
+                    {"reason", candidate.reason}, {"note", candidate.note},
+                    {"enabled", candidate.enabled}, {"current", candidate.current}});
+            }
+            m_tcpFallbackServersBusy = false;
+            if (!moonError.isEmpty()) m_tcpFallbackServersMessage = moonError;
+            else if (list.isEmpty()) m_tcpFallbackServersMessage =
+                QStringLiteral("没有符合导出条件的网络（需要本地存在对应的 Moon 文件）。");
+            else m_tcpFallbackServersMessage.clear();
+            emit tcpFallbackServersChanged();
+        });
+    });
+}
+
+void AppController::selectTcpFallbackServer(const QString &networkId)
+{
+    if (m_localConfigBusy || m_closing) return;
+    if (!m_localConfigLoaded || !m_localConfig.valid()) {
+        feedback(QStringLiteral("本地 ZeroTier 配置当前不可用，未切换 TCP 回退中转服务器。"));
+        return;
+    }
+    QVariantMap selected;
+    for (const auto &value : m_tcpFallbackServers) {
+        const auto row = value.toMap();
+        if (row["networkId"].toString().compare(networkId, Qt::CaseInsensitive) == 0) { selected = row; break; }
+    }
+    const auto ip = selected["ip"].toString();
+    if (ip.isEmpty() || !selected["enabled"].toBool()) return;
+    if (m_localConfig.relayPort == zerotier::localconfig::RelayPort && m_localConfig.relayIp == ip) {
+        feedback(QStringLiteral("当前已使用该 TCP 回退中转服务器。"));
+        return;
+    }
+    const auto address = zerotier::localconfig::displayRelay(ip, zerotier::localconfig::RelayPort);
+    ask(QStringLiteral("切换 TCP 回退中转服务器"),
+        QStringLiteral("将本机 ZeroTier 的 TCP 回退中转服务器切换为 %1？\n\n"
+                       "这是本机节点级设置，影响本机加入的所有网络；保存后不会自动重启 ZeroTier。").arg(address),
+        QStringLiteral("切换"), [this, networkId, ip] { applyTcpFallbackRelay(networkId, ip); });
+}
+
+void AppController::applyTcpFallbackRelay(const QString &networkId, const QString &ip)
+{
+    if (m_localConfigBusy || m_closing || ip.isEmpty()) return;
+    m_localConfigBusy = true;
+    emit localConfigChanged();
+    zerotier::localconfig::State base;
+    QString expectedHash;
+    QString error;
+    if (!currentLocalConfigForUpdate(base, expectedHash, error)) {
+        recoverLocalConfig(error);
+        return;
+    }
+    QByteArray content;
+    if (!zerotier::localconfig::mergeRelay(base, ip, zerotier::localconfig::RelayPort, content, error)) {
+        recoverLocalConfig(error);
+        return;
+    }
+    writeLocalConfig(content, expectedHash, [this, networkId, ip](bool ok, const QString &) {
+        if (!ok) return;
+        for (auto &value : m_tcpFallbackServers) {
+            auto row = value.toMap();
+            row["current"] = row["networkId"].toString().compare(networkId, Qt::CaseInsensitive) == 0
+                && row["ip"].toString() == ip;
+            value = row;
+        }
+        emit tcpFallbackServersChanged();
+        emit pluginNoticeRequested(QStringLiteral("TCP回退中转服务器"),
+            QStringLiteral("TCP回退中转服务器已更新，请手动重启 ZeroTier，以及时刷新配置并切换中继连接。"));
+    });
+}
+
+void AppController::revealLocalConfig()
+{
+    if (m_closing) return;
+    const QFileInfo info(m_localConfigPath);
+    if (!info.isFile()) {
+        feedback(QStringLiteral("本地配置文件尚未创建：%1。请先重试读取或安装 ZeroTier。")
+                     .arg(QDir::toNativeSeparators(m_localConfigPath)));
+        return;
+    }
+    QString error;
+    if (!m_operations->revealFile(info.absoluteFilePath(), error))
+        feedback(error.isEmpty() ? QStringLiteral("无法在文件管理器中定位本地配置文件。") : error);
+}
 void AppController::exportConfiguration(const QString &id, const QUrl &destination)
 {
     if (!destination.isLocalFile() || m_closing) return;
     const auto path = zerotier::matchingMoonFile(id); QFile source(path);
     if (path.isEmpty() || !source.open(QIODevice::ReadOnly)) { feedback(QStringLiteral("无法读取 Moon 文件。")); return; }
     const auto bytes = source.read(4 * 1024 * 1024 + 1);
-    const auto bundle = zerotier::bundle::encode({id, QFileInfo(path).fileName(), bytes});
-    auto target = destination.toLocalFile(); if (!target.endsWith(".ztbundle", Qt::CaseInsensitive)) target += ".ztbundle";
-    QSaveFile output(target);
-    if (source.error() != QFileDevice::NoError || bundle.isEmpty() || !output.open(QIODevice::WriteOnly) || output.write(bundle) != bundle.size() || !output.commit()) feedback(QStringLiteral("无法导出中转站配置包。"));
-    else feedback(QStringLiteral("中转站配置包已导出。"));
+    if (source.error() != QFileDevice::NoError || bytes.isEmpty()) { feedback(QStringLiteral("无法读取 Moon 文件。")); return; }
+    // Re-read the actual system file at export time. If the protected file
+    // cannot be read directly, the last validated snapshot is used rather than
+    // silently exporting a different local.conf.
+    auto local = m_localConfig;
+    const auto fresh = zerotier::localconfig::read(m_localConfigPath);
+    if (fresh.ok) local = fresh.state;
+    else if (!fresh.permissionDenied) local = zerotier::localconfig::State{};
+    const auto fileName = QFileInfo(path).fileName();
+    zerotier::command(this, {"-j", "listmoons"}, [this, id, destination, fileName, bytes, local](bool ok, const QString &moonOutput) {
+        if (m_closing) return;
+        QString relay;
+        if (ok) {
+            QJsonParseError error;
+            const auto moons = QJsonDocument::fromJson(moonOutput.toUtf8(), &error);
+            if (error.error == QJsonParseError::NoError && moons.isArray())
+                relay = zerotier::localconfig::exportRelay(local, id, moons);
+        }
+        const auto bundle = zerotier::bundle::encode({id, fileName, bytes, relay});
+        auto target = destination.toLocalFile();
+        if (!target.endsWith(".z2bundle", Qt::CaseInsensitive)) target += ".z2bundle";
+        QSaveFile output(target);
+        if (bundle.isEmpty() || !output.open(QIODevice::WriteOnly)
+            || output.write(bundle) != bundle.size() || !output.commit())
+            feedback(QStringLiteral("无法导出中转站配置包。"));
+        else feedback(QStringLiteral("中转站配置包已导出。"));
+    });
 }
 void AppController::importConfiguration(const QUrl &source)
 {
@@ -911,14 +1310,16 @@ void AppController::importConfiguration(const QUrl &source)
     auto temporary = std::make_shared<QTemporaryDir>(); const auto moonPath = temporary->filePath(configuration.moonFileName); QFile moon(moonPath);
     if (!temporary->isValid() || !moon.open(QIODevice::WriteOnly) || moon.write(configuration.moonContents) != configuration.moonContents.size() || !moon.flush()) { feedback(QStringLiteral("无法创建临时 Moon 文件。")); return; }
     moon.close(); emit configurationImported(configuration.networkId);
-    importMoonFiles({moonPath}, [this, temporary, configuration](bool ok) { if (ok) networkCommand("join", configuration.networkId, true); });
+    importMoonFiles({moonPath}, [this, temporary, configuration](bool ok) { if (ok) networkCommand("join", configuration.networkId, true); },
+                    configuration.tcpFallbackRelay);
 }
 void AppController::importMoons(const QList<QUrl> &sources)
 {
     QStringList paths; for (const auto &url : sources) { if (!url.isLocalFile()) return; paths.append(url.toLocalFile()); }
     importMoonFiles(paths);
 }
-void AppController::importMoonFiles(const QStringList &sources, std::function<void(bool)> completed)
+void AppController::importMoonFiles(const QStringList &sources, std::function<void(bool)> completed,
+                                     const QString &tcpFallbackRelay)
 {
     if (m_busy || m_closing) { if (completed) completed(false); return; }
     QList<QPair<QString, QString>> copies; QSet<QString> names; QStringList replacements;
@@ -933,16 +1334,78 @@ void AppController::importMoonFiles(const QStringList &sources, std::function<vo
         copies.append({file.absoluteFilePath(), target});
     }
     if (copies.isEmpty()) { if (completed) completed(false); return; }
-    auto execute = [this, copies, completed] {
+    const bool updateRelay = !tcpFallbackRelay.isEmpty();
+    auto execute = [this, copies, completed, updateRelay, tcpFallbackRelay] {
         if (m_busy || m_closing) { if (completed) completed(false); return; }
         setBusy(true);
-        m_operations->runElevatedScript(QStringLiteral("添加 Moon 并重启服务"), zerotier::moonImportScript(copies), [this, completed](bool ok) {
-            setBusy(false); refresh(); feedback(ok ? QString() : QStringLiteral("文件复制或服务启动未完成，请查看本次启动日志。")); if (completed) completed(ok);
-        });
+        auto configDirectory = std::make_shared<QTemporaryDir>(QDir::tempPath() + "/zto-import-localconf-XXXXXX");
+        zerotier::localconfig::Install install;
+        QByteArray content;
+        if (updateRelay) {
+            QString error;
+            if (!configDirectory->isValid()
+                || !prepareImportRelay(tcpFallbackRelay, configDirectory->path(), install, content, error)) {
+                setBusy(false);
+                const auto message = error.isEmpty() ? QStringLiteral("无法准备 local.conf 的导入内容。") : error;
+                feedback(message);
+                emit pluginNoticeRequested(QStringLiteral("无法导入配置"), message);
+                if (completed) completed(false);
+                return;
+            }
+        }
+        const auto script = zerotier::moonImportScript(copies, updateRelay ? &install : nullptr);
+        if (script.isEmpty()) {
+            setBusy(false);
+            const auto message = QStringLiteral("当前平台不支持在导入配置时更新 local.conf，未执行导入。");
+            feedback(message);
+            emit pluginNoticeRequested(QStringLiteral("无法导入配置"), message);
+            if (completed) completed(false);
+            return;
+        }
+        m_operations->runElevatedScript(QStringLiteral("添加 Moon 并重启服务"), script,
+            [this, completed, updateRelay, content, configDirectory](bool ok) {
+                setBusy(false);
+                if (updateRelay) {
+                    if (ok) applyLocalConfig(zerotier::localconfig::parse(content, true), QString());
+                    else {
+                        const auto actual = zerotier::localconfig::read(m_localConfigPath);
+                        if (actual.ok) applyLocalConfig(actual.state, QString());
+                    }
+                }
+                refresh();
+                if (ok) feedback({});
+                else feedback(QStringLiteral("导入未完成；local.conf、Moon 文件或服务可能仅部分更新，请查看本次启动日志。"));
+                if (completed) completed(ok);
+            });
     };
     if (replacements.isEmpty()) execute();
     else ask(QStringLiteral("替换 Moon 文件"), replacements.join(QStringLiteral("、")) + QStringLiteral(" 已存在，确定替换并重启服务？"), QStringLiteral("替换并重启"), execute);
 }
+bool AppController::prepareImportRelay(const QString &display, const QString &directoryPath,
+                                       zerotier::localconfig::Install &install, QByteArray &content, QString &error)
+{
+    QString ip;
+    int port = 0;
+    if (!zerotier::localconfig::parseDisplayRelay(display, ip, port) || port != zerotier::localconfig::RelayPort) {
+        error = QStringLiteral("配置包的 tcpFallbackRelay 必须是有效的 IPv4:9443。");
+        return false;
+    }
+    zerotier::localconfig::State base;
+    QString expectedHash;
+    if (!currentLocalConfigForUpdate(base, expectedHash, error)) return false;
+    if (!base.valid()) { error = base.error; return false; }
+    if (!zerotier::localconfig::mergeRelay(base, ip, port, content, error)) return false;
+    const auto proposed = QDir(directoryPath).filePath("local.conf");
+    QFile file(proposed);
+    if (!file.open(QIODevice::WriteOnly) || file.write(content) != content.size() || !file.flush()) {
+        error = QStringLiteral("无法准备 local.conf 的导入内容。");
+        return false;
+    }
+    file.close();
+    install = {m_localConfigPath, proposed, expectedHash};
+    return true;
+}
+
 void AppController::deleteMoon(const QString &id)
 {
     if (m_busy || m_closing) return;

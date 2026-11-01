@@ -5,22 +5,22 @@
 #include <QFutureWatcher>
 #include <QPointer>
 #include <QTimer>
-#include <ztgui/PluginLifecycle.h>
+#include <zto/PluginLifecycle.h>
 #include <memory>
 #include <vector>
 #include <QVariantList>
 #include <QTemporaryDir>
 #include <QLockFile>
-#include <ztgui/PluginStop.h>
+#include <zto/PluginStop.h>
 #include "PluginPackage.h"
 #include "ServiceBroker.h"
 #include "../storage/StorageContext.h"
 #include "../storage/PluginDataStore.h"
 #include <functional>
 class QPluginLoader;
-namespace vusiif::ztgui::util { class HostServicesImpl; }
-namespace vusiif::ztgui::storage { class SettingsStore; }
-namespace vusiif::ztgui::plugins {
+namespace vusiif::zto::util { class HostServicesImpl; }
+namespace vusiif::zto::storage { class SettingsStore; }
+namespace vusiif::zto::plugins {
 class PluginRegistry;
 
 class PluginLoader final : public QObject {

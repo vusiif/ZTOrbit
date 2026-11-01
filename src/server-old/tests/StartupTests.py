@@ -10,13 +10,13 @@ import unittest
 
 class StartupTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="zt-server startup ")
+        self.temporary = tempfile.TemporaryDirectory(prefix="ztohub startup ")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.launcher = self.root / "start-server.sh"
         source = Path(__file__).resolve().parents[1] / "main/start-server.sh"
         shutil.copyfile(source, self.launcher)
-        self.server = self.root / "zt-server"
+        self.server = self.root / "ztohub"
         self.server.write_text(
             "#!/usr/bin/python3\nimport json, os, sys\n"
             "print(json.dumps({'cwd': os.getcwd(), 'args': sys.argv[1:]}))\n"

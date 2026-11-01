@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace vusiif::ztgui::voice_chat {
+namespace vusiif::zto::voice_chat {
 namespace {
 constexpr qint64 MaxWaitingMs = 2000;
 constexpr int MaxItems = 8;

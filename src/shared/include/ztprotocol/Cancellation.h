@@ -3,7 +3,7 @@
 #include <atomic>
 #include <memory>
 
-namespace vusiif::ztgui::util {
+namespace vusiif::zto::util {
 class CancellationSource;
 
 // Copyable, thread-safe observation of a cooperative stop request.

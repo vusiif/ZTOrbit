@@ -1,12 +1,12 @@
 # 插件运行依赖交付
 
-> 2026-10-17：Linux 服务端已迁移为 Java 25 + Netty，不再加载 C++ `.ztplugin`，也不需要宿主侧 Qt 运行库；本文中“服务端入口 `/2.0`”和“服务端 Core/Network 契约”仅适用于 `src/server-old/` 的归档实现。Java 插件格式、SDK 与线程约定见[服务端 API](server-api.md)。
+> 2026-10-17：Linux 服务端已迁移为 Java 25 + Netty，不再加载 C++ `.z2plugin`，也不需要宿主侧 Qt 运行库；本文中“服务端入口 `/2.0`”和“服务端 Core/Network 契约”仅适用于 `src/server-old/` 的归档实现。Java 插件格式、SDK 与线程约定见[服务端 API](server-api.md)。
 
-当前客户端 `0.5.1`、客户端 API `0.5`，服务端 `0.2.1`、服务端 API `0.2`；客户端入口／生命周期 IID `/3.0`，旧 C++ 服务端入口 `/2.0`。媒体现使用独立 v3 worker 包；语音 v3 只依赖媒体公开 API。通用契约见[插件服务](plugin-services.md)，业务边界见[媒体](../src/plugins/media/client/docs/media.md)和[语音文档](../src/plugins/voice-chat/client/docs/voice-chat.md)。工作进程目前只验证 Windows x64；旧 C++ 服务端归档在 `src/server-old/`。
+当前客户端 `0.5.2`、客户端 API `0.5`，服务端 `0.2.2`、服务端 API `0.2`；客户端入口／生命周期 IID `/3.0`，旧 C++ 服务端入口 `/2.0`。媒体现使用独立 v3 worker 包；语音 v3 只依赖媒体公开 API。通用契约见[插件服务](plugin-services.md)，业务边界见[媒体](../src/plugins/media/client/docs/media.md)和[语音文档](../src/plugins/voice-chat/client/docs/voice-chat.md)。工作进程目前只验证 Windows x64；旧 C++ 服务端归档在 `src/server-old/`。
 
 ## 收集与安装 SDK
 
-`ztgui_package_plugin()` 保留普通插件 v2 默认行为。增加 `SERVICE_MANIFEST` 时输出 v3；同时支持 `RUNTIME_QT_MODULES`、`RUNTIME_FILES`、`LICENSE_FILES`，映射使用 `包内路径=源路径`。POST_BUILD 和显式 `<target>_package` 共用文件锁，重新收集实际闭包并原子发布；正式安装只有 `.ztplugin` 和许可证，裸 DLL／EXE 留在构建目录。
+`zto_package_plugin()` 保留普通插件 v2 默认行为。增加 `SERVICE_MANIFEST` 时输出 v3；同时支持 `RUNTIME_QT_MODULES`、`RUNTIME_FILES`、`LICENSE_FILES`，映射使用 `包内路径=源路径`。POST_BUILD 和显式 `<target>_package` 共用文件锁，重新收集实际闭包并原子发布；正式安装只有 `.z2plugin` 和许可证，裸 DLL／EXE 留在构建目录。
 
 Windows 收集器在校验过的独立暂存目录运行实际 Kit 的 windeployqt，不读取宿主发布目录或其他业务插件缓存。进程内入口分析 DLL，排除宿主基础 Qt、系统库和 CRT；工作进程分析 EXE，携带自己的基础 Qt、声明模块／后端、实际可达第三方库和 MSVC 运行库。worker 不继承进程内“排除基础 Qt”的规则；其 requiresHost 必须为空，运行环境只在子进程生效。旧进程内媒体包被拒绝。
 
@@ -23,7 +23,3 @@ HostRuntimeContract.cmake 保留基础 ABI 契约：客户端 Core、Gui、Netwo
 v2/v3 继续逐块认证、逐文件散列，文件数最多 512，单文件最多 256 MiB，总明文最多 512 MiB；拒绝绝对路径、路径穿越、重复／文件目录冲突、链接输入、截断和尾随数据。v3 的执行与依赖声明包含在认证头中。共享格式密钥是封装机制，不是发行者签名。
 
 旧普通插件可保留非 Qt 运行库到进程退出；该兼容机制不用于媒体服务。v3 worker 的库从未映射到宿主；卸载需要同时证明业务 DLL 已解除映射、拥有的进程树退出、租约与调用排空、提取锁已释放。目录删除失败可有界重试，不能用删除目录或 QPluginLoader::unload 返回值替代模块／进程核对。
-
-## 验证记录
-
-2026-10-14 的 v2 验收证明了独立收集与分块包可用，但媒体库当时仍常驻主进程。2026-10-15 的迁移改用相反的模块验收；本轮实测、未验证条件和产物见[插件服务迁移验证](validation/plugin-services-2026-10-15/README.md)。

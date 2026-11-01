@@ -16,7 +16,7 @@
 #endif
 #include <windows.h>
 #endif
-namespace vusiif::ztgui::protocol::service {
+namespace vusiif::zto::protocol::service {
 // Header-only worker-side transport. No host implementation or media dependency.
 class Worker final : public QObject {
 public:
@@ -67,7 +67,7 @@ public:
     bool start(const QStringList &args) {
         auto argument=[&](const QString &key) { const auto i=args.indexOf(key); return i>=0 && i+1<args.size()?args[i+1]:QString(); };
         const auto name=argument("--service-socket"); m_generation=argument("--service-generation");
-        m_token=qEnvironmentVariable("ZTGUI_SERVICE_TOKEN"); qunsetenv("ZTGUI_SERVICE_TOKEN");
+        m_token=qEnvironmentVariable("ZTO_SERVICE_TOKEN"); qunsetenv("ZTO_SERVICE_TOKEN");
         if(name.isEmpty() || m_generation.isEmpty() || m_token.size()!=64) return false;
 #ifdef Q_OS_WIN
         bool ok=false; const auto pid=argument("--host-pid").toULong(&ok);

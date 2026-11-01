@@ -4,16 +4,21 @@
 #include <QtTest>
 #include <QTemporaryDir>
 #include <QWindow>
+#include <QScreen>
+#include <QImage>
 #include <QFile>
 #include <QWidget>
 #include <QPainter>
+#include <QScopeGuard>
+#include <QPointer>
 #include <QtEndian>
+#include <chrono>
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <psapi.h>
 #include <tlhelp32.h>
 #endif
-using namespace vusiif::ztgui;
+using namespace vusiif::zto;
 namespace {
 QByteArray clipWav(int frames)
 {
@@ -99,11 +104,11 @@ class MediaIntegrationTests : public QObject {
         clipFailureFile = clipFailureDirectory.filePath("clip-failure.txt");
         // The worker inherits this environment at start; the file is created
         // only by the failure test. Production never sets this variable.
-        qputenv("ZTGUI_MEDIA_TEST_CLIP_FAILURE", clipFailureFile.toUtf8());
+        qputenv("ZTO_MEDIA_TEST_CLIP_FAILURE", clipFailureFile.toUtf8());
     }
     void init() {
         QFile::remove(clipFailureFile);
-        auto package = package::inspect(qEnvironmentVariable("ZTGUI_TEST_MEDIA_PACKAGE",QString::fromUtf8(MEDIA_PLUGIN)));
+        auto package = package::inspect(qEnvironmentVariable("ZTO_TEST_MEDIA_PACKAGE",QString::fromUtf8(MEDIA_PLUGIN)));
         QVERIFY2(package.ok(), qPrintable(package.error));
         QString entry;
         auto error = package::extract(package, cache, entry, lock);
@@ -151,10 +156,27 @@ class MediaIntegrationTests : public QObject {
                 ++raw;
         };
         b->frame = [&](const media::FrameView &) { ++other; };
+        // On an assertion failure callbacks must stop before their captured
+        // stack counters disappear; otherwise the failure path corrupts the
+        // heap and hides the original stream diagnostics.
+        const auto detachCallbacks = qScopeGuard([&] {
+            a->packet = {}; a->frame = {}; a->error = {}; b->frame = {};
+            close(*a); close(*b);
+        });
         QVERIFY(start(*a, receive.value.id));
         QVERIFY(start(*a, send.value.id));
         QVERIFY(start(*b, independent.value.id));
-        QTRY_VERIFY_WITH_TIMEOUT(decoded >= 20 && other >= 20, 8000);
+        QElapsedTimer progress;
+        progress.start();
+        while ((decoded < 20 || other < 20) && progress.elapsed() < 8000) QTest::qWait(10);
+        if (decoded < 20 || other < 20) {
+            const auto first = await<media::Statistics>([&](auto *ctx, auto cb) { a->statistics(ctx, cb); });
+            const auto second = await<media::Statistics>([&](auto *ctx, auto cb) { b->statistics(ctx, cb); });
+            qInfo() << "roundtrip counters" << decoded << raw << other << errors
+                    << QJsonDocument(first.value.values).toJson(QJsonDocument::Compact)
+                    << QJsonDocument(second.value.values).toJson(QJsonDocument::Compact);
+        }
+        QVERIFY(decoded >= 20 && other >= 20);
         QVERIFY2(errors.isEmpty(), qPrintable(errors.join(";")));
         QVERIFY(raw >= decoded);
         QVERIFY(close(*a));
@@ -172,11 +194,98 @@ class MediaIntegrationTests : public QObject {
             do {
                 auto name = QString::fromWCharArray(module.szModule).toLower();
                 QVERIFY2(!name.startsWith("avcodec-") && !name.startsWith("avfilter-") &&
-                             name != "qt6multimedia.dll" && name != "ztmedia_flip.dll",
+                             name != "qt6multimedia.dll" && name != "z2media_flip.dll",
                          qPrintable(name));
             } while (Module32NextW(snapshot, &module));
         CloseHandle(snapshot);
 #endif
+    }
+    void tileConfigurationRejectsInitializationData() {
+        auto s = consumer();
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->open(ctx, cb); }).ok());
+        const auto cleanup = qScopeGuard([&] { if (!broker->idle()) close(*s); });
+        auto config = video();
+        config.codec.codec = "bgra-tiles";
+        config.video.colorRange = "full";
+        config.preview = false;
+        for (const auto &direction : {QStringLiteral("send"), QStringLiteral("receive")}) {
+            config.direction = direction;
+            config.source = direction == "send" ? "synthetic" : "";
+            config.codec.initializationData = "unexpected";
+            const auto invalid = create(*s, config);
+            QVERIFY2(!invalid.ok(), "Tile initialization data must be rejected");
+            QVERIFY(invalid.error.message.contains("initialization data"));
+            config.codec.initializationData.clear();
+            const auto valid = create(*s, config);
+            QVERIFY2(valid.ok(), qPrintable(valid.error.message));
+            config.codec.initializationData = "unexpected";
+            const auto configured = await<media::TrackDescriptor>([&](auto *ctx, auto cb) {
+                s->configure(valid.value.id, config, ctx, cb);
+            });
+            QVERIFY2(!configured.ok(), "Reconfiguration must enforce the same tile contract");
+            QVERIFY(configured.error.message.contains("initialization data"));
+        }
+        QVERIFY(close(*s));
+        QTRY_VERIFY(broker->idle());
+    }
+    void delayedFirstPacketDoesNotStarveIndependentVideo() {
+        auto s = consumer();
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->open(ctx, cb); }).ok());
+        auto config = video();
+        config.video.width = 320;
+        config.video.height = 180;
+        config.codec.keyFrameInterval = 1; // Every retained packet is independently decodable.
+        config.preview = false;
+        const auto tx = create(*s, config);
+        QVERIFY(tx.ok());
+        config.direction = "receive";
+        config.source.clear();
+        config.preview = true;
+        const auto rx = create(*s, config);
+        QVERIFY(rx.ok());
+        int decoded = 0;
+        bool haveFirst = false, live = false;
+        media::EncodedPacket first;
+        QTimer delayed;
+        delayed.setSingleShot(true);
+        const auto callbacks = qScopeGuard([&] {
+            delayed.stop();
+            s->packet = {};
+            s->frame = {};
+            if (!broker->idle()) close(*s);
+        });
+        QObject::connect(&delayed, &QTimer::timeout, this, [&] {
+            QVERIFY(s->submitTo(rx.value, std::move(first)));
+            live = true;
+        });
+        s->packet = [&](media::EncodedPacket packet) {
+            if (!haveFirst) {
+                first = std::move(packet);
+                haveFirst = true;
+                delayed.start(500);
+            } else if (live) {
+                QVERIFY(s->submitTo(rx.value, std::move(packet)));
+            }
+        };
+        s->frame = [&](const media::FrameView &frame) {
+            if (frame.track == rx.value.id && frame.decoded) ++decoded;
+        };
+        QVERIFY(start(*s, rx.value.id));
+        QVERIFY(start(*s, tx.value.id));
+        QTest::qWait(3500);
+        const auto stats = await<media::Statistics>([&](auto *ctx, auto cb) { s->statistics(ctx, cb); });
+        QVERIFY(stats.ok());
+        const auto track = stats.value.track(rx.value.id);
+        qInfo().noquote() << "delayed first packet" << "decoded" << decoded
+            << QJsonDocument(track).toJson(QJsonDocument::Compact);
+        QVERIFY2(decoded >= 10, "An old first packet must not starve all subsequent live video");
+        QVERIFY(track["decodedQueuePeak"].toString().toULongLong() <= 3);
+        QVERIFY(track["playbackReanchors"].toString().toULongLong() >= 1);
+        const int before = decoded;
+        QTest::qWait(500);
+        QVERIFY(decoded > before);
+        QVERIFY(close(*s));
+        QTRY_VERIFY(broker->idle());
     }
     void clipServiceAcceptsAndFinishesShortAudio() {
         auto lease = broker->acquire(media::ClipService, media::ClipApi);
@@ -332,6 +441,570 @@ class MediaIntegrationTests : public QObject {
         bool dropped=false;for(const auto &row:stats.value.values["tracks"].toArray())dropped|=row.toObject()["dropped"].toString().toULongLong()>0;
         QVERIFY(close(*s));QVERIFY(dropped);
     }
+    void syntheticProfilesLoopback_data() {
+        QTest::addColumn<int>("width");
+        QTest::addColumn<int>("height");
+        QTest::addColumn<int>("bitrate");
+        QTest::newRow("720p30") << 1280 << 720 << 2000000;
+        QTest::newRow("1080p30") << 1920 << 1080 << 4000000;
+    }
+    void syntheticProfilesLoopback() {
+        QFETCH(int, width);
+        QFETCH(int, height);
+        QFETCH(int, bitrate);
+        auto s = consumer();
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->open(ctx, cb); }).ok());
+        auto c = video();
+        c.video.width = width;
+        c.video.height = height;
+        c.codec.bitrate = bitrate;
+        c.codec.keyFrameInterval = 30;
+        auto tx = create(*s, c);
+        QVERIFY2(tx.ok(), qPrintable(tx.error.message));
+        c.direction = "receive";
+        c.source.clear();
+        auto rx = create(*s, c);
+        QVERIFY(rx.ok());
+        int packets = 0, keyFrames = 0, decoded = 0;
+        qint64 lastDuration = 0;
+        QSize decodedSize;
+        QList<quint64> sequences;
+        s->packet = [&](media::EncodedPacket p) {
+            ++packets;
+            sequences.append(p.sequence);
+            lastDuration = p.duration;
+            if (p.keyFrame)
+                ++keyFrames;
+            QVERIFY(s->submitTo(rx.value, std::move(p)));
+        };
+        s->frame = [&](const media::FrameView &f) {
+            if (!f.decoded)
+                return;
+            ++decoded;
+            decodedSize = QSize(f.video.width, f.video.height);
+        };
+        QVERIFY(start(*s, rx.value.id));
+        QVERIFY(start(*s, tx.value.id));
+        QTRY_VERIFY_WITH_TIMEOUT(decoded >= 10, 10000);
+        QCOMPARE(decodedSize, QSize(width, height));
+        QCOMPARE(lastDuration, qint64(1000000 / 30));
+        // The first packet is a key frame; a key frame request must produce a
+        // later one instead of silently keeping the previous picture.
+        QVERIFY(keyFrames >= 1);
+        const auto beforeRequest = keyFrames;
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->requestKeyFrame(tx.value.id, ctx, cb); }).ok());
+        QTest::qWait(200);
+        QTRY_VERIFY_WITH_TIMEOUT(keyFrames > beforeRequest, 3000);
+        for (qsizetype i = 1; i < sequences.size(); ++i)
+            QVERIFY(sequences[i] > sequences[i - 1]);
+        QVERIFY(close(*s));
+        QTRY_VERIFY(broker->idle());
+    }
+
+    void syntheticAndCachedRefreshSharePacingBudget() {
+        auto s = consumer();
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->open(ctx, cb); }).ok());
+        auto config = video();
+        config.video.width = 320; config.video.height = 180;
+        config.codec.frameRate = 30; config.preview = false;
+        auto tx = create(*s, config);
+        QVERIFY(tx.ok());
+        int packets = 0;
+        const auto callbacks = qScopeGuard([&] { s->packet = {}; close(*s); });
+        s->packet = [&](media::EncodedPacket) { ++packets; };
+        QElapsedTimer elapsed;
+        elapsed.start();
+        QVERIFY(start(*s, tx.value.id));
+        while (elapsed.elapsed() < 2500) {
+            QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->requestKeyFrame(tx.value.id, ctx, cb); }).ok());
+            QTest::qWait(10);
+        }
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->stop(tx.value.id, ctx, cb); }).ok());
+        QVERIFY2(packets <= 2 + (elapsed.elapsed() * 30 + 999) / 1000,
+                 qPrintable(QStringLiteral("pacing budget exceeded: %1 in %2ms").arg(packets).arg(elapsed.elapsed())));
+        QVERIFY(packets >= 60);
+        qInfo() << "synthetic+keyframe packets" << packets << "elapsedMs" << elapsed.elapsed();
+    }
+    void keyFrameRequestRefreshesCachedCanvas() {
+        auto s = consumer();
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->open(ctx, cb); }).ok());
+        auto config = video();
+        config.video.width = 320;
+        config.video.height = 180;
+        config.codec.bitrate = 500000;
+        config.codec.frameRate = 1;
+        config.preview = false;
+        const auto tx = create(*s, config);
+        QVERIFY(tx.ok());
+        config.direction = "receive";
+        config.source.clear();
+        config.preview = true;
+        const auto rx = create(*s, config);
+        QVERIFY(rx.ok());
+        int frames = 0, keyFrames = 0;
+        const auto callbacks = qScopeGuard([&] { s->packet = {}; s->frame = {}; if(!broker->idle())close(*s); });
+        s->packet = [&](media::EncodedPacket packet) {
+            if (packet.keyFrame) ++keyFrames;
+            QVERIFY(s->submitTo(rx.value, std::move(packet)));
+        };
+        s->frame = [&](const media::FrameView &frame) { if (frame.decoded) ++frames; };
+        QVERIFY(start(*s, rx.value.id));
+        QVERIFY(start(*s, tx.value.id));
+        QTRY_VERIFY_WITH_TIMEOUT(frames >= 1, 3000);
+        const auto before = await<media::Statistics>([&](auto *ctx, auto cb) { s->statistics(ctx, cb); });
+        QVERIFY(before.ok());
+        const auto captured = before.value.track(tx.value.id)["captured"].toString();
+        const auto previousFrames = frames, previousKeyFrames = keyFrames;
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->requestKeyFrame(tx.value.id, ctx, cb); }).ok());
+        // The source is only 1 fps; this must not wait for its next input.
+        QTRY_VERIFY_WITH_TIMEOUT(frames > previousFrames && keyFrames > previousKeyFrames, 500);
+        const auto after = await<media::Statistics>([&](auto *ctx, auto cb) { s->statistics(ctx, cb); });
+        QVERIFY(after.ok());
+        const auto stats = after.value.track(tx.value.id);
+        QCOMPARE(stats["captured"].toString(), captured);
+        QCOMPARE(stats["keyFrameRefreshes"].toString(), QStringLiteral("1"));
+        QVERIFY(after.value.track(QStringLiteral("missing-track")).isEmpty());
+        qInfo().noquote() << "cached keyframe refresh" << QJsonDocument(stats).toJson(QJsonDocument::Compact);
+        QVERIFY(close(*s));
+        QTRY_VERIFY(broker->idle());
+    }
+
+    void physical1080pLoopback_data() {
+        QTest::addColumn<bool>("preview");
+        QTest::newRow("preview") << true;
+        QTest::newRow("decode-only") << false;
+    }
+    void physical1080pLoopback() {
+        if (!qEnvironmentVariableIntValue("ZTO_TEST_PHYSICAL_VIDEO"))
+            QSKIP("Set ZTO_TEST_PHYSICAL_VIDEO=1 for real window capture");
+        QFETCH(bool, preview);
+        CaptureFixtureWindow window;
+        window.setWindowTitle("ZTOrbit 1080p loopback fixture");
+        window.resize(360, 240);
+        window.move(1450, 850);
+        window.show();
+        QTest::qWait(100);
+        window.hide();
+        window.show();
+        window.raise();
+        QTimer animation;
+        QObject::connect(&animation, &QTimer::timeout, &window, [&window] { window.update(); });
+        animation.start(33);
+        QTest::qWait(400);
+        auto s = consumer();
+        const auto sources = await<media::SourceSnapshot>([&](auto *ctx, auto cb) { s->sources(ctx, cb); });
+        QVERIFY(sources.ok());
+        QString source;
+        for (const auto &entry : sources.value.sources)
+            if (entry.kind == "window" && entry.description.contains(window.windowTitle()))
+                source = entry.kind + ":" + entry.id;
+        if (source.isEmpty()) {
+            QVERIFY(close(*s));
+            QSKIP("Fixture window is not capturable on this platform");
+        }
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->open(ctx, cb); }).ok());
+        auto config = video(source);
+        config.video.width = 1920;
+        config.video.height = 1080;
+        config.codec.bitrate = 4000000;
+        config.codec.keyFrameInterval = 30;
+        config.preview = false;
+        const auto tx = create(*s, config);
+        QVERIFY2(tx.ok(), qPrintable(tx.error.message));
+        config.direction = "receive";
+        config.source.clear();
+        config.preview = preview;
+        const auto rx = create(*s, config);
+        QVERIFY2(rx.ok(), qPrintable(rx.error.message));
+        int packets = 0, frames = 0, submitDrops = 0;
+        QString failure;
+        const auto callbacks = qScopeGuard([&] { s->packet = {}; s->frame = {}; s->error = {}; if(!broker->idle())close(*s); });
+        s->error = [&](const media::MediaError &error) { failure = error.message; };
+        s->packet = [&](media::EncodedPacket packet) {
+            ++packets;
+            if (!s->submitTo(rx.value, std::move(packet))) ++submitDrops;
+        };
+        s->frame = [&](const media::FrameView &frame) {
+            if (frame.track == rx.value.id && frame.decoded) {
+                ++frames;
+                QCOMPARE(QSize(frame.video.width, frame.video.height), QSize(1920, 1080));
+            }
+        };
+        QVERIFY(start(*s, rx.value.id));
+        QVERIFY(start(*s, tx.value.id));
+        QJsonObject receiveStats;
+        int framesBeforeLastInterval = 0;
+        for (int interval = 0; interval < 5; ++interval) {
+            if (interval == 4) framesBeforeLastInterval = frames;
+            QTest::qWait(2000);
+            const auto stats = await<media::Statistics>([&](auto *ctx, auto cb) { s->statistics(ctx, cb); });
+            QVERIFY(stats.ok());
+            receiveStats = stats.value.track(rx.value.id);
+            qInfo().noquote() << "1080p receive statistics"
+                              << QJsonDocument(receiveStats).toJson(QJsonDocument::Compact);
+        }
+        qInfo() << "1080p ten-second loopback" << "preview" << preview << "packets" << packets
+                << "frames" << frames << "submitDrops" << submitDrops;
+        QVERIFY2(failure.isEmpty(), qPrintable(failure));
+        QVERIFY(receiveStats["decodedOutput"].toString().toULongLong() >= 10);
+        if (preview) {
+            QVERIFY(frames >= 10);
+            QVERIFY2(frames > framesBeforeLastInterval, "preview stopped progressing in the final interval");
+        } else {
+            QCOMPARE(frames, 0);
+            QCOMPARE(receiveStats["frames"].toString(), QStringLiteral("0"));
+        }
+        QVERIFY(close(*s));
+        QTRY_VERIFY(broker->idle());
+    }
+
+    void physicalAspectLoopback() {
+        if (!qEnvironmentVariableIntValue("ZTO_TEST_PHYSICAL_VIDEO"))
+            QSKIP("Set ZTO_TEST_PHYSICAL_VIDEO=1 for device capture");
+        CaptureFixtureWindow window;
+        window.setWindowTitle("ZTOrbit aspect fixture");
+        window.resize(500, 420);
+        // The same show/hide/show sequence used by the existing window capture
+        // test; it makes the fixture reliably appear in the capturable list.
+        window.show();
+        QTest::qWait(100);
+        window.hide();
+        window.show();
+        QTimer animation;
+        QObject::connect(&animation, &QTimer::timeout, &window, [&window] { window.update(); });
+        animation.start(33);
+        QTest::qWait(400);
+        auto s = consumer();
+        auto sources = await<media::SourceSnapshot>([&](auto *ctx, auto cb) { s->sources(ctx, cb); });
+        QVERIFY(sources.ok());
+        QString source;
+        for (const auto &d : sources.value.sources)
+            if (d.kind == "window" && d.description.contains(window.windowTitle())) {
+                source = d.kind + ":" + d.id;
+                break;
+            }
+        if (source.isEmpty()) {
+            QStringList windows;
+            for (const auto &d : sources.value.sources)
+                if (d.kind == "window")
+                    windows.append(d.description);
+            qWarning() << "Capturable windows:" << windows;
+            QVERIFY(close(*s));
+            QSKIP("Fixture window is not capturable on this platform");
+        }
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->open(ctx, cb); }).ok());
+        auto tx = create(*s, video(source));
+        QVERIFY2(tx.ok(), qPrintable(tx.error.message));
+        auto c = video();
+        c.direction = "receive";
+        c.source.clear();
+        auto rx = create(*s, c);
+        QVERIFY(rx.ok());
+        int decoded = 0, raw = 0;
+        QString deviceError;
+        QImage last;
+        const auto callbacks = qScopeGuard([&] { s->packet = {}; s->frame = {}; s->error = {}; if(!broker->idle())close(*s); });
+        s->error = [&](const media::MediaError &e) {
+            if (e.code == QStringLiteral("device"))
+                deviceError = e.message;
+            qWarning() << e.code << e.message;
+        };
+        s->packet = [&](media::EncodedPacket p) { QVERIFY(s->submitTo(rx.value, std::move(p))); };
+        s->frame = [&](const media::FrameView &f) {
+            if (!f.decoded) {
+                ++raw;
+                return;
+            }
+            ++decoded;
+            last = QImage(f.data, f.video.width, f.video.height, f.planes.front().stride,
+                          QImage::Format_ARGB32)
+                       .copy();
+        };
+        QVERIFY(start(*s, rx.value.id));
+        QVERIFY(start(*s, tx.value.id));
+        QElapsedTimer wait;
+        wait.start();
+        while (decoded < 20 && wait.elapsed() < 15000)
+            QTest::qWait(20);
+        QVERIFY2(decoded >= 20, qPrintable(QStringLiteral("decoded %1").arg(decoded)));
+        QVERIFY(raw > 0);
+        animation.stop();
+        QCOMPARE(last.size(), QSize(1280, 720));
+        // A 500x420 window is narrower than 16:9, so the fixed canvas keeps the
+        // window shape and fills the sides with black instead of stretching.
+        QVERIFY2(last.pixelColor(2, 360).lightness() < 30, "left edge must be a black bar");
+        QVERIFY2(last.pixelColor(1277, 360).lightness() < 30, "right edge must be a black bar");
+        QVERIFY2(last.pixelColor(640, 360).lightness() > 40, "center must keep the window content");
+        // A static window (no repaint) is normal content: it must not be
+        // reported as a source failure.
+        QTest::qWait(4000);
+        QVERIFY2(deviceError.isEmpty(), qPrintable(deviceError));
+        const int beforeRepaint = decoded;
+        window.update();
+        QTRY_VERIFY_WITH_TIMEOUT(decoded > beforeRepaint, 5000);
+        QVERIFY2(deviceError.isEmpty(), qPrintable(deviceError));
+        // A window resize keeps the fixed profile canvas and the new aspect
+        // ratio: 720x300 is wider than 16:9, so the top/bottom become black.
+        animation.start(33);
+        const int beforeResize = decoded;
+        window.resize(720, 300);
+        // Frames already queued before the resize still arrive afterwards.
+        // Wait for the actual geometry within the same six-second limit,
+        // rather than treating three more frames as a resize acknowledgement.
+        QElapsedTimer resizeWait;
+        resizeWait.start();
+        while (resizeWait.elapsed() < 6000 &&
+               !(decoded > beforeResize + 2 && last.pixelColor(640, 3).lightness() < 30 &&
+                 last.pixelColor(640, 717).lightness() < 30 &&
+                 last.pixelColor(640, 360).lightness() > 40))
+            QTest::qWait(20);
+        QVERIFY(decoded > beforeResize + 2);
+        QCOMPARE(last.size(), QSize(1280, 720));
+        QVERIFY2(last.pixelColor(640, 3).lightness() < 30, "top edge must be a black bar");
+        QVERIFY2(last.pixelColor(640, 717).lightness() < 30, "bottom edge must be a black bar");
+        QVERIFY2(last.pixelColor(640, 360).lightness() > 40, "center must keep the window content");
+        animation.stop();
+        QVERIFY2(deviceError.isEmpty(), qPrintable(deviceError));
+        QVERIFY(close(*s));
+        QTRY_VERIFY(broker->idle());
+    }
+
+  private:
+    void exerciseClosedWindowCapture(int cycles) {
+        if (!qEnvironmentVariableIntValue("ZTO_TEST_PHYSICAL_VIDEO"))
+            QSKIP("Set ZTO_TEST_PHYSICAL_VIDEO=1 for device capture");
+        for (int cycle = 0; cycle < cycles; ++cycle) {
+        QPointer<CaptureFixtureWindow> window = new CaptureFixtureWindow;
+        const auto windowCleanup = qScopeGuard([&] { if (window) delete window.data(); });
+        window->setWindowTitle(QStringLiteral("ZTOrbit close fixture ") + QUuid::createUuid().toString());
+        window->resize(480, 360);
+        window->show();
+        QTest::qWait(100);
+        window->hide();
+        window->show();
+        QTimer animation;
+        QObject::connect(&animation, &QTimer::timeout, window.data(), [window] { if (window) window->update(); });
+        animation.start(33);
+        QTest::qWait(400);
+        auto s = consumer();
+        auto sources = await<media::SourceSnapshot>([&](auto *ctx, auto cb) { s->sources(ctx, cb); });
+        QVERIFY(sources.ok());
+        QString source;
+        for (const auto &d : sources.value.sources)
+            if (d.kind == "window" && d.description.contains(window->windowTitle())) {
+                source = d.kind + ":" + d.id;
+                break;
+            }
+        if (source.isEmpty()) {
+            delete window.data();
+            QVERIFY(close(*s));
+            QSKIP("Fixture window is not capturable on this platform");
+        }
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->open(ctx, cb); }).ok());
+        auto tx = create(*s, video(source));
+        QVERIFY2(tx.ok(), qPrintable(tx.error.message));
+        auto c = video();
+        c.direction = "receive";
+        c.source.clear();
+        auto rx = create(*s, c);
+        QVERIFY(rx.ok());
+        int decoded = 0;
+        QString failure;
+        const auto callbacks = qScopeGuard([&] {
+            s->packet = {}; s->frame = {}; s->error = {};
+            if (!broker->idle()) close(*s);
+        });
+        s->error = [&](const media::MediaError &e) {
+            if (!failure.isEmpty())
+                return;
+            if (e.code == QStringLiteral("device") || e.code == QStringLiteral("track"))
+                failure = e.message;
+        };
+        s->packet = [&](media::EncodedPacket p) { QVERIFY(s->submitTo(rx.value, std::move(p))); };
+        s->frame = [&](const media::FrameView &f) {
+            if (f.decoded)
+                ++decoded;
+        };
+        QVERIFY(start(*s, rx.value.id));
+        QVERIFY(start(*s, tx.value.id));
+        QTRY_VERIFY_WITH_TIMEOUT(decoded >= 5, 10000);
+        animation.stop();
+        window->close();
+        window->deleteLater();
+        QTest::qWait(200);
+        // The validity probe waits for a sustained absence, not one missed
+        // enumeration, and then reports an explicit source failure.
+        QTRY_VERIFY_WITH_TIMEOUT(!failure.isEmpty(), 20000);
+        QVERIFY(close(*s));
+        QTRY_VERIFY(broker->idle());
+        qInfo() << "closed window cycle" << cycle;
+        }
+    }
+
+  private slots:
+    void physicalClosedWindowFailsCapture() { exerciseClosedWindowCapture(1); }
+    void physicalClosedWindowsRepeatedly() { exerciseClosedWindowCapture(20); }
+
+    void physicalStaticWindowSharedConsumerAndStop() {
+        if (!qEnvironmentVariableIntValue("ZTO_TEST_PHYSICAL_VIDEO"))
+            QSKIP("Set ZTO_TEST_PHYSICAL_VIDEO=1 for real window capture");
+        CaptureFixtureWindow window;
+        window.setWindowTitle(QStringLiteral("ZTOrbit static shared source ") + QUuid::createUuid().toString());
+        window.resize(320,240);
+        window.show();
+        QTest::qWait(100); window.hide(); window.show();
+        QVERIFY(QTest::qWaitForWindowExposed(window.windowHandle()));
+        QTest::qWait(300);
+        auto s = consumer();
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->open(ctx, cb); }).ok());
+        auto sources = await<media::SourceSnapshot>([&](auto *ctx, auto cb) { s->sources(ctx, cb); });
+        QVERIFY(sources.ok());
+        QString source;
+        for (const auto &entry : sources.value.sources)
+            if (entry.kind == "window" && entry.description == window.windowTitle()) source = "window:" + entry.id;
+        QVERIFY(!source.isEmpty());
+        auto first = create(*s, video(source)), second = create(*s, video(source));
+        QVERIFY(first.ok()); QVERIFY(second.ok());
+        int firstPackets = 0, secondPackets = 0;
+        qint64 secondFirstPts = -1;
+        const auto callbacks = qScopeGuard([&] {
+            s->packet = {}; s->frame = {}; s->error = {};
+            if (!broker->idle()) close(*s);
+        });
+        s->packet = [&](media::EncodedPacket packet) {
+            if (packet.track == first.value.id) ++firstPackets;
+            if (packet.track == second.value.id) {
+                if (!secondPackets) secondFirstPts = packet.pts;
+                ++secondPackets;
+            }
+        };
+        QVERIFY(start(*s, first.value.id));
+        QTRY_VERIFY_WITH_TIMEOUT(firstPackets > 0, 5000);
+        QTest::qWait(1000); // A cached seed must not anchor a new stream a second in the past.
+        const auto secondStartedAt = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        QVERIFY(start(*s, second.value.id));
+        QTRY_VERIFY_WITH_TIMEOUT(secondPackets > 0, 5000);
+        QVERIFY2(secondFirstPts >= secondStartedAt,
+                 qPrintable(QStringLiteral("cached seed PTS %1 precedes attach %2").arg(secondFirstPts).arg(secondStartedAt)));
+        auto stats = await<media::Statistics>([&](auto *ctx, auto cb) { s->statistics(ctx, cb); });
+        QVERIFY(stats.ok());
+        const auto secondTrack = stats.value.track(second.value.id);
+        QVERIFY(secondTrack["videoBeforeStart"].toString().toULongLong() > 0);
+        QVERIFY(secondTrack["captured"].toString().toULongLong() > 0);
+        QCOMPARE(stats.value.values["devices"].toObject()["physicalInputs"].toInt(),1);
+#ifdef Q_OS_WIN
+        const auto native = stats.value.values["devices"].toObject()["sources"].toArray().first().toObject()["native"].toObject();
+        QCOMPARE(native["apartmentType"].toInt(-1), 1); // APTTYPE_MTA, never silently accept an existing STA.
+#endif
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->stop(first.value.id,ctx,cb); }).ok());
+        const auto stoppedFirst = firstPackets, previousSecond = secondPackets;
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->requestKeyFrame(second.value.id,ctx,cb); }).ok());
+        QTRY_VERIFY_WITH_TIMEOUT(secondPackets > previousSecond, 500);
+        QCOMPARE(firstPackets,stoppedFirst);
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->stop(second.value.id,ctx,cb); }).ok());
+        auto stopped = await<media::Statistics>([&](auto *ctx, auto cb) { s->statistics(ctx, cb); });
+        QVERIFY(stopped.ok());
+        QCOMPARE(stopped.value.values["devices"].toObject()["physicalInputs"].toInt(),0);
+        const auto raw = stopped.value.values["devices"].toObject()["rawVideoFrames"];
+        QTest::qWait(800);
+        auto drained = await<media::Statistics>([&](auto *ctx, auto cb) { s->statistics(ctx, cb); });
+        QVERIFY(drained.ok());
+        QCOMPARE(drained.value.values["devices"].toObject()["rawVideoFrames"],raw);
+        const auto beforeRestart = secondPackets;
+        QVERIFY(start(*s, second.value.id));
+        QTRY_VERIFY_WITH_TIMEOUT(secondPackets > beforeRestart,5000);
+        qInfo().noquote() << "shared static startup" << QJsonDocument(stats.value.values).toJson(QJsonDocument::Compact);
+        QVERIFY(close(*s));
+        QTRY_VERIFY(broker->idle());
+    }
+
+    void physicalStaticScreenDoesNotFail() {
+        if (!qEnvironmentVariableIntValue("ZTO_TEST_PHYSICAL_VIDEO"))
+            QSKIP("Set ZTO_TEST_PHYSICAL_VIDEO=1 for device capture");
+        CaptureFixtureWindow window;
+        window.setWindowTitle("ZTOrbit static fixture");
+        window.setWindowFlag(Qt::WindowStaysOnTopHint);
+        window.resize(400, 300);
+        window.move(80, 80);
+        window.show();
+        // The unattended Windows launcher hides the process's first show.
+        // Exercise a second native show, as the other physical fixtures do,
+        // before checking exposure or starting screen capture.
+        QTest::qWait(100);
+        window.hide();
+        window.show();
+        window.raise();
+        QVERIFY(QTest::qWaitForWindowExposed(window.windowHandle()));
+        QTimer animation;
+        QObject::connect(&animation, &QTimer::timeout, &window, [&window] { window.update(); });
+        animation.start(33);
+        QTest::qWait(400);
+        const auto screenName = window.screen() ? window.screen()->name() : QString{};
+        auto s = consumer();
+        auto sources = await<media::SourceSnapshot>([&](auto *ctx, auto cb) { s->sources(ctx, cb); });
+        QVERIFY(sources.ok());
+        QString source;
+        for (const auto &d : sources.value.sources)
+            if (d.kind == "screen" && (screenName.isEmpty() || d.id == screenName)) {
+                source = d.kind + ":" + d.id;
+                break;
+            }
+        if (source.isEmpty()) {
+            QVERIFY(close(*s));
+            QSKIP("Requested physical screen unavailable");
+        }
+        QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->open(ctx, cb); }).ok());
+        auto tx = create(*s, video(source));
+        QVERIFY2(tx.ok(), qPrintable(tx.error.message));
+        auto c = video();
+        c.direction = "receive";
+        c.source.clear();
+        auto rx = create(*s, c);
+        QVERIFY(rx.ok());
+        int decoded = 0, packets = 0;
+        QString failure;
+        const auto callbacks=qScopeGuard([&] {
+            s->packet={};s->frame={};s->error={};
+            if (!broker->idle()) {
+                const auto stats = await<media::Statistics>([&](auto *ctx, auto cb) { s->statistics(ctx, cb); });
+                if (stats.ok()) qInfo().noquote() << "static screen final" << "packets" << packets
+                    << "decoded" << decoded << "failure" << failure
+                    << QJsonDocument(stats.value.values).toJson(QJsonDocument::Compact);
+                close(*s);
+            }
+        });
+        s->error = [&](const media::MediaError &e) {
+            if (e.code == QStringLiteral("device") || e.code == QStringLiteral("track"))
+                failure = e.message;
+        };
+        s->packet = [&](media::EncodedPacket p) { ++packets;QVERIFY(s->submitTo(rx.value, std::move(p))); };
+        s->frame = [&](const media::FrameView &f) {
+            if (f.decoded)
+                ++decoded;
+        };
+        QVERIFY(start(*s, rx.value.id));
+        QVERIFY(start(*s, tx.value.id));
+        QTRY_VERIFY_WITH_TIMEOUT(decoded >= 10, 15000);
+        // Long static picture: no capture error, no automatic room/capture end.
+        animation.stop();
+        QTest::qWait(11000);
+        QVERIFY2(failure.isEmpty(), qPrintable(failure));
+        const int beforeRepaint = decoded;
+        window.raise();
+        window.update();
+        QElapsedTimer recovery;recovery.start();
+        while(decoded<=beforeRepaint && recovery.elapsed()<5000)QTest::qWait(20);
+        const bool recovered=decoded>beforeRepaint;
+        const auto stats=await<media::Statistics>([&](auto*ctx,auto cb){s->statistics(ctx,cb);});
+        if(stats.ok())qInfo().noquote()<<"static screen recovery"<<"packets"<<packets
+            <<"decoded"<<decoded<<QJsonDocument(stats.value.values).toJson(QJsonDocument::Compact);
+        QVERIFY(recovered);
+        QVERIFY2(failure.isEmpty(), qPrintable(failure));
+        QVERIFY(close(*s));
+        QTRY_VERIFY(broker->idle());
+    }
+
     void physicalCapture_data() {
         QTest::addColumn<QString>("kind");
         QTest::newRow("screen") << QString("screen");
@@ -339,13 +1012,13 @@ class MediaIntegrationTests : public QObject {
         QTest::newRow("camera") << QString("camera");
     }
     void physicalCapture() {
-        if (!qEnvironmentVariableIntValue("ZTGUI_TEST_PHYSICAL_VIDEO"))
-            QSKIP("Set ZTGUI_TEST_PHYSICAL_VIDEO=1 for device capture");
+        if (!qEnvironmentVariableIntValue("ZTO_TEST_PHYSICAL_VIDEO"))
+            QSKIP("Set ZTO_TEST_PHYSICAL_VIDEO=1 for device capture");
         QFETCH(QString, kind);
         CaptureFixtureWindow window;
         QTimer animation;
         connect(&animation, &QTimer::timeout, &window, [&] { window.update(); });
-        window.setWindowTitle("ZTGUI media capture fixture");
+        window.setWindowTitle("ZTOrbit media capture fixture");
         window.resize(640, 360);
         if (kind == "window") {
             window.show();
@@ -400,8 +1073,8 @@ class MediaIntegrationTests : public QObject {
         qInfo() << "Physical H.264 loopback verified:" << kind << decoded;
     }
     void physicalAudioLoopback() {
-        if (!qEnvironmentVariableIntValue("ZTGUI_TEST_PHYSICAL_AUDIO"))
-            QSKIP("Set ZTGUI_TEST_PHYSICAL_AUDIO=1 for microphone capture");
+        if (!qEnvironmentVariableIntValue("ZTO_TEST_PHYSICAL_AUDIO"))
+            QSKIP("Set ZTO_TEST_PHYSICAL_AUDIO=1 for microphone capture");
         auto s = consumer();
         auto sources = await<media::SourceSnapshot>([&](auto *ctx, auto cb) { s->sources(ctx, cb); });
         QVERIFY(sources.ok());
@@ -441,9 +1114,9 @@ class MediaIntegrationTests : public QObject {
         QVERIFY(close(*s));
     }
     void sustainedVideo() {
-        int seconds = qEnvironmentVariableIntValue("ZTGUI_MEDIA_SOAK_SECONDS");
+        int seconds = qEnvironmentVariableIntValue("ZTO_MEDIA_SOAK_SECONDS");
         if (seconds < 1)
-            QSKIP("Set ZTGUI_MEDIA_SOAK_SECONDS=600 for performance acceptance");
+            QSKIP("Set ZTO_MEDIA_SOAK_SECONDS=600 for performance acceptance");
         auto s = consumer();
         QVERIFY(await<bool>([&](auto *ctx, auto cb) { s->open(ctx, cb); }).ok());
         auto tx = create(*s, video());

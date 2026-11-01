@@ -7,7 +7,7 @@
 #include <QJsonDocument>
 #include <QTimer>
 #include <QtTest>
-using namespace vusiif::ztgui;
+using namespace vusiif::zto;
 static const QString NetworkId="0123456789abcdef",Alice="0000000002",Bob="0000000003",Carol="0000000004";
 static QJsonArray descriptors(const QString &ip) { return {QJsonObject{{"nwid",NetworkId},{"assignedAddresses",QJsonArray{ip+"/24"}}}}; }
 static QJsonArray memberRows() {

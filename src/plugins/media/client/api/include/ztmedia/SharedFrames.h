@@ -8,7 +8,7 @@
 #endif
 #include <windows.h>
 #endif
-namespace vusiif::ztgui::media::detail {
+namespace vusiif::zto::media::detail {
 // Three independent producer/consumer slots. Windows interlocked operations
 // publish data before READY and release it after the synchronous callback.
 class SharedFrames {
@@ -21,7 +21,7 @@ class SharedFrames {
     bool create(quint64 generation) {
 #ifdef Q_OS_WIN
         close();
-        name = "Local\\ztgui-frame-" + QUuid::createUuid().toString(QUuid::Id128);
+        name = QString::fromLatin1(MappingPrefix) + QUuid::createUuid().toString(QUuid::Id128);
         epoch = generation;
         mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, DWORD(Bytes),
                                      reinterpret_cast<LPCWSTR>(name.utf16()));
@@ -45,7 +45,7 @@ class SharedFrames {
         close();
         name = key;
         epoch = generation;
-        if (!name.startsWith("Local\\ztgui-frame-") || name.size() != 50)
+        if (!name.startsWith(QLatin1StringView(MappingPrefix)) || name.size() != MappingKeyLength)
             return false;
         mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, reinterpret_cast<LPCWSTR>(name.utf16()));
         if (!mapping)
@@ -138,6 +138,8 @@ class SharedFrames {
     }
 
   private:
+    static constexpr char MappingPrefix[] = "Local\\zto-frame-";
+    static constexpr qsizetype MappingKeyLength = sizeof(MappingPrefix) - 1 + 32;
     QString name;
     quint64 replacements = 0;
     quint64 epoch = 0;
@@ -147,4 +149,4 @@ class SharedFrames {
     volatile LONG *state(int i) { return reinterpret_cast<volatile LONG *>(view) + i; }
 #endif
 };
-} // namespace vusiif::ztgui::media::detail
+} // namespace vusiif::zto::media::detail

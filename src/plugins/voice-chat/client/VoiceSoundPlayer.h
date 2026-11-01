@@ -10,7 +10,7 @@
 
 #include <ztmedia/AudioClipClient.h>
 
-namespace vusiif::ztgui::voice_chat {
+namespace vusiif::zto::voice_chat {
 // Serializes the two short room cues. Bursts merge adjacent waiting cues of the
 // same kind, keep at most eight items (including the playing one) and discard
 // waiting items older than two seconds on a monotonic clock.

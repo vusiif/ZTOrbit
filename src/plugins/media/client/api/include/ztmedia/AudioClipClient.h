@@ -1,13 +1,13 @@
 #pragma once
 
 #include <ztmedia/MediaTypes.h>
-#include <ztgui/PluginServices.h>
+#include <zto/PluginServices.h>
 #include <QObject>
 #include <QSet>
 #include <algorithm>
 #include <functional>
 
-namespace vusiif::ztgui::media {
+namespace vusiif::zto::media {
 // Generic short-audio service (media.clip / 1). It has no rooms, members or
 // voice concepts: the caller supplies a validated WAV payload and output
 // device. One active clip is allowed per lease; queueing belongs to the caller.
@@ -108,4 +108,4 @@ class AudioClipClient final : public QObject {
         m_lease->call(method, data, payload, context, std::move(done));
     }
 };
-} // namespace vusiif::ztgui::media
+} // namespace vusiif::zto::media

@@ -15,7 +15,7 @@
 #include <atomic>
 #include <cmath>
 
-namespace vusiif::ztgui::network {
+namespace vusiif::zto::network {
 namespace p = protocol;
 using Reply = std::function<void(QJsonObject)>;
 static qint64 now() { return QDateTime::currentMSecsSinceEpoch(); }

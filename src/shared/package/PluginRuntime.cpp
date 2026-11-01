@@ -17,12 +17,12 @@
 #endif
 #include <windows.h>
 #endif
-namespace vusiif::ztgui::package {
+namespace vusiif::zto::package {
 QJsonObject hostRuntimeContract() {
 #ifdef QT_DEBUG
-    QFile file(":/ztgui/contracts/Debug.json");
+    QFile file(":/zto/contracts/Debug.json");
 #else
-    QFile file(":/ztgui/contracts/Release.json");
+    QFile file(":/zto/contracts/Release.json");
 #endif
     if(!file.open(QIODevice::ReadOnly)) return {};
     return QJsonDocument::fromJson(file.readAll()).object();

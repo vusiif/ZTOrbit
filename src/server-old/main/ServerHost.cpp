@@ -16,7 +16,7 @@
 #include "PluginPackage.h"
 #include "PluginRuntime.h"
 #include <QFile>
-namespace vusiif::ztgui::server {
+namespace vusiif::ztohub {
 namespace wire = protocol;
 ServerHost::ServerHost(QString directory) : m_directory(std::move(directory)), m_queries(this) {
     m_udp.setProxy(QNetworkProxy::NoProxy);
@@ -30,33 +30,33 @@ bool ServerHost::start(const QHostAddress &address, quint16 port) {
     if (!m_udp.bind(address, m_tcp.serverPort())) { qCritical() << "UDP bind failed:" << m_udp.errorString(); m_tcp.close(); return false; }
     QFile configuration(QDir(m_directory).filePath("relays.json"));
     if(configuration.open(QIODevice::ReadOnly)) m_transport.setRelayConfig(QJsonDocument::fromJson(configuration.read(65536)).object());
-    connect(&m_transport,&network::NetworkTransport::received,this,[this](const QString &route,const util::NetworkMessage &message) {
+    connect(&m_transport,&vusiif::zto::network::NetworkTransport::received,this,[this](const QString &route,const vusiif::zto::util::NetworkMessage &message) {
         auto *entry=plugin(route); if(!entry||!entry->ready) return;
-        try { entry->entry->onUdpPacket({{},protocol::ClientNetworkPort},message.data); }
+        try { entry->entry->onUdpPacket({{},vusiif::zto::protocol::ClientNetworkPort},message.data); }
         catch(...) { qWarning()<<"Plugin delivery callback failed"<<route; }
     });
     scan(); m_timer.start(100);
-    qInfo() << "zt-server listening" << address << "TCP/UDP" << m_tcp.serverPort(); return true;
+    qInfo() << "ztohub listening" << address << "TCP/UDP" << m_tcp.serverPort(); return true;
 }
 void ServerHost::scan() {
-    package::cleanStaleCache();
+    vusiif::zto::package::cleanStaleCache();
     const QDir directory(QDir(m_directory).filePath("plugins"));
     for (const auto &file : directory.entryInfoList({"*.ztplugin"}, QDir::Files | QDir::NoSymLinks, QDir::Name)) {
-        Plugin loaded; const auto pkg=package::inspect(file.absoluteFilePath());
-        QString error=pkg.error; if(error.isEmpty()) error=package::validate(pkg.info,"server",api::ApiVersion,ZTSERVER_PLUGIN_IID);
+        Plugin loaded; const auto pkg=vusiif::zto::package::inspect(file.absoluteFilePath());
+        QString error=pkg.error; if(error.isEmpty()) error=vusiif::zto::package::validate(pkg.info,"server",api::ApiVersion,ZTOHUB_PLUGIN_IID);
         if(error.isEmpty()&&plugin(pkg.info["id"].toString())) error="Duplicate plugin ID";
         if(error.isEmpty()) for(const auto &registered:m_plugins) if(registered.info.name.compare(pkg.info["name"].toString(),Qt::CaseInsensitive)==0) error="Duplicate plugin data directory/name";
-        QString library; if(error.isEmpty()) error=package::extract(pkg,loaded.cache,library,loaded.cacheLock);
+        QString library; if(error.isEmpty()) error=vusiif::zto::package::extract(pkg,loaded.cache,library,loaded.cacheLock);
         if(!error.isEmpty()) { qWarning()<<"Rejected package"<<file.fileName()<<error; continue; }
         loaded.library = std::make_unique<QPluginLoader>();
         loaded.library->setLoadHints(QLibrary::ResolveAllSymbolsHint);
         loaded.library->setFileName(library);
         const auto metadata = loaded.library->metaData();
-        if (metadata.value("IID").toString() != QLatin1String(ZTSERVER_PLUGIN_IID) ||
+        if (metadata.value("IID").toString() != QLatin1String(ZTOHUB_PLUGIN_IID) ||
             metadata.value("MetaData").toObject().value("apiVersion").toString() != QLatin1String(api::ApiVersion)) {
             qWarning() << "Rejected plugin metadata" << file.fileName(); continue;
         }
-        error=package::activateRuntime(pkg,loaded.cache->path());
+        error=vusiif::zto::package::activateRuntime(pkg,loaded.cache->path());
         if(!error.isEmpty()) { qWarning()<<"Rejected runtime"<<file.fileName()<<error; continue; }
         try {
             loaded.entry = qobject_cast<api::PluginInterface *>(loaded.library->instance());
@@ -230,12 +230,12 @@ void ServerHost::stop() {
         // Consume the future so plugin-owned task captures die before unloading.
         if (entry.task.valid()) entry.task.get();
         try { entry.entry->onStop(); } catch (...) { qWarning() << "Plugin stop failed" << entry.info.id; }
-        if((!entry.library->unload()&&entry.library->isLoaded()) || package::businessLibraryMapped(entry.library->fileName())) {
+        if((!entry.library->unload()&&entry.library->isLoaded()) || vusiif::zto::package::businessLibraryMapped(entry.library->fileName())) {
             qWarning()<<"Plugin library failed to unload"<<entry.info.id<<entry.library->errorString();
             entry.cache->setAutoRemove(false); entry.library.release(); entry.cacheLock.release();
         }
         entry.library.reset(); entry.cacheLock.reset();
-        if(!entry.cache || entry.cache->autoRemove()) package::discardCache(entry.cache);
+        if(!entry.cache || entry.cache->autoRemove()) vusiif::zto::package::discardCache(entry.cache);
         entry.services.reset();
     }
     m_plugins.clear();

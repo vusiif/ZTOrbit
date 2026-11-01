@@ -8,7 +8,7 @@
 #include <atomic>
 #include <algorithm>
 #include <map>
-namespace vusiif::ztgui::media::engine {
+namespace vusiif::zto::media::engine {
 class SessionActor;
 class ClipPlayer;
 class SessionEngine final : public QObject {
@@ -77,4 +77,4 @@ class SessionEngine final : public QObject {
         QMetaObject::invokeMethod(&devices, [this, track] { devices.detach(track); });
     }
 };
-} // namespace vusiif::ztgui::media::engine
+} // namespace vusiif::zto::media::engine

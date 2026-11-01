@@ -5,7 +5,7 @@
 #include <QLockFile>
 #include <QString>
 
-namespace vusiif::ztgui::plugins {
+namespace vusiif::zto::plugins {
 
 // Install-directory-level mutation lock shared by package import and delete.
 // It is independent of the active data root, so two profiles importing or
@@ -49,4 +49,4 @@ private:
     bool m_held = false;
 };
 
-} // namespace vusiif::ztgui::plugins
+} // namespace vusiif::zto::plugins

@@ -16,9 +16,13 @@
 #include <QTimer>
 #include <QQueue>
 #include <QMap>
+#include <QList>
 #include <map>
 #include <memory>
-namespace vusiif::ztgui::media::engine {
+#ifdef Q_OS_WIN
+#include "WindowsWindowCapture.h"
+#endif
+namespace vusiif::zto::media::engine {
 class DeviceManager final : public QObject {
   public:
     struct Consumer {
@@ -57,9 +61,23 @@ class DeviceManager final : public QObject {
         std::unique_ptr<QCamera> camera;
         std::unique_ptr<QScreenCapture> screen;
         std::unique_ptr<QWindowCapture> window;
+#ifdef Q_OS_WIN
+        std::unique_ptr<WindowsWindowCapture> nativeWindow;
+        WindowsWindowCapture::Window nativeWindowInfo;
+#endif
         std::unique_ptr<QMediaCaptureSession> session;
         std::unique_ptr<QVideoSink> sink;
         std::unique_ptr<QObject> callbacks = std::make_unique<QObject>();
+        // Set once when a device-level failure was reported to the consumers;
+        // no further frames are delivered for this source.
+        bool failed = false;
+        quint64 rawFrames = 0, cpuFrames = 0, deliveredFrames = 0;
+        quint64 cachedDeliveries = 0;
+        QVideoFrame lastVideoFrame;
+        // Consecutive one-second window-capture probes in which the captured
+        // window was not listed as capturable. A single miss (minimized, being
+        // moved, occluded) only increments this counter.
+        int missingSeconds = 0;
         ~Source() { callbacks.reset(); }
     };
     struct Output {
@@ -74,16 +92,32 @@ class DeviceManager final : public QObject {
     };
     QMediaDevices devices;
     QTimer timer;
+    // Validity probe for active window captures; runs only while such a source
+    // is attached. One missed enumeration is not evidence that the window was
+    // closed, so the failure threshold is a sustained absence.
+    QTimer windowTimer;
+    static constexpr int WindowMissingSeconds = 10;
+#ifdef Q_OS_WIN
+    using CapturableWindow = WindowsWindowCapture::Window;
+#else
+    using CapturableWindow = QCapturableWindow;
+#endif
+    QList<CapturableWindow> lastWindows;
     std::map<QString, std::unique_ptr<Source>> inputs;
     std::map<QString, std::unique_ptr<Output>> outputs;
-    QMap<QString, QCapturableWindow> windows;
+    QMap<QString, CapturableWindow> windows;
+    quint64 rawVideoFrames = 0, cpuVideoFrames = 0;
     void mix();
+    void monitorWindows();
+    void screenGone(const QString &name);
+    void deliverVideo(Source &source, const QVideoFrame &frame);
+    static void failSource(Source &source, const QString &message);
     static QAudioDevice audioDevice(bool input, const QString &id);
     // Test-only injection used by media integration tests through a file whose
-    // path is supplied in ZTGUI_MEDIA_TEST_CLIP_FAILURE. Production processes
+    // path is supplied in ZTO_MEDIA_TEST_CLIP_FAILURE. Production processes
     // never set that variable, so this stays inert.
     bool injectedPlaybackFailure();
     QString m_testFailureNonce;
     int m_testAcceptedPlays = 0;
 };
-} // namespace vusiif::ztgui::media::engine
+} // namespace vusiif::zto::media::engine
