@@ -396,8 +396,11 @@ void vusiif::zto::zerotier::command(QObject *owner, const QStringList &arguments
         if (error == QProcess::FailedToStart) complete(false, QStringLiteral("无法启动 ZeroTier 命令。"));
     });
     QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
-                     process, [process, complete](int code, QProcess::ExitStatus status) {
-        const QString text = QString::fromLocal8Bit(process->readAllStandardOutput())
+                     process, [process, complete, arguments](int code, QProcess::ExitStatus status) {
+        const auto output = process->readAllStandardOutput();
+        // ZeroTier JSON is UTF-8, independently of the Windows console code
+        // page. Decode command diagnostics in the platform's usual encoding.
+        const QString text = (arguments.contains("-j") ? QString::fromUtf8(output) : QString::fromLocal8Bit(output))
                            + QString::fromLocal8Bit(process->readAllStandardError());
         complete(code == 0 && status == QProcess::NormalExit, text.trimmed());
     });

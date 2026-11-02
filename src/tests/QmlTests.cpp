@@ -261,8 +261,8 @@ private slots:
         QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("invalid package"); file.close();
         openWindow(packages.path()); QTRY_COMPARE(m_controller->plugins().size(),1);
         QTRY_VERIFY(!m_controller->plugins().first().toMap()["loading"].toBool());
-        QTRY_VERIFY(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool());
-        QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
+        QTRY_VERIFY(object("notificationBanner") && object("notificationBanner")->property("visible").toBool());
+        click("dismissNotificationButton"); QTRY_VERIFY(!object("notificationBanner")->property("visible").toBool());
         click("settingsButton"); QTest::qWait(220); click("openPluginsButton"); QTest::qWait(220);
         click("pluginRow-"); QVERIFY(object("pluginRow-")->property("highlighted").toBool()); QVERIFY(!object("pluginAboutDialog"));
         const auto removeFromMenu=[this] {
@@ -281,11 +281,11 @@ private slots:
 #ifdef ZTO_UI_VOICE_PACKAGE
         QTemporaryDir packages; QVERIFY(QFile::copy(ZTO_UI_VOICE_PACKAGE,packages.filePath("voice.z2plugin")));
         openWindow(packages.path());
-        QTRY_VERIFY_WITH_TIMEOUT(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool(),10000);
-        QVERIFY(object("pluginNoticeDialog")->property("message").toString().contains("media"));
+        QTRY_VERIFY_WITH_TIMEOUT(object("notificationBanner") && object("notificationBanner")->property("visible").toBool(),10000);
+        QVERIFY(object("notificationBanner")->property("message").toString().contains("media"));
         QVERIFY(m_controller->pluginRegistry()->plugins().isEmpty());
         for(const auto &v:m_controller->plugins()) { QVERIFY(!v.toMap()["loaded"].toBool()); QVERIFY(!v.toMap()["loading"].toBool()); }
-        QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
+        click("dismissNotificationButton"); QTRY_VERIFY(!object("notificationBanner")->property("visible").toBool());
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
 #else
         QSKIP("Voice package required");
@@ -316,19 +316,19 @@ private slots:
         QVERIFY(object("pluginServicesLabel")->property("text").toString().contains("media.session"));
         QVERIFY(m_window->grabWindow().save(dark?".tmp/screenshots/plugin-services-dark.png":".tmp/screenshots/plugin-services-light.png"));
         QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginAboutDialog")->property("visible").toBool());
-        m_controller->loadPlugin("MEDIA"); QTRY_VERIFY(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool());
-        QVERIFY(object("pluginNoticeDialog")->property("message").toString().contains(QStringLiteral("同 ID")));
+        m_controller->loadPlugin("MEDIA"); QTRY_VERIFY(object("notificationBanner") && object("notificationBanner")->property("visible").toBool());
+        QVERIFY(object("notificationBanner")->property("message").toString().contains(QStringLiteral("同 ID")));
         QCOMPARE(m_controller->pluginRegistry()->plugins().size(),2);
-        QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
+        click("dismissNotificationButton"); QTRY_VERIFY(!object("notificationBanner")->property("visible").toBool());
         const auto unloadFromMenu=[this] {
             auto *row=qobject_cast<QQuickItem *>(object("pluginRow-media")); QVERIFY(row);
             QTest::mouseClick(m_window,Qt::RightButton,{},row->mapToScene(QPointF(row->width()/2,row->height()/2)).toPoint());
             QTest::qWait(160); click("pluginUnload-media");
         };
-        unloadFromMenu(); QTRY_VERIFY(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool());
-        QVERIFY(object("pluginNoticeDialog")->property("message").toString().contains("voice-chat"));
+        unloadFromMenu(); QTRY_VERIFY(object("notificationBanner") && object("notificationBanner")->property("visible").toBool());
+        QVERIFY(object("notificationBanner")->property("message").toString().contains("voice-chat"));
         QTest::qWait(180); QVERIFY(m_window->grabWindow().save(dark?".tmp/screenshots/plugin-dependency-dark.png":".tmp/screenshots/plugin-dependency-light.png"));
-        QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
+        click("dismissNotificationButton"); QTRY_VERIFY(!object("notificationBanner")->property("visible").toBool());
         QCOMPARE(m_controller->pluginRegistry()->plugins().size(),2);
         m_controller->unloadPlugin("voice-chat"); QTRY_VERIFY_WITH_TIMEOUT(m_controller->pluginRegistry()->plugins().isEmpty(),10000);
         QVERIFY(ticks>5); QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
@@ -382,6 +382,7 @@ private slots:
 #endif
     }
     void cleanup() {
+        qunsetenv("ZT_TEST_INFO_DELAY");
         m_engine.reset(); m_window = nullptr; m_controller.reset();
         QFile::remove(m_storage.settingsFile()); qunsetenv("ZT_TEST_MODE"); qunsetenv("ZT_TEST_COMMAND_LOG");
         qunsetenv("ZT_TEST_QUERY_LOG");
@@ -402,7 +403,9 @@ private slots:
     }
     void qmlWindowLoadsBothThemesAndScales() {
         openWindow();
-        QTRY_COMPARE(m_controller->networks()->count(),2); QTRY_COMPARE(m_controller->peers()->count(),4);
+        QTRY_COMPARE(m_controller->networks()->count(),2);
+        QVERIFY(!m_controller->peersExpanded());
+        click("togglePeersButton"); QTRY_COMPARE(m_controller->peers()->count(),4);
         QTRY_COMPARE(m_controller->info()["address"].toString(),QString("0123456789"));
         QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-light.png"));
         m_controller->setTheme("dark"); QTest::qWait(300);
@@ -466,9 +469,9 @@ private slots:
         QVERIFY(toggle->property("checked").toBool()); QVERIFY(toggle->property("enabled").toBool());
         QVERIFY(!object("gpuAccelerationHint"));
         click("disableGpuAccelerationSwitch"); QTRY_VERIFY(!m_controller->disableGpuAcceleration());
-        QTRY_VERIFY(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool());
-        QVERIFY(object("pluginNoticeDialog")->property("message").toString().contains(QStringLiteral("重新启动")));
-        QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
+        QTRY_VERIFY(object("notificationBanner") && object("notificationBanner")->property("visible").toBool());
+        QVERIFY(object("notificationBanner")->property("message").toString().contains(QStringLiteral("重新启动")));
+        click("dismissNotificationButton"); QTRY_VERIFY(!object("notificationBanner")->property("visible").toBool());
         QCOMPARE(QQuickWindow::sceneGraphBackend(), backend);
         m_engine.reset(); m_window = nullptr; m_controller.reset();
         openWindow();
@@ -480,7 +483,7 @@ private slots:
         QVERIFY(popup->property("y").toReal() + popup->property("height").toReal() <= m_window->height());
         QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-gpu-settings-dark-small.png"));
         click("disableGpuAccelerationSwitch"); QTRY_VERIFY(m_controller->disableGpuAcceleration());
-        QVERIFY(!object("pluginNoticeDialog") || !object("pluginNoticeDialog")->property("visible").toBool());
+        QVERIFY(!object("notificationBanner") || !object("notificationBanner")->property("visible").toBool());
         m_controller->setTheme("light"); QTest::qWait(300);
         QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-gpu-settings-light-small.png"));
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
@@ -497,6 +500,169 @@ private slots:
         QVERIFY(m_controller->disableGpuAcceleration());
         QVERIFY(!hasSetting("rendering/disableGpuAcceleration"));
         QVERIFY(!object("gpuAccelerationHint"));
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
+    }
+    void notificationsFloatWithoutResizingAndRepeatAfterDismiss() {
+        prepareLocalConfigDirectory(); writeMoonFile();
+        writeLocalConfig("{\"settings\":{\"tcpFallbackRelay\":\"192.0.2.10/9443\"}}");
+        qputenv("ZT_TEST_MODE", "members"); openWindow();
+        m_controller->refreshTcpFallbackServers(); QTRY_VERIFY(!m_controller->tcpFallbackServersBusy());
+        QVERIFY(!m_window->property("footer").value<QObject *>());
+        auto *page=qobject_cast<QQuickItem *>(object("zeroTierScroll")); QVERIFY(page);
+        const auto pageHeight=page->height();
+        auto *banner=qobject_cast<QQuickItem *>(object("notificationBanner")); QVERIFY(banner);
+        m_controller->selectTcpFallbackServer("0123456789abcdef");
+        QTRY_VERIFY(banner->property("shown").toBool());
+        QTRY_VERIFY(banner->property("opacity").toReal()>0.99);
+        QVERIFY(!banner->property("error").toBool());
+        QCOMPARE(banner->property("message").toString(),QStringLiteral("当前已使用该 TCP 回退中转服务器。"));
+        QCOMPARE(page->height(),pageHeight);
+        const auto position=banner->mapToScene(QPointF(0,0));
+        QCOMPARE(position.y(),18.0);
+        QVERIFY(qAbs(position.x()+banner->width()/2-m_window->width()/2)<1);
+        click("dismissNotificationButton"); QTRY_VERIFY(!banner->isVisible());
+        m_controller->refresh(); QTest::qWait(250); QVERIFY(!banner->isVisible());
+        m_controller->selectTcpFallbackServer("0123456789abcdef");
+        QTRY_VERIFY(banner->isVisible()); // Same text is a new event.
+        m_controller->joinNetwork("invalid");
+        QTRY_VERIFY(banner->property("error").toBool());
+        QVERIFY(banner->property("message").toString().contains(QStringLiteral("16 位")));
+        QCOMPARE(page->height(),pageHeight);
+        click("dismissNotificationButton"); QTRY_VERIFY(!banner->isVisible());
+        // The closing overlay no longer intercepts the controls beneath it.
+        click("beginnerGuideButton"); QTRY_VERIFY(object("guideOverlay")->property("visible").toBool());
+        QTest::keyClick(m_window,Qt::Key_Escape);
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
+    }
+    void notificationColorsAndLongText_data() {
+        QTest::addColumn<QString>("theme"); QTest::addColumn<bool>("error");
+        QTest::newRow("light-info") << QString("light") << false;
+        QTest::newRow("light-error") << QString("light") << true;
+        QTest::newRow("dark-info") << QString("dark") << false;
+        QTest::newRow("dark-error") << QString("dark") << true;
+    }
+    void notificationColorsAndLongText() {
+        QFETCH(QString,theme); QFETCH(bool,error);
+        openWindow(); m_controller->setTheme(theme); m_window->resize(720,480);
+        const auto text=QStringLiteral("很长的处理结果与路径 <test> C:/Z2/data/：请查看并继续操作。\n").repeated(30);
+        m_controller->notificationRequested(text,error);
+        auto *banner=qobject_cast<QQuickItem *>(object("notificationBanner")); QVERIFY(banner);
+        QTRY_VERIFY(banner->property("opacity").toReal()>0.99); QTest::qWait(250);
+        QVERIFY(banner->height()<=260);
+        const auto position=banner->mapToScene(QPointF(0,0));
+        QVERIFY(position.x()>=0 && position.y()>=0);
+        QVERIFY(position.x()+banner->width()<=m_window->width());
+        QVERIFY(position.y()+banner->height()<=m_window->height());
+        const auto background=object("notificationBackground")->property("color").value<QColor>();
+        const QColor expected(theme=="dark" ? (error?"#57363b":"#284b3b") : (error?"#fbe3e5":"#e0f3e7"));
+        QCOMPARE(background,expected);
+        QCOMPARE(object("notificationMessage")->property("text").toString(),text);
+        QVERIFY(m_window->grabWindow().save(QString(".tmp/screenshots/notification-%1-%2.png").arg(theme,error?"error":"info")));
+        click("dismissNotificationButton"); QTRY_VERIFY(!banner->isVisible());
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
+    }
+    void busyAndFailureNotificationsDoNotReserveWindowSpace() {
+        DeferredOperations operations; openWindow({},&operations);
+        QTRY_VERIFY(m_controller->service()["known"].toBool());
+        const auto pageHeight=object("zeroTierScroll")->property("height").toReal();
+        m_controller->serviceAction("restart");
+        auto *banner=object("notificationBanner"); QVERIFY(banner);
+        QVERIFY(banner->property("working").toBool()); QVERIFY(banner->property("shown").toBool());
+        QCOMPARE(object("zeroTierScroll")->property("height").toReal(),pageHeight);
+        operations.complete(false);
+        QVERIFY(!banner->property("working").toBool()); QVERIFY(banner->property("error").toBool());
+        QTRY_VERIFY(banner->property("opacity").toReal()>0.99);
+        QCOMPARE(object("zeroTierScroll")->property("height").toReal(),pageHeight);
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
+    }
+    void nodeCopyFeedbackRestartsAndRejectsPlaceholder() {
+        qputenv("ZT_TEST_MODE", "invalid-id");
+        openWindow(); QTRY_COMPARE(m_controller->info()["address"].toString(), QStringLiteral("—"));
+        QGuiApplication::clipboard()->setText("keep");
+        click("nodeId"); QTest::qWait(180);
+        QCOMPARE(QGuiApplication::clipboard()->text(), QString("keep"));
+        QVERIFY(!object("notificationBanner")->property("visible").toBool());
+        qputenv("ZT_TEST_MODE", "compact-lists"); m_controller->refresh();
+        QTRY_COMPARE(m_controller->info()["address"].toString(), QString("0123456789"));
+        auto *id = qobject_cast<QQuickItem *>(object("nodeId")); QVERIFY(id);
+        QTest::mouseMove(m_window, id->mapToScene(QPointF(10, 10)).toPoint());
+        QTRY_VERIFY(id->property("font").value<QFont>().underline());
+        click("nodeId"); QTRY_VERIFY(object("notificationBanner")->property("visible").toBool());
+        QCOMPARE(QGuiApplication::clipboard()->text(), QString("0123456789"));
+        auto *toast = object("notificationBanner");
+        QTest::qWait(900); click("nodeId"); QTest::qWait(700);
+        QCOMPARE(object("notificationBanner"), toast); QVERIFY(toast->property("opacity").toReal() > 0.95);
+        QTRY_VERIFY(!toast->property("visible").toBool());
+        QTest::mouseClick(m_window, Qt::RightButton, {}, id->mapToScene(QPointF(10,10)).toPoint());
+        QTest::qWait(180); QTest::keyClick(m_window, Qt::Key_Escape);
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void destructiveServiceOperationInvalidatesOldQueries_data() {
+        QTest::addColumn<QString>("action"); QTest::addColumn<bool>("success");
+        QTest::newRow("stop") << QString("stop") << true;
+        QTest::newRow("restart") << QString("restart") << true;
+        QTest::newRow("authorization-cancelled") << QString("restart") << false;
+    }
+    void destructiveServiceOperationInvalidatesOldQueries() {
+        QFETCH(QString, action); QFETCH(bool, success);
+        DeferredOperations operations;
+        openWindow({}, &operations);
+        QTRY_VERIFY(m_controller->service()["available"].toBool());
+        QTRY_VERIFY(m_controller->service()["known"].toBool());
+        const auto path = m_directory.filePath("interruption-queries.log"); QFile::remove(path);
+        qputenv("ZT_TEST_QUERY_LOG", path.toUtf8()); qputenv("ZT_TEST_INFO_DELAY", "1800");
+        const auto queried = [&] { QFile f(path); return f.open(QIODevice::ReadOnly) && f.readAll().contains("info"); };
+        m_controller->refresh(); QTRY_VERIFY(queried());
+        m_controller->serviceAction("invalid"); QVERIFY(m_controller->service()["available"].toBool());
+        m_controller->serviceAction(action);
+        QVERIFY(m_controller->busy()); QVERIFY(!m_controller->service()["available"].toBool());
+        QVERIFY(bool(operations.completion));
+        QTest::qWait(2000); QVERIFY(!m_controller->service()["available"].toBool());
+        QCOMPARE(object("serviceStatusDot")->property("color").value<QColor>(), QColor("#d95059"));
+        qputenv("ZT_TEST_MODE", "error"); operations.complete(success);
+        QVERIFY(!m_controller->busy()); QTest::qWait(1000);
+        QVERIFY(!m_controller->service()["available"].toBool());
+        qunsetenv("ZT_TEST_INFO_DELAY"); qputenv("ZT_TEST_MODE", "compact-lists"); m_controller->refresh();
+        QTRY_VERIFY(m_controller->service()["available"].toBool());
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void uninstallCancellationAndPreflightPreserveAvailability() {
+        DeferredOperations operations; openWindow({}, &operations);
+        QTRY_VERIFY(m_controller->service()["available"].toBool());
+        QSignalSpy confirmation(m_controller.get(), &AppController::confirmationRequested);
+        const auto path = qgetenv("PATH"); qputenv("PATH", "");
+        m_controller->packageAction(true); qputenv("PATH", path);
+#ifndef Q_OS_MACOS
+        QCOMPARE(confirmation.size(), 0); QVERIFY(!operations.completion);
+        QVERIFY(m_controller->service()["available"].toBool());
+#endif
+        m_controller->packageAction(true);
+        if (confirmation.isEmpty()) QSKIP("winget unavailable; preflight verified");
+        QVERIFY(m_controller->service()["available"].toBool());
+        m_controller->confirm(false); QVERIFY(!operations.completion);
+        QVERIFY(m_controller->service()["available"].toBool());
+        m_controller->packageAction(true); m_controller->confirm(true);
+        QVERIFY(bool(operations.completion)); QVERIFY(!m_controller->service()["available"].toBool());
+        operations.complete(false); QTRY_VERIFY(m_controller->service()["available"].toBool());
+    }
+    void globalMembersDefaultCollapsedAndRefreshKeepsEditor() {
+        const auto path=m_directory.filePath("peer-queries.log"); QFile::remove(path);
+        qputenv("ZT_TEST_QUERY_LOG", path.toUtf8()); openWindow();
+        QTRY_COMPARE(m_controller->networks()->count(),2);
+        QVERIFY(!m_controller->peersExpanded()); QCOMPARE(m_controller->peers()->count(),0);
+        for (int i=0; i<m_controller->networks()->count(); ++i) QVERIFY(!m_controller->networks()->get(i)["expanded"].toBool());
+        auto queries=[&] { QFile f(path); return f.open(QIODevice::ReadOnly)? f.readAll():QByteArray(); };
+        QTest::qWait(1200); QVERIFY(!queries().contains("listpeers"));
+        click("togglePeersButton"); QTRY_COMPARE(m_controller->peers()->count(),4);
+        auto *peers=object("peers"); QVERIFY(peers);
+        QVERIFY(QMetaObject::invokeMethod(peers,"edit",Q_ARG(QVariant,"0000000001"),Q_ARG(QVariant,"editing")));
+        QTRY_VERIFY(object("remarkEditor")); QPointer<QObject> editor=object("remarkEditor");
+        m_controller->refresh(); QTest::qWait(1200);
+        QVERIFY(m_controller->peersExpanded()); QCOMPARE(object("remarkEditor"),editor.data());
+        QCOMPARE(editor->property("text").toString(),QString("editing"));
+        QTest::keyClick(m_window,Qt::Key_Escape);
+        m_controller->setPeersExpanded(false); QTest::qWait(200);
+        const auto collapsed=queries(); QTest::qWait(1200); QCOMPARE(queries().count("listpeers"),collapsed.count("listpeers"));
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
     void infoPollingDebouncesFailuresAndRecovers() {
@@ -578,13 +744,13 @@ private slots:
         QVERIFY(m_controller->storageUsage().contains("previewText"));
         QVERIFY(m_controller->storageUsage().contains("orphansText"));
         click("settingsButton");
-        QTRY_VERIFY(object("storageSection"));
+        scrollSettingsTo("storageDetailsButton"); click("storageDetailsButton");
+        QTRY_VERIFY(object("storageDetailsPopup")->property("visible").toBool());
         QVERIFY(object("storagePathLabel")->property("text").toString().contains(m_storage.activeRoot()));
         QVERIFY(object("cleanupLogsButton"));
         QVERIFY(object("cleanupCacheButton"));
         QVERIFY(object("cleanupOrphansButton"));
-        QVERIFY(object("storagePreviewLabel"));
-        QVERIFY(object("storageOrphansLabel"));
+        QTest::keyClick(m_window, Qt::Key_Escape); QTest::qWait(150);
         const auto orphans = m_controller->storageOrphans();
         QVERIFY(std::any_of(orphans.cbegin(), orphans.cend(), [](const QVariant &value) {
             return value.toMap().value("id").toString() == "orphan-plugin"
@@ -1000,54 +1166,31 @@ private slots:
         QCOMPARE(readLocalConfig(), original);
         click("settingsButton");
         QTRY_VERIFY(object("settingsPage") && object("settingsPage")->property("visible").toBool());
-        auto *allow = object("allowTcpFallbackSwitch"); auto *force = object("forceTcpFallbackSwitch");
-        QVERIFY(allow); QVERIFY(force);
-        QVERIFY(allow->property("checked").toBool());
+        QVERIFY(!object("allowTcpFallbackSwitch"));
+        click("switchTcpFallbackServerButton");
+        QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("opened").toBool());
+        auto *force = object("forceTcpFallbackSwitch"); QVERIFY(force);
         QVERIFY(force->property("checked").toBool());
-        QVERIFY(allow->property("enabled").toBool());
-        QVERIFY(force->property("enabled").toBool());
-        QVERIFY(object("localConfigRelayLabel")->property("text").toString().contains("192.0.2.10:9443"));
-
-        click("allowTcpFallbackSwitch");
-        QTRY_VERIFY(!m_controller->localConfig().value("allowTcpFallbackRelay").toBool());
+        click("forceTcpFallbackSwitch");
+        QTRY_VERIFY(!m_controller->localConfig().value("forceTcpRelay").toBool());
         auto state = vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true);
-        QVERIFY(state.valid());
-        QVERIFY(!state.allowTcpFallbackRelay);
-        QVERIFY(!state.forceTcpRelay);
-        QCOMPARE(state.root.value("settings").toObject().value("primaryPort").toInt(), 19999);
-        QCOMPARE(state.root.value("settings").toObject().value("extraSetting").toString(), QString("keep"));
-        QCOMPARE(state.root.value("unknown").toObject().value("nested").toInt(), 42);
-        QVERIFY(!force->property("checked").toBool());
-        QVERIFY(!force->property("enabled").toBool());
+        QVERIFY(state.allowTcpFallbackRelay); QVERIFY(!state.forceTcpRelay);
+        QCOMPARE(state.root["settings"].toObject()["primaryPort"].toInt(), 19999);
+        QCOMPARE(state.root["settings"].toObject()["extraSetting"].toString(), QString("keep"));
+        QCOMPARE(state.root["unknown"].toObject()["nested"].toInt(), 42);
+        click("forceTcpFallbackSwitch");
+        QTRY_VERIFY(m_controller->localConfig().value("forceTcpRelay").toBool());
         QCOMPARE(operations.operations, 0);
-
-        // A disabled force switch cannot create allow=false/force=true.
+        const QByteArray edited("{\"settings\":{\"allowTcpFallbackRelay\":false,\"forceTcpRelay\":false},\"manual\":{\"keep\":true}}");
+        writeLocalConfig(edited); m_controller->refreshLocalConfig();
+        QTRY_VERIFY(!force->property("checked").toBool());
+        QVERIFY(force->property("enabled").toBool());
+        QCOMPARE(readLocalConfig(), edited);
         click("forceTcpFallbackSwitch");
-        QTest::qWait(80);
-        QVERIFY(!vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true).forceTcpRelay);
-
-        click("allowTcpFallbackSwitch");
-        QTRY_VERIFY(vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true).allowTcpFallbackRelay);
-        QVERIFY(!vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true).forceTcpRelay);
-        click("forceTcpFallbackSwitch");
-        QTRY_VERIFY(vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true).forceTcpRelay);
+        QTRY_VERIFY(m_controller->localConfig().value("forceTcpRelay").toBool());
         state = vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true);
-        QVERIFY(state.valid());
-        QVERIFY(state.allowTcpFallbackRelay);
-        QVERIFY(state.forceTcpRelay);
-        QCOMPARE(operations.operations, 0); // No service restart or elevation for ordinary saves.
-        // A manual edit is visible after an explicit re-read, and re-reading
-        // never rewrites the file or triggers another save.
-        const QByteArray edited("{\"settings\":{\"allowTcpFallbackRelay\":false,\"forceTcpRelay\":false},"
-                                "\"manual\":{\"keep\":true}}");
-        writeLocalConfig(edited);
-        m_controller->refreshLocalConfig();
-        QTRY_VERIFY(!allow->property("checked").toBool());
-        QVERIFY(!force->property("checked").toBool());
-        QCOMPARE(readLocalConfig(), edited);
-        m_controller->refreshLocalConfig();
-        QTest::qWait(50);
-        QCOMPARE(readLocalConfig(), edited);
+        QVERIFY(state.allowTcpFallbackRelay); QVERIFY(state.forceTcpRelay);
+        QVERIFY(state.root["manual"].toObject()["keep"].toBool());
         QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
     }
     void localConfigInvalidFileIsReportedWithoutRewrite() {
@@ -1059,9 +1202,9 @@ private slots:
         QVERIFY(!m_controller->localConfig().value("valid").toBool());
         click("settingsButton");
         QTRY_VERIFY(object("settingsPage")->property("visible").toBool());
-        auto *allow = object("allowTcpFallbackSwitch");
-        QVERIFY(allow);
-        QVERIFY(!allow->property("enabled").toBool());
+        click("switchTcpFallbackServerButton");
+        QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("opened").toBool());
+        QVERIFY(!object("forceTcpFallbackSwitch")->property("enabled").toBool());
         QVERIFY(object("localConfigErrorLabel")->property("text").toString().contains(QStringLiteral("settings")));
         QCOMPARE(readLocalConfig(), invalid);
         QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
@@ -1110,8 +1253,10 @@ private slots:
         QCOMPARE(candidate.value("networkId").toString(), QString("0123456789abcdef"));
         QCOMPARE(candidate.value("relay").toString(), QString("192.0.2.10:9443"));
         QVERIFY(candidate.value("enabled").toBool());
-        QVERIFY(object("tcpFallbackServer-0123456789abcdef"));
+        click("tcpFallbackServerSelector");
+        QTRY_VERIFY(object("tcpFallbackServer-0123456789abcdef"));
         QVERIFY(m_window->grabWindow().save(".tmp/screenshots/tcp-fallback-popup.png"));
+        QTest::qWait(160);
         click("tcpFallbackServer-0123456789abcdef");
         QTest::qWait(250);
         QTRY_VERIFY(object("confirmationDialog") && object("confirmationDialog")->property("visible").toBool());
@@ -1121,19 +1266,21 @@ private slots:
         QTest::qWait(80);
         QCOMPARE(readLocalConfig(), original);
         QCOMPARE(operations.operations, 0);
-        QVERIFY(!object("pluginNoticeDialog") || !object("pluginNoticeDialog")->property("visible").toBool());
+        QVERIFY(!object("notificationBanner") || !object("notificationBanner")->property("visible").toBool());
 
         click("switchTcpFallbackServerButton");
         QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("visible").toBool());
         QTRY_COMPARE(m_controller->tcpFallbackServers().size(), 1);
+        click("tcpFallbackServerSelector");
+        QTest::qWait(160);
         click("tcpFallbackServer-0123456789abcdef");
         QTest::qWait(250);
         QTRY_VERIFY(object("confirmationDialog")->property("visible").toBool());
         click("confirmActionButton");
         QTRY_COMPARE(vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true).tcpFallbackRelay,
                      QString("192.0.2.10/9443"));
-        QTRY_VERIFY(object("pluginNoticeDialog") && object("pluginNoticeDialog")->property("visible").toBool());
-        QCOMPARE(object("pluginNoticeDialog")->property("message").toString(),
+        QTRY_VERIFY(object("notificationBanner") && object("notificationBanner")->property("visible").toBool());
+        QCOMPARE(object("notificationBanner")->property("message").toString(),
                  QStringLiteral("TCP回退中转服务器已更新，请手动重启 ZeroTier，以及时刷新配置并切换中继连接。"));
         auto state = vusiif::zto::zerotier::localconfig::parse(readLocalConfig(), true);
         QVERIFY(state.valid());
@@ -1141,21 +1288,79 @@ private slots:
         QVERIFY(!state.forceTcpRelay);
         QCOMPARE(state.root.value("settings").toObject().value("primaryPort").toInt(), 19999);
         QCOMPARE(operations.operations, 0);
-        QTest::keyClick(m_window, Qt::Key_Escape);
-        QTRY_VERIFY(!object("pluginNoticeDialog")->property("visible").toBool());
+        click("dismissNotificationButton");
+        QTRY_VERIFY(!object("notificationBanner")->property("visible").toBool());
 
+        QCOMPARE(m_controller->tcpFallbackNetworkName(), QStringLiteral("管理员网络"));
         const auto selected = readLocalConfig();
         click("switchTcpFallbackServerButton");
         QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("visible").toBool());
         QTRY_COMPARE(m_controller->tcpFallbackServers().size(), 1);
         QVERIFY(m_controller->tcpFallbackServers().first().toMap().value("current").toBool());
+        click("tcpFallbackServerSelector");
+        QTest::qWait(160);
         click("tcpFallbackServer-0123456789abcdef");
         QTest::qWait(120);
         QVERIFY(!object("confirmationDialog") || !object("confirmationDialog")->property("visible").toBool());
-        QVERIFY(!object("pluginNoticeDialog") || !object("pluginNoticeDialog")->property("visible").toBool());
+        QVERIFY(object("notificationBanner")->property("visible").toBool());
+        QVERIFY(!object("notificationBanner")->property("error").toBool());
         QCOMPARE(readLocalConfig(), selected);
         QVERIFY(m_controller->feedback().contains(QStringLiteral("当前已使用")));
         QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void tcpFallbackNameRestoresAndNeverGuessesIdentity() {
+        prepareLocalConfigDirectory(); writeMoonFile();
+        writeLocalConfig("{\"settings\":{\"tcpFallbackRelay\":\"192.0.2.10/9443\"}}");
+        qputenv("ZT_TEST_MODE", "members");
+        {
+            AppController controller(nullptr, {}, nullptr, m_storage);
+            controller.rename("networks", "0123456789abcdef", QStringLiteral("本机中转备注"));
+            controller.refreshTcpFallbackServers();
+            QTRY_VERIFY(!controller.tcpFallbackServersBusy());
+            QCOMPARE(controller.tcpFallbackNetworkName(), QStringLiteral("本机中转备注"));
+        }
+        AppController restored(nullptr, {}, nullptr, m_storage);
+        restored.refreshTcpFallbackServers(); QTRY_VERIFY(!restored.tcpFallbackServersBusy());
+        QCOMPARE(restored.tcpFallbackNetworkName(), QStringLiteral("本机中转备注"));
+        qputenv("ZT_TEST_MODE", "ambiguous-relay");
+        restored.refreshTcpFallbackServers(); QTRY_VERIFY(!restored.tcpFallbackServersBusy());
+        QCOMPARE(restored.tcpFallbackServers().size(), 2);
+        QCOMPARE(restored.tcpFallbackNetworkName(), QStringLiteral("已配置（对应多个网络）"));
+        writeLocalConfig("{\"settings\":{\"tcpFallbackRelay\":\"192.0.2.99/9443\"}}");
+        restored.refreshLocalConfig();
+        QCOMPARE(restored.tcpFallbackNetworkName(), QStringLiteral("已配置（无法关联网络）"));
+        qputenv("ZT_TEST_MODE", "error"); restored.refreshTcpFallbackServers();
+        QTRY_VERIFY(!restored.tcpFallbackServersBusy()); QVERIFY(restored.tcpFallbackServers().isEmpty());
+        QVERIFY(!restored.tcpFallbackServersMessage().isEmpty());
+        QVERIFY(!restored.tcpFallbackNetworkName().contains("192.0.2"));
+        writeLocalConfig(vusiif::zto::zerotier::localconfig::defaultContent()); restored.refreshLocalConfig();
+        qputenv("ZT_TEST_MODE", "empty"); restored.refreshTcpFallbackServers();
+        QTRY_VERIFY(!restored.tcpFallbackServersBusy()); QVERIFY(restored.tcpFallbackServers().isEmpty());
+        QCOMPARE(restored.tcpFallbackNetworkName(), QStringLiteral("未选择"));
+    }
+    void tcpFallbackRelaySaveFailureDoesNotDisplaySelection() {
+        prepareLocalConfigDirectory(); writeMoonFile();
+        const QByteArray original("{\"settings\":{\"tcpFallbackRelay\":\"192.0.2.99/9443\"},\"keep\":true}");
+        writeLocalConfig(original); qputenv("ZT_TEST_MODE", "members");
+        RecordingOperations operations; openWindow({}, &operations);
+        m_controller->refreshTcpFallbackServers(); QTRY_VERIFY(!m_controller->tcpFallbackServersBusy());
+        QSignalSpy notices(m_controller.get(), &AppController::pluginNoticeRequested);
+        QFile::setPermissions(localConfigPath(), QFileDevice::ReadOwner | QFileDevice::ReadUser);
+        m_controller->selectTcpFallbackServer("0123456789abcdef");
+        QTRY_VERIFY(object("confirmationDialog") && object("confirmationDialog")->property("opened").toBool());
+        click("confirmActionButton");
+        QTRY_VERIFY(!object("confirmationDialog")->property("visible").toBool());
+        QTRY_VERIFY(!m_controller->localConfig()["busy"].toBool());
+        QVERIFY(operations.operations > 0); QCOMPARE(notices.size(),0);
+        QCOMPARE(readLocalConfig(), original);
+        QCOMPARE(m_controller->tcpFallbackNetworkName(), QStringLiteral("已配置（无法关联网络）"));
+        QVERIFY(!m_controller->localConfig()["error"].toString().isEmpty());
+        QFile::setPermissions(localConfigPath(), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ReadUser | QFileDevice::WriteUser);
+        click("settingsButton"); QTest::qWait(200); click("switchTcpFallbackServerButton");
+        QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("opened").toBool());
+        QTRY_VERIFY(!m_controller->tcpFallbackServersBusy());
+        QCOMPARE(object("tcpFallbackServerSelector")->property("displayText").toString(), m_controller->tcpFallbackNetworkName());
+        QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
     void tcpFallbackServerWithoutMoonMetadataIsDisabled() {
         prepareLocalConfigDirectory();
@@ -1167,6 +1372,8 @@ private slots:
         click("switchTcpFallbackServerButton");
         QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("visible").toBool());
         QTRY_VERIFY(m_controller->tcpFallbackServers().size() >= 1);
+        click("tcpFallbackServerSelector");
+        QTest::qWait(160);
         bool found = false;
         for (const auto &value : m_controller->tcpFallbackServers()) {
             const auto candidate = value.toMap();
@@ -1204,47 +1411,48 @@ private slots:
     void localConfigSettingsThemeAndMinimumSize() {
         prepareLocalConfigDirectory();
         writeLocalConfig(vusiif::zto::zerotier::localconfig::defaultContent());
-        writeMoonFile();
-        qputenv("ZT_TEST_MODE", "members");
-        openWindow();
-        click("settingsButton");
+        writeMoonFile(); qputenv("ZT_TEST_MODE", "members");
+        openWindow(); click("settingsButton");
         QTRY_VERIFY(object("settingsPage")->property("visible").toBool());
-        QCOMPARE(object("openLocalConfigButton")->property("text").toString(), QStringLiteral("打开本地配置文件"));
-        m_controller->setTheme("dark");
+        QCOMPARE(object("openLocalConfigButton")->property("text").toString(), QStringLiteral("ZeroTier配置文件"));
+        QCOMPARE(object("openSettingsButton")->property("text").toString(), QStringLiteral("打开程序设置文件"));
         m_window->resize(720, 480);
-        QTest::qWait(300);
-        scrollSettingsTo("allowTcpFallbackSwitch");
-        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/local-config-dark-small.png"));
-        click("switchTcpFallbackServerButton");
-        QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("visible").toBool());
-        QTRY_COMPARE(m_controller->tcpFallbackServers().size(), 1);
-        QTest::qWait(150);
-        auto *popup = object("tcpFallbackRelayPopup");
-        QVERIFY(popup);
-        QVERIFY(popup->property("width").toReal() > 100);
-        QVERIFY(popup->property("width").toReal() <= m_window->width());
-        QVERIFY(popup->property("x").toReal() >= -1 && popup->property("y").toReal() >= -1);
-        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/tcp-fallback-popup-dark-small.png"));
-        QTest::keyClick(m_window, Qt::Key_Escape);
-        QTRY_VERIFY(!object("tcpFallbackRelayPopup")->property("visible").toBool());
-        m_controller->setTheme("light");
-        QTest::qWait(300);
-        scrollSettingsTo("allowTcpFallbackSwitch");
-        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/local-config-light-small.png"));
-        click("allowTcpFallbackSwitch");
-        QTRY_VERIFY(!object("allowTcpFallbackSwitch")->property("checked").toBool());
-        QVERIFY(!object("forceTcpFallbackSwitch")->property("enabled").toBool());
-        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/local-config-force-disabled-light-small.png"));
-        click("allowTcpFallbackSwitch");
-        QTRY_VERIFY(object("allowTcpFallbackSwitch")->property("checked").toBool());
-        click("switchTcpFallbackServerButton");
-        QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("visible").toBool());
-        QTest::qWait(150);
-        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/tcp-fallback-popup-light-small.png"));
-        QTest::keyClick(m_window, Qt::Key_Escape);
-        QTRY_VERIFY(!object("tcpFallbackRelayPopup")->property("visible").toBool());
-        scrollSettingsTo("openLocalConfigButton");
-        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/local-config-locate-light-small.png"));
+        for (const auto &theme : {"dark", "light"}) {
+            m_controller->setTheme(theme); QTest::qWait(300);
+            scrollSettingsTo("switchTcpFallbackServerButton");
+            QVERIFY(m_window->grabWindow().save(QString(".tmp/screenshots/settings-%1-small.png").arg(theme)));
+            click("switchTcpFallbackServerButton");
+            QTRY_VERIFY(object("tcpFallbackRelayPopup")->property("opened").toBool());
+            QTRY_COMPARE(m_controller->tcpFallbackServers().size(), 1);
+            const auto longName=QStringLiteral("很长的网络名称与本机备注用于检查选择框省略和布局边界").repeated(5).left(128);
+            m_controller->rename("networks", "0123456789abcdef", longName);
+            writeLocalConfig("{\"settings\":{\"tcpFallbackRelay\":\"192.0.2.10/9443\"}}"); m_controller->refreshLocalConfig();
+            QTRY_COMPARE(object("tcpFallbackServerSelector")->property("displayText").toString(), longName);
+            QTest::qWait(180);
+            auto *popup = object("tcpFallbackRelayPopup");
+            QVERIFY(popup->property("x").toReal() >= 0); QVERIFY(popup->property("y").toReal() >= 0);
+            QVERIFY(popup->property("x").toReal()+popup->property("width").toReal() <= m_window->width());
+            QVERIFY(popup->property("y").toReal()+popup->property("height").toReal() <= m_window->height());
+            QVERIFY(m_window->grabWindow().save(QString(".tmp/screenshots/tcp-popup-%1-small.png").arg(theme)));
+            click("tcpFallbackServerSelector"); QTest::qWait(180);
+            auto *dropdown=object("tcpFallbackServerSelector")->property("popup").value<QObject *>(); QVERIFY(dropdown);
+            QVERIFY(dropdown->property("opened").toBool());
+            auto *content=qobject_cast<QQuickItem *>(dropdown->property("contentItem").value<QObject *>()); QVERIFY(content);
+            const auto origin=content->mapToScene(QPointF(0,0));
+            QVERIFY(origin.x() >= 0 && origin.y() >= 0);
+            QVERIFY(origin.x()+content->width() <= m_window->width());
+            QVERIFY(origin.y()+content->height() <= m_window->height());
+            QVERIFY(m_window->grabWindow().save(QString(".tmp/screenshots/tcp-selector-%1-small.png").arg(theme)));
+            QTest::keyClick(m_window,Qt::Key_Escape); QTRY_VERIFY(!dropdown->property("visible").toBool());
+            QTest::keyClick(m_window, Qt::Key_Escape);
+            QTRY_VERIFY(!popup->property("visible").toBool());
+            // Outside press closes and must not leave a transparent input blocker.
+            click("switchTcpFallbackServerButton"); QTRY_VERIFY(popup->property("opened").toBool());
+            QTest::mouseClick(m_window, Qt::LeftButton, {}, QPoint(40, 320));
+            QTRY_VERIFY(!popup->property("visible").toBool());
+            click("switchTcpFallbackServerButton"); QTRY_VERIFY(popup->property("opened").toBool());
+            QTest::keyClick(m_window, Qt::Key_Escape); QTRY_VERIFY(!popup->property("visible").toBool());
+        }
         QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
     }
     void forcedTcpFallbackDoesNotReportConnectionFault() {

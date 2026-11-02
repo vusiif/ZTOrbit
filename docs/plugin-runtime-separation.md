@@ -2,7 +2,7 @@
 
 > 2026-10-17：Linux 服务端已迁移为 Java 25 + Netty，不再加载 C++ `.z2plugin`，也不需要宿主侧 Qt 运行库；本文中“服务端入口 `/2.0`”和“服务端 Core/Network 契约”仅适用于 `src/server-old/` 的归档实现。Java 插件格式、SDK 与线程约定见[服务端 API](server-api.md)。
 
-当前客户端 `0.5.2`、客户端 API `0.5`，服务端 `0.2.2`、服务端 API `0.2`；客户端入口／生命周期 IID `/3.0`，旧 C++ 服务端入口 `/2.0`。媒体现使用独立 v3 worker 包；语音 v3 只依赖媒体公开 API。通用契约见[插件服务](plugin-services.md)，业务边界见[媒体](../src/plugins/media/client/docs/media.md)和[语音文档](../src/plugins/voice-chat/client/docs/voice-chat.md)。工作进程目前只验证 Windows x64；旧 C++ 服务端归档在 `src/server-old/`。
+当前客户端 `0.5.3`、客户端 API `0.5`，服务端 `0.2.2`、服务端 API `0.2`；客户端入口／生命周期 IID `/3.0`，旧 C++ 服务端入口 `/2.0`。媒体现使用独立 v3 worker 包；语音 v3 只依赖媒体公开 API。通用契约见[插件服务](plugin-services.md)，业务边界见[媒体](../src/plugins/media/client/docs/media.md)和[语音文档](../src/plugins/voice-chat/client/docs/voice-chat.md)。工作进程目前只验证 Windows x64；旧 C++ 服务端归档在 `src/server-old/`。
 
 ## 收集与安装 SDK
 

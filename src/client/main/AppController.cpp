@@ -9,6 +9,7 @@
 #include "storage/StorageMaintenance.h"
 #include <ztprotocol/NetworkAddress.h>
 #include <QClipboard>
+#include <QDesktopServices>
 #include <QDateTime>
 #include <QGuiApplication>
 #include <QFutureWatcher>
@@ -138,7 +139,7 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
         m_info = doc.object().toVariantMap(); emit stateChanged();
     });
     connect(m_infoPoller, &zerotier::JsonPoller::availabilityChanged, this, [this](bool available, const QString &) {
-        m_apiAvailable = available; emit stateChanged();
+        if (!m_serviceInterrupted) { m_apiAvailable = available; emit stateChanged(); }
     });
     connect(m_networkPoller, &zerotier::JsonPoller::availabilityChanged, this, [this](bool available, const QString &message) {
         m_networkStatus = available ? QString() : message; emit stateChanged();
@@ -195,7 +196,7 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
     connect(&m_statusTimer, &QTimer::timeout, this, &AppController::updateService);
     m_memberTimer.setInterval(5000);
     connect(&m_memberTimer, &QTimer::timeout, this, &AppController::refreshMembers);
-    connect(m_operations, &SystemOperations::output, this, [this](const QString &text) { feedback(text.trimmed()); });
+    connect(m_operations, &SystemOperations::output, this, [this](const QString &text) { feedback(text.trimmed(), false); });
     connect(&m_loader, &plugins::PluginLoader::shutdownProgress, this, [this](const QStringList &pending) {
         m_shutdownMessage = QStringLiteral("正在退出，正在停止插件初始化…");
         if (!pending.isEmpty()) m_shutdownMessage += pending.join(QStringLiteral("、"));
@@ -266,10 +267,13 @@ void AppController::updateService()
     if (m_moonsActive) refreshMoonFiles();
 #ifdef Q_OS_WIN
     m_serviceQueryPending = true;
+    const auto generation = m_serviceGeneration;
     auto *watcher = new QFutureWatcher<zerotier::ServiceStatus>(this);
-    connect(watcher, &QFutureWatcher<zerotier::ServiceStatus>::finished, this, [this, watcher] {
+    connect(watcher, &QFutureWatcher<zerotier::ServiceStatus>::finished, this, [this, watcher, generation] {
         m_serviceQueryPending = false;
-        m_serviceStatus = watcher->result(); watcher->deleteLater(); emit stateChanged();
+        const auto status = watcher->result(); watcher->deleteLater();
+        if (generation != m_serviceGeneration) { updateService(); return; }
+        m_serviceStatus = status; emit stateChanged();
     });
     watcher->setFuture(QtConcurrent::run([] { return zerotier::serviceStatus(); }));
 #else
@@ -297,7 +301,7 @@ void AppController::setDisableGpuAcceleration(bool disabled)
     QString syncError;
     if (!m_settings.sync(syncError)) feedback(QStringLiteral("无法保存设置：%1").arg(syncError));
     emit disableGpuAccelerationChanged();
-    if(showHint) emit pluginNoticeRequested(QStringLiteral("需要重启程序"),QStringLiteral("GPU 加速设置已保存，完全退出并重新启动程序后生效。"));
+    if(showHint) emit pluginNoticeRequested(QStringLiteral("需要重启程序"),QStringLiteral("GPU 加速设置已保存，完全退出并重新启动程序后生效。"), false);
 }
 bool AppController::gpuAccelerationForcedOff() const
 {
@@ -513,7 +517,7 @@ void AppController::cleanupStorage(const QString &category)
             names.append(row["directory"].toString());
         }
         if (ids.isEmpty()) {
-            feedback(QStringLiteral("没有可自动清理的无主插件数据；未登记归属的旧目录需要人工确认。"));
+            feedback(QStringLiteral("没有可自动清理的无主插件数据；未登记归属的旧目录需要人工确认。"), false);
             return;
         }
         ask(QStringLiteral("清理无主插件数据"),
@@ -529,7 +533,7 @@ void AppController::cleanupStorage(const QString &category)
                                                  : QStringLiteral("previewCacheBytes")).toDouble();
     if (count <= 0) {
         feedback(QStringLiteral("没有需要自动清理的%1。")
-                     .arg(logs ? QStringLiteral("历史日志") : QStringLiteral("闲置缓存")));
+                     .arg(logs ? QStringLiteral("历史日志") : QStringLiteral("闲置缓存")), false);
         return;
     }
     ask(QStringLiteral("存储清理"),
@@ -575,8 +579,9 @@ void AppController::runStorageCleanup(const QString &category, const QStringList
         if (!report.skipped.isEmpty()) summary += QStringLiteral("；在用跳过 %1 项").arg(report.skipped.size());
         if (!report.failed.isEmpty()) summary += QStringLiteral("；失败 %1 项").arg(report.failed.size());
         if (!report.error.isEmpty()) summary += QStringLiteral("\n%1").arg(report.error);
-        feedback(summary);
-        emit pluginNoticeRequested(QStringLiteral("存储清理"), summary);
+        const bool failed = !report.error.isEmpty() || !report.failed.isEmpty();
+        feedback(summary, failed);
+        emit pluginNoticeRequested(QStringLiteral("存储清理"), summary, failed);
         emit storageUsageChanged();
         // Re-scan asynchronously so the preview and orphan list reflect the result.
         requestStorageScan();
@@ -646,9 +651,9 @@ void AppController::updatePolling()
     if (m_serviceMonitor) m_serviceMonitor(active);
     if (active && !m_statusTimer.isActive()) { m_statusTimer.start(); updateService(); }
     else if (!active) m_statusTimer.stop();
-    m_infoPoller->setActive(active);
+    m_infoPoller->setActive(active && !m_serviceInterrupted);
     m_networkPoller->setActive(active && m_activeMenu == QLatin1String(api::ZeroTierMenuId));
-    m_peerPoller->setActive(active && m_activeMenu == QLatin1String(api::ZeroTierMenuId));
+    m_peerPoller->setActive(active && m_peersExpanded && m_activeMenu == QLatin1String(api::ZeroTierMenuId));
     m_moonPoller->setActive(active && m_moonsActive);
     const bool membersActive = active && m_activeMenu == QLatin1String(api::ZeroTierMenuId);
     if (membersActive && !m_memberTimer.isActive()) { m_memberTimer.start(); refreshMembers(); }
@@ -696,7 +701,12 @@ void AppController::setBusy(bool value)
     m_busy = value; emit stateChanged();
     if (!value && m_closing && m_shutdownReady) emit exitFinished();
 }
-void AppController::feedback(const QString &message) { m_feedback = message; emit stateChanged(); }
+void AppController::feedback(const QString &message, bool error)
+{
+    m_feedback = message;
+    emit stateChanged();
+    if (!message.trimmed().isEmpty()) emit notificationRequested(message, error);
+}
 void AppController::ask(const QString &title, const QString &message, const QString &acceptLabel, std::function<void()> action)
 {
     if (m_closing || m_confirmation) return;
@@ -707,11 +717,70 @@ void AppController::confirm(bool accepted)
     auto action = std::move(m_confirmation); m_confirmation = {};
     if (accepted && !m_closing && action) action();
 }
+void AppController::beginServiceInterruption()
+{
+    ++m_serviceGeneration;
+    m_serviceInterrupted = true;
+    m_apiAvailable = false;
+    // Cancel the in-flight process as well as suspending future queries. Its
+    // delayed completion must never publish a pre-operation success.
+    m_infoPoller->setActive(false);
+    emit stateChanged();
+}
+void AppController::endServiceInterruption()
+{
+    if (!m_serviceInterrupted) return;
+    m_serviceInterrupted = false;
+    updatePolling(); // Only a fresh successful info query can restore green.
+}
+void AppController::setPeersExpanded(bool expanded)
+{
+    if (m_peersExpanded == expanded) return;
+    m_peersExpanded = expanded;
+    updatePolling();
+    emit stateChanged();
+}
+bool AppController::copyNodeId()
+{
+    const auto id = m_info.value("address").toString();
+    if (!QRegularExpression("^[0-9a-fA-F]{10}$").match(id).hasMatch()) return false;
+    QGuiApplication::clipboard()->setText(id);
+    emit nodeIdCopied();
+    return true;
+}
+QString AppController::tcpFallbackNetworkName() const
+{
+    if (!m_localConfigLoaded || !m_localConfig.valid()) return QStringLiteral("配置不可用");
+    if (m_localConfig.tcpFallbackRelay.isEmpty()) return QStringLiteral("未选择");
+    if (m_tcpFallbackServersBusy) return QStringLiteral("正在读取…");
+    QString name;
+    int matches = 0;
+    for (const auto &value : m_tcpFallbackServers) {
+        const auto candidate = value.toMap();
+        if (!candidate["enabled"].toBool() || m_localConfig.relayPort != zerotier::localconfig::RelayPort
+            || candidate["ip"].toString() != m_localConfig.relayIp) continue;
+        name = localName("networks", candidate["networkId"].toString(), candidate["name"].toString());
+        ++matches;
+    }
+    if (matches == 1) return name;
+    return matches > 1 ? QStringLiteral("已配置（对应多个网络）") : QStringLiteral("已配置（无法关联网络）");
+}
+void AppController::revealSettings()
+{
+    QString error;
+    if (!m_operations->revealFile(m_storage.settingsFile(), error)) feedback(error);
+}
+void AppController::openLogs()
+{
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(m_storage.logsDirectory())))
+        feedback(QStringLiteral("无法打开日志目录：%1").arg(m_storage.logsDirectory()));
+}
 void AppController::serviceAction(const QString &action)
 {
     if (m_busy || m_closing || !m_serviceStatus.known || (action != "start" && action != "stop" && action != "restart")) return;
     setBusy(true); feedback({});
-    m_operations->runService(action, [this](bool ok) { setBusy(false); feedback(ok ? QString() : QStringLiteral("操作失败，请查看 logs 文件夹中的本次启动日志。")); refresh(); });
+    if (action != "start") beginServiceInterruption();
+    m_operations->runService(action, [this](bool ok) { endServiceInterruption(); setBusy(false); feedback(ok ? QString() : QStringLiteral("操作失败，请查看 logs 文件夹中的本次启动日志。")); refresh(); });
 }
 void AppController::packageAction(bool uninstall)
 {
@@ -732,8 +801,9 @@ void AppController::packageAction(bool uninstall)
     ask(title, message, uninstall ? QStringLiteral("卸载并删除数据") : QStringLiteral("继续安装"), [this, title, winget, uninstall] {
         if (m_busy) return;
         setBusy(true);
+        if (uninstall) beginServiceInterruption();
         m_operations->runElevatedScript(title, zerotier::packageScript(uninstall, winget), [this](bool ok) {
-            setBusy(false); feedback(ok ? QString() : QStringLiteral("操作失败，请查看本次启动日志。")); refresh();
+            endServiceInterruption(); setBusy(false); feedback(ok ? QString() : QStringLiteral("操作失败，请查看本次启动日志。")); refresh();
         });
     });
 }
@@ -836,6 +906,7 @@ void AppController::rename(const QString &kind, const QString &id, const QString
     auto *model = kind == "networks" ? &m_networks : kind == "peers" ? &m_peers : &m_moons;
     const auto fallback = kind == "networks" ? model->record(id)["details"].toMap()["name"].toString() : QString();
     model->update(id, {{"name", localName(kind, id, fallback)}});
+    if (kind == "networks") emit tcpFallbackServersChanged();
     if (kind == "peers") {
         for (int n = 0; n < m_networks.count(); ++n) {
             const auto record = m_networks.get(n); auto members = record["members"].toList();
@@ -1014,11 +1085,13 @@ void AppController::applyLocalConfig(const zerotier::localconfig::State &state, 
     m_localConfigBusy = false;
     m_localConfigError = error.isEmpty() ? state.error : error;
     emit localConfigChanged();
+    emit tcpFallbackServersChanged();
     emit stateChanged();
 }
 
 void AppController::recoverLocalConfig(const QString &error)
 {
+    feedback(error);
     const auto result = zerotier::localconfig::read(m_localConfigPath);
     if (result.ok) {
         applyLocalConfig(result.state, error);
@@ -1032,6 +1105,7 @@ void AppController::recoverLocalConfig(const QString &error)
     m_localConfigBusy = false;
     m_localConfigError = error;
     emit localConfigChanged();
+    emit tcpFallbackServersChanged();
     emit stateChanged();
 }
 
@@ -1064,7 +1138,7 @@ bool AppController::currentLocalConfigForUpdate(zerotier::localconfig::State &st
 void AppController::writeLocalConfig(const QByteArray &content, const QString &expectedHash,
                                      std::function<void(bool, const QString &)> finished)
 {
-    const auto direct = zerotier::localconfig::writeAtomic(m_localConfigPath, content);
+    const auto direct = zerotier::localconfig::writeAtomic(m_localConfigPath, content, expectedHash);
     if (direct.ok) {
         applyLocalConfig(zerotier::localconfig::parse(content, true), QString());
         if (finished) finished(true, QString());
@@ -1140,6 +1214,7 @@ void AppController::setTcpFallbackSwitches(bool allow, bool force)
 void AppController::refreshTcpFallbackServers()
 {
     if (m_tcpFallbackServersBusy || m_closing) return;
+    m_tcpFallbackServers.clear();
     m_tcpFallbackServersBusy = true;
     m_tcpFallbackServersMessage = QStringLiteral("正在读取网络与 Moon 元数据…");
     emit tcpFallbackServersChanged();
@@ -1197,7 +1272,7 @@ void AppController::refreshTcpFallbackServers()
 
 void AppController::selectTcpFallbackServer(const QString &networkId)
 {
-    if (m_localConfigBusy || m_closing) return;
+    if (m_localConfigBusy || m_tcpFallbackServersBusy || m_closing) return;
     if (!m_localConfigLoaded || !m_localConfig.valid()) {
         feedback(QStringLiteral("本地 ZeroTier 配置当前不可用，未切换 TCP 回退中转服务器。"));
         return;
@@ -1210,7 +1285,7 @@ void AppController::selectTcpFallbackServer(const QString &networkId)
     const auto ip = selected["ip"].toString();
     if (ip.isEmpty() || !selected["enabled"].toBool()) return;
     if (m_localConfig.relayPort == zerotier::localconfig::RelayPort && m_localConfig.relayIp == ip) {
-        feedback(QStringLiteral("当前已使用该 TCP 回退中转服务器。"));
+        feedback(QStringLiteral("当前已使用该 TCP 回退中转服务器。"), false);
         return;
     }
     const auto address = zerotier::localconfig::displayRelay(ip, zerotier::localconfig::RelayPort);
@@ -1247,7 +1322,7 @@ void AppController::applyTcpFallbackRelay(const QString &networkId, const QStrin
         }
         emit tcpFallbackServersChanged();
         emit pluginNoticeRequested(QStringLiteral("TCP回退中转服务器"),
-            QStringLiteral("TCP回退中转服务器已更新，请手动重启 ZeroTier，以及时刷新配置并切换中继连接。"));
+            QStringLiteral("TCP回退中转服务器已更新，请手动重启 ZeroTier，以及时刷新配置并切换中继连接。"), false);
     });
 }
 
@@ -1295,7 +1370,7 @@ void AppController::exportConfiguration(const QString &id, const QUrl &destinati
         if (bundle.isEmpty() || !output.open(QIODevice::WriteOnly)
             || output.write(bundle) != bundle.size() || !output.commit())
             feedback(QStringLiteral("无法导出中转站配置包。"));
-        else feedback(QStringLiteral("中转站配置包已导出。"));
+        else feedback(QStringLiteral("中转站配置包已导出。"), false);
     });
 }
 void AppController::importConfiguration(const QUrl &source)
@@ -1362,9 +1437,10 @@ void AppController::importMoonFiles(const QStringList &sources, std::function<vo
             if (completed) completed(false);
             return;
         }
+        beginServiceInterruption();
         m_operations->runElevatedScript(QStringLiteral("添加 Moon 并重启服务"), script,
             [this, completed, updateRelay, content, configDirectory](bool ok) {
-                setBusy(false);
+                endServiceInterruption(); setBusy(false);
                 if (updateRelay) {
                     if (ok) applyLocalConfig(zerotier::localconfig::parse(content, true), QString());
                     else {
@@ -1412,9 +1488,9 @@ void AppController::deleteMoon(const QString &id)
     const auto record = m_moons.record(id); const auto path = record["details"].toMap()["moonFile"].toString(); if (path.isEmpty()) return;
     ask(QStringLiteral("删除 Moon"), QStringLiteral("确定删除“%1”？删除后重启服务。此操作无法撤销。").arg(record["name"].toString()), QStringLiteral("删除并重启"), [this, id, path] {
         if (m_busy) return;
-        setBusy(true); m_operations->runElevatedScript(QStringLiteral("删除 Moon 并重启服务"), zerotier::moonDeleteScript(path), [this, id, path](bool ok) {
+        setBusy(true); beginServiceInterruption(); m_operations->runElevatedScript(QStringLiteral("删除 Moon 并重启服务"), zerotier::moonDeleteScript(path), [this, id, path](bool ok) {
             if (!QFileInfo::exists(path)) m_settings.remove("names/moons/" + id);
-            setBusy(false); refresh(); feedback(ok ? QString() : QStringLiteral("文件删除或服务启动未完成，请查看本次启动日志。"));
+            endServiceInterruption(); setBusy(false); refresh(); feedback(ok ? QString() : QStringLiteral("文件删除或服务启动未完成，请查看本次启动日志。"));
         });
     });
 }
@@ -1455,7 +1531,7 @@ void AppController::deletePlugin(const QString &path) {
                                          :plugins::PluginLoader::Removal::PackageOnly;
         ask(QStringLiteral("删除插件"),message,QStringLiteral("删除"),[this,path,removal] {
             const auto result=m_loader.removeFile(path,m_pluginDirectory,{},removal);
-            feedback(result.message);
+            feedback(result.message, !result.ok());
             refreshStorageUsage();
             if(!result.ok()) emit pluginNoticeRequested(QStringLiteral("无法删除插件"),result.message);
         }); return;

@@ -1,5 +1,6 @@
 #include "LocalConfig.h"
 #include <QAbstractSocket>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -147,7 +148,7 @@ ReadResult read(const QString &path)
     return result;
 }
 
-WriteResult writeAtomic(const QString &path, const QByteArray &bytes)
+WriteResult writeAtomic(const QString &path, const QByteArray &bytes, const std::optional<QString> &expectedSha256)
 {
     WriteResult result;
     const QFileInfo info(path);
@@ -170,6 +171,17 @@ WriteResult writeAtomic(const QString &path, const QByteArray &bytes)
         file.cancelWriting();
         return result;
     }
+    if (expectedSha256) {
+        const auto current = read(path);
+        const auto hash = current.state.exists
+            ? QString::fromLatin1(QCryptographicHash::hash(current.state.raw, QCryptographicHash::Sha256).toHex()) : QString();
+        if (!current.ok || hash != *expectedSha256) {
+            file.cancelWriting();
+            result.permissionDenied = current.permissionDenied;
+            result.error = current.ok ? QStringLiteral("local.conf 已被其他程序修改，请重新读取后重试。") : current.error;
+            return result;
+        }
+    }
     if (!file.commit()) {
         result.error = QStringLiteral("无法保存 local.conf：%1").arg(file.errorString());
         result.permissionDenied = file.error() == QFileDevice::PermissionsError
@@ -188,7 +200,7 @@ WriteResult createDefault(const QString &path)
         result.ok = true;
         return result;
     }
-    return writeAtomic(path, defaultContent());
+    return writeAtomic(path, defaultContent(), QString());
 }
 
 bool parseRelay(const QString &text, QString &ip, int &port)

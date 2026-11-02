@@ -6,6 +6,7 @@
 #include <QList>
 #include <QString>
 #include <functional>
+#include <optional>
 
 // ZeroTier's system-wide local.conf is the only authority for these settings.
 // This module contains the platform-independent validation/merge rules and the
@@ -47,7 +48,8 @@ struct WriteResult {
 // state has exists=false and the documented defaults.
 ReadResult read(const QString &path);
 // Atomically replaces path after the caller has validated and merged content.
-WriteResult writeAtomic(const QString &path, const QByteArray &bytes);
+WriteResult writeAtomic(const QString &path, const QByteArray &bytes,
+                        const std::optional<QString> &expectedSha256 = std::nullopt);
 // Creates the documented initial file only when path does not exist yet.
 WriteResult createDefault(const QString &path);
 State parse(const QByteArray &bytes, bool exists);

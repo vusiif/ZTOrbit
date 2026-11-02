@@ -20,7 +20,7 @@
 
 页面可通过 `<zto/PluginPage.h>` 的 `createQmlPage(engine,parent,source,initialProperties)` 从插件自己的资源创建。C++控制器通过required属性注入，由页面持有；页面先于工厂和DLL销毁，宿主清理引擎组件缓存后才卸载库。插件不能注册DLL所有的全局QML类型或单例，也不能依赖宿主内部QML模块。可使用Qt Quick Controls并继承应用窗口palette。
 
-客户端应用与 API 均由根 `VERSION` 派生（当前 `0.5.2` → API `0.5`），由新入口／生命周期IID `/3.0` 区分页面ABI。旧 `/1.0`、`/2.0` DLL在实例化前拒绝，必须迁移页面工厂并重编。SDK依赖Qt Quick/Qml，已移除Widgets依赖；应用保留Widgets仅供Windows原生托盘菜单后备实现。
+客户端应用与 API 均由根 `VERSION` 派生（当前 `0.5.3` → API `0.5`），由新入口／生命周期IID `/3.0` 区分页面ABI。旧 `/1.0`、`/2.0` DLL在实例化前拒绝，必须迁移页面工厂并重编。SDK依赖Qt Quick/Qml，已移除Widgets依赖；应用保留Widgets仅供Windows原生托盘菜单后备实现。
 
 ## 当前入口与生命周期
 
@@ -194,7 +194,7 @@ cmake --install build/cmake-build-api --config Release --prefix build/dist/Z2-ap
 
 独立插件使用 `find_package(ZTOrbitPluginApi 0.5 EXACT CONFIG REQUIRED)` 并链接 `ZTO::Api`，只需安装后的SDK和匹配工具链，不需要宿主源码。CMake 包版本使用数字基版本 `0.5`；`ZTO_API_VERSION` 与插件 JSON 使用完整 API `0.5`。JSON 使用 `{"apiVersion":"@ZTO_API_VERSION@"}`，不硬编码另一份版本。
 
-客户端应用版本为 `0.5.2`，API 由 `VERSION` 前两段数字和同一预发布后缀派生为 `0.5`。旧名称的插件均须使用新 ZTOrbit SDK 重新编译。入口IID为 `vusiif.zto.api.PluginInterface/3.0`，生命周期IID为 `vusiif.zto.api.PluginLifecycleInterface/3.0`；旧IID不会实例化，API 0.2也不再兼容。0.4→0.5 的核心代际升级由开发者明确指定；本次更名并移除 qualifier，核心代际仍为 5；接口命名随品牌更新，IID 代际仍为 `/3.0`。
+客户端应用版本为 `0.5.3`，API 由 `VERSION` 前两段数字和同一预发布后缀派生为 `0.5`。旧名称的插件均须使用新 ZTOrbit SDK 重新编译。入口IID为 `vusiif.zto.api.PluginInterface/3.0`，生命周期IID为 `vusiif.zto.api.PluginLifecycleInterface/3.0`；旧IID不会实例化，API 0.2也不再兼容。0.4→0.5 的核心代际升级由开发者明确指定；本次更名并移除 qualifier，核心代际仍为 5；接口命名随品牌更新，IID 代际仍为 `/3.0`。
 
 统一使用动态Qt，宿主与插件须匹配Qt、编译器、架构、运行库及构建模式。Qt类型和std::function属于进程内C++接口，不承诺跨工具链ABI或跨进程协议。
 

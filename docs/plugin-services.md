@@ -1,6 +1,6 @@
 # 插件服务、依赖与媒体隔离
 
-当前客户端 `0.5.2`、客户端 API `0.5`，服务端 API `0.2`。进程内入口和生命周期继续使用 `/3.0`；服务访问与停止采用独立扩展接口，因此不修改原 HostServices 虚表或 `PluginDefinition` 布局；服务租约另提供直接数据回调的寿命守卫。语音插件版本 `0.3.0`，媒体提供者与 Media API 为 `2.0.0`，Engine SDK 为 `1.0.0`。音视频能力、扩展 ABI 与构建交付统一见[媒体项目文档](../src/plugins/media/client/docs/media.md)。
+当前客户端 `0.5.3`、客户端 API `0.5`，服务端 API `0.2`。进程内入口和生命周期继续使用 `/3.0`；服务访问与停止采用独立扩展接口，因此不修改原 HostServices 虚表或 `PluginDefinition` 布局；服务租约另提供直接数据回调的寿命守卫。语音插件版本 `0.3.0`，媒体提供者与 Media API 为 `2.0.0`，Engine SDK 为 `1.0.0`。音视频能力、扩展 ABI 与构建交付统一见[媒体项目文档](../src/plugins/media/client/docs/media.md)。
 
 ## 包与兼容
 

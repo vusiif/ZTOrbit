@@ -1,36 +1,66 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+
 Pane {
     id: root
     objectName: "settingsPage"
     required property var backend
     signal openPlugins()
     signal openAbout()
+    function placePopup(popup, anchor) {
+        const area = Overlay.overlay
+        if (!area || !popup || !anchor || !popup.parent) return
+        const point = anchor.mapToItem(area, 0, anchor.height)
+        const x = Math.max(12, Math.min(point.x, area.width - popup.width - 12))
+        const y = Math.max(12, Math.min(point.y + 4, area.height - popup.height - 12))
+        const local = area.mapToItem(popup.parent, x, y)
+        popup.x = local.x
+        popup.y = local.y
+    }
+    Connections {
+        target: root.Window.window
+        function onWidthChanged() { root.repositionPopups() }
+        function onHeightChanged() { root.repositionPopups() }
+    }
+    function repositionPopups() {
+        if (tcpFallbackPopup && tcpFallbackPopup.visible) placePopup(tcpFallbackPopup, tcpButton)
+        if (relaySelector && relaySelector.popup && relaySelector.popup.visible) placePopup(relaySelector.popup, relaySelector)
+    }
     padding: 20
     background: Rectangle { color: Theme.surface; radius: 8 }
-    onVisibleChanged: if (visible) backend.refreshLocalConfig()
+    onVisibleChanged: {
+        if (visible) backend.refreshLocalConfig()
+        else tcpFallbackPopup.close()
+    }
+    component SectionTitle: Label {
+        Layout.fillWidth: true
+        Layout.topMargin: 8
+        font.pixelSize: 16
+        font.bold: true
+        color: Theme.text
+    }
+    component FullButton: ActionButton { Layout.fillWidth: true; implicitHeight: 36 }
     BoundedScrollView {
         id: settingsScroll
         objectName: "settingsScroll"
         anchors.fill: parent
         clip: true
         contentWidth: availableWidth
-            ColumnLayout {
-                width: settingsScroll.availableWidth
-                spacing: 14
-                Label { text: "设置"; font.pixelSize: 18; font.bold: true }
-                RowLayout {
-                    Label { text: "主题" }
-                    ThemeToggle {
-                        objectName: "themeSelector"
-                        checked: backend.dark
-                        onClicked: backend.theme = checked ? "dark" : "light"
-                    }
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "禁止GPU加速"; Layout.fillWidth: true }
+        ColumnLayout {
+            width: settingsScroll.availableWidth
+            spacing: 10
+            Label { text: "设置"; font.pixelSize: 24; font.bold: true; color: Theme.text }
+            SectionTitle { text: "外观" }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "主题"; Layout.fillWidth: true }
+                ThemeToggle { objectName: "themeSelector"; checked: backend.dark; onClicked: backend.theme = checked ? "dark" : "light" }
+            }
+            SectionTitle { text: "程序" }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "禁止GPU加速"; Layout.fillWidth: true }
                     Switch {
                         id: gpuAccelerationSwitch
                         objectName: "disableGpuAccelerationSwitch"
@@ -55,65 +85,76 @@ Pane {
                         }
                         HoverHandler { cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
                     }
-                }
-                Label { text: "本机 ZeroTier TCP 回退"; font.pixelSize: 16; font.bold: true; Layout.topMargin: 8 }
-                Label {
-                    objectName: "localConfigScopeLabel"
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    font.pixelSize: 11
-                    color: Theme.muted
-                    text: "这些是本机 ZeroTier 节点级设置，影响本机加入的所有网络。保存后不会自动重启 ZeroTier。"
-                }
-                Label {
-                    objectName: "localConfigPathLabel"
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    font.pixelSize: 11
-                    color: Theme.muted
-                    text: "配置文件：" + (backend.localConfig.path || "")
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "允许TCP回退"; Layout.fillWidth: true }
-                    Switch {
-                        id: allowTcpFallbackSwitch
-                        objectName: "allowTcpFallbackSwitch"
-                        Accessible.name: "允许TCP回退"
-                        implicitWidth: 52
-                        implicitHeight: 32
-                        checked: backend.localConfig.allowTcpFallbackRelay === true
-                        enabled: backend.localConfig.loaded && backend.localConfig.valid && !backend.localConfig.busy
-                        onClicked: backend.setTcpFallbackSwitches(checked, forceTcpFallbackSwitch.checked)
-                        indicator: Rectangle {
-                            anchors.centerIn: parent
-                            width: 48; height: 28; radius: 14
-                            color: allowTcpFallbackSwitch.checked ? Theme.accent : Theme.button
-                            border.color: allowTcpFallbackSwitch.activeFocus ? Theme.accent : Theme.border
-                            opacity: allowTcpFallbackSwitch.enabled ? 1 : 0.6
-                            Rectangle {
-                                width: 22; height: 22; radius: 11; y: 3
-                                x: allowTcpFallbackSwitch.checked ? parent.width - width - 3 : 3
-                                color: allowTcpFallbackSwitch.checked ? Theme.window : Theme.text
-                                Behavior on x { NumberAnimation { duration: 140; easing.type: Easing.InOutCubic } }
-                            }
-                        }
-                        HoverHandler { cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
-                    }
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "强制TCP回退"; Layout.fillWidth: true }
+            }
+            FullButton { objectName: "openPluginsButton"; text: "插件"; onClicked: root.openPlugins() }
+            SectionTitle { text: "ZeroTier" }
+            FullButton {
+                id: tcpButton
+                objectName: "switchTcpFallbackServerButton"
+                text: "TCP回退"
+                onClicked: tcpFallbackPopup.visible ? tcpFallbackPopup.close() : tcpFallbackPopup.open()
+            }
+            FullButton {
+                objectName: "openLocalConfigButton"; text: "ZeroTier配置文件"
+                onClicked: backend.revealLocalConfig()
+                ToolTip.visible: hovered
+                ToolTip.text: backend.localConfig.path || "ZeroTier local.conf"
+            }
+            SectionTitle { text: "存储" }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "日志"; Layout.fillWidth: true }
+                ActionButton { objectName: "openLogsButton"; text: "打开日志"; onClicked: backend.openLogs(); ToolTip.visible: hovered; ToolTip.text: backend.storageUsage.logs || "" }
+                ActionButton { objectName: "cleanupLogsButton"; text: "清理日志"; enabled: !backend.storageBusy && !backend.storageScanBusy; onClicked: backend.cleanupStorage("logs"); ToolTip.visible: hovered; ToolTip.text: backend.storageUsage.previewText || "仅清理历史日志，保留在用文件" }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "缓存"; Layout.fillWidth: true }
+                ActionButton { objectName: "cleanupCacheButton"; text: "清理缓存"; enabled: !backend.storageBusy && !backend.storageScanBusy; onClicked: backend.cleanupStorage("cache"); ToolTip.visible: hovered; ToolTip.text: backend.storageUsage.previewText || "仅清理闲置缓存，保留在用文件" }
+            }
+            FullButton { objectName: "openSettingsButton"; text: "打开程序设置文件"; onClicked: backend.revealSettings(); ToolTip.visible: hovered; ToolTip.text: backend.storageUsage.settings || "" }
+            // Low-frequency diagnostics stay available without crowding the page.
+            ToolButton { objectName: "storageDetailsButton"; text: "存储详情"; Layout.alignment: Qt.AlignRight; onClicked: { backend.refreshStorageUsage(); storagePopup.open() } }
+            SectionTitle { text: "其他" }
+            FullButton { objectName: "aboutButton"; text: "关于"; onClicked: root.openAbout() }
+            FullButton { text: "退出"; onClicked: backend.requestQuit() }
+        }
+    }
+    AppPopup {
+        id: tcpFallbackPopup
+        objectName: "tcpFallbackRelayPopup"
+        parent: Overlay.overlay
+        width: Math.min(380, parent.width - 24)
+        height: Math.min(implicitHeight, parent.height - 24)
+        onHeightChanged: if (visible) root.placePopup(tcpFallbackPopup, tcpButton)
+        onWidthChanged: if (visible) root.placePopup(tcpFallbackPopup, tcpButton)
+        padding: 14
+        modal: false
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onAboutToShow: {
+            root.placePopup(tcpFallbackPopup, tcpButton)
+            backend.refreshLocalConfig(); backend.refreshTcpFallbackServers()
+            Qt.callLater(root.repositionPopups)
+        }
+        onAboutToHide: relaySelector.popup.close()
+        contentItem: ColumnLayout {
+            spacing: 10
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "强制回退"; Layout.fillWidth: true }
                     Switch {
                         id: forceTcpFallbackSwitch
                         objectName: "forceTcpFallbackSwitch"
-                        Accessible.name: "强制TCP回退"
+                        Accessible.name: "强制回退"
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 800
+                        ToolTip.text: "本机节点级设置，影响所有网络。保存后不会自动重启 ZeroTier。"
                         implicitWidth: 52
                         implicitHeight: 32
                         checked: backend.localConfig.forceTcpRelay === true
-                        enabled: allowTcpFallbackSwitch.checked && backend.localConfig.loaded
+                        enabled: backend.localConfig.loaded
                             && backend.localConfig.valid && !backend.localConfig.busy
-                        onClicked: backend.setTcpFallbackSwitches(allowTcpFallbackSwitch.checked, checked)
+                        onClicked: { backend.setTcpFallbackSwitches(true, checked); checked = Qt.binding(() => backend.localConfig.forceTcpRelay === true) }
                         indicator: Rectangle {
                             anchors.centerIn: parent
                             width: 48; height: 28; radius: 14
@@ -129,268 +170,110 @@ Pane {
                         }
                         HoverHandler { cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
                     }
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label {
-                        objectName: "localConfigRelayLabel"
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        text: "当前中转服务器：" + (backend.localConfig.relayText || "未设置")
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "中转服务器"; Layout.fillWidth: true }
+                ComboBox {
+                    id: relaySelector
+                    implicitHeight: 32
+                    objectName: "tcpFallbackServerSelector"
+                    Layout.preferredWidth: Math.min(220, tcpFallbackPopup.width - 130)
+                    Layout.minimumWidth: 100
+                    model: backend.tcpFallbackServers
+                    textRole: "name"
+                    valueRole: "networkId"
+                    currentIndex: -1
+                    onActivated: index => {
+                        const candidate = backend.tcpFallbackServers[index]
+                        currentIndex = -1
+                        if (!candidate || !candidate.enabled) return
+                        tcpFallbackPopup.close()
+                        backend.selectTcpFallbackServer(candidate.networkId)
                     }
-                    ActionButton {
-                        objectName: "refreshLocalConfigButton"
-                        text: "重新读取"
-                        flat: true
-                        implicitHeight: 28
-                        font.pixelSize: 11
-                        onClicked: backend.retryLocalConfig()
+                    displayText: backend.tcpFallbackNetworkName
+                    enabled: !backend.tcpFallbackServersBusy && backend.localConfig.loaded && backend.localConfig.valid && !backend.localConfig.busy
+                    contentItem: Label { text: relaySelector.displayText; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter; color: relaySelector.enabled ? Theme.text : Theme.muted; leftPadding: 10; rightPadding: 22 }
+                    indicator: Label { text: "▾"; color: Theme.muted; anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter }
+                    background: Rectangle { color: Theme.field; radius: 5; border.color: relaySelector.activeFocus ? Theme.accent : Theme.border }
+                    AppToolTip {
+                        parent: relaySelector
+                        visible: relaySelector.hovered && !relaySelector.popup.visible && tcpFallbackPopup.opened
+                        text: relaySelector.displayText
+                        width: Math.min(360, tcpFallbackPopup.parent.width - 24)
                     }
-                }
-                Label {
-                    objectName: "localConfigErrorLabel"
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    visible: text !== ""
-                    color: Theme.danger
-                    font.pixelSize: 11
-                    text: backend.localConfig.error || ""
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    ActionButton {
-                        id: switchTcpFallbackServerButton
-                        objectName: "switchTcpFallbackServerButton"
-                        text: "切换TCP回退中转服务器"
-                        enabled: backend.localConfig.loaded && backend.localConfig.valid && !backend.localConfig.busy
-                        onClicked: tcpFallbackPopup.opened ? tcpFallbackPopup.close() : tcpFallbackPopup.open()
-                    }
-                    ActionButton {
-                        objectName: "retryLocalConfigButton"
-                        text: "重试读取"
-                        flat: true
-                        implicitHeight: 28
-                        font.pixelSize: 11
-                        visible: backend.localConfig.canRetry
-                        onClicked: backend.retryLocalConfig()
-                    }
-                }
-                Popup {
-                    id: tcpFallbackPopup
-                    objectName: "tcpFallbackRelayPopup"
-                    parent: switchTcpFallbackServerButton
-                    x: 0
-                    y: switchTcpFallbackServerButton.height + 4
-                    width: Math.min(560, settingsScroll.availableWidth - 20)
-                    padding: 12
-                    modal: false
-                    focus: true
-                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-                    background: Rectangle { color: Theme.popup; radius: 8; border.color: Theme.popupBorder; border.width: 1 }
-                    onOpened: backend.refreshTcpFallbackServers()
-                    contentItem: ColumnLayout {
-                        spacing: 8
-                        Label { text: "选择网络（与 .z2bundle 导出条件一致）"; font.bold: true; color: Theme.text }
-                        Label {
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            font.pixelSize: 11
-                            color: Theme.muted
-                            text: "服务器公网 IPv4 来自对应 Moon 服务器根节点的 stableEndpoints；中继端口固定 9443。"
-                        }
-                        Label {
-                            visible: backend.tcpFallbackServersBusy
-                            text: "正在读取网络与 Moon 信息…"
-                            color: Theme.muted
-                            font.pixelSize: 11
-                        }
-                        Label {
-                            objectName: "tcpFallbackServersMessage"
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            visible: text !== ""
-                            color: Theme.danger
-                            font.pixelSize: 11
-                            text: backend.tcpFallbackServersMessage || ""
-                        }
-                        ListView {
-                            id: tcpFallbackServerList
+                    popup: AppPopup {
+                        parent: relaySelector
+                        onAboutToShow: { root.placePopup(relaySelector.popup, relaySelector); Qt.callLater(root.repositionPopups) }
+                        onHeightChanged: if (visible) root.placePopup(relaySelector.popup, relaySelector)
+                        onWidthChanged: if (visible) root.placePopup(relaySelector.popup, relaySelector)
+                        width: Math.min(420, tcpFallbackPopup.parent.width - 24)
+                        height: Math.min(300, implicitHeight, tcpFallbackPopup.parent.height - 24)
+                        padding: 6
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                        contentItem: ListView {
+                            id: relayList
                             objectName: "tcpFallbackServerList"
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: Math.min(260, contentHeight)
-                            visible: count > 0
+                            implicitHeight: Math.min(280, contentHeight)
                             clip: true
                             boundsBehavior: Flickable.StopAtBounds
-                            model: backend.tcpFallbackServers
+                            model: relaySelector.popup.visible ? backend.tcpFallbackServers : null
                             delegate: ItemDelegate {
-                                id: tcpFallbackServerItem
+                                id: candidate
                                 required property var modelData
                                 objectName: "tcpFallbackServer-" + modelData.networkId
                                 width: ListView.view.width
                                 enabled: modelData.enabled
-                                onClicked: {
-                                    tcpFallbackPopup.close()
-                                    backend.selectTcpFallbackServer(modelData.networkId)
-                                }
+                                onClicked: { relaySelector.popup.close(); tcpFallbackPopup.close(); backend.selectTcpFallbackServer(modelData.networkId) }
                                 contentItem: ColumnLayout {
-                                    spacing: 2
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Label {
-                                            text: tcpFallbackServerItem.modelData.name
-                                                + (tcpFallbackServerItem.modelData.current ? "（当前）" : "")
-                                            font.bold: true
-                                            elide: Text.ElideRight
-                                            Layout.fillWidth: true
-                                            color: Theme.text
-                                        }
-                                        Label {
-                                            text: tcpFallbackServerItem.modelData.enabled
-                                                ? tcpFallbackServerItem.modelData.relay : "不可用"
-                                            color: tcpFallbackServerItem.modelData.enabled ? Theme.accent : Theme.muted
-                                            font.pixelSize: 11
-                                        }
-                                    }
-                                    Label {
-                                        text: tcpFallbackServerItem.modelData.networkId
-                                        font.pixelSize: 10
-                                        color: Theme.muted
-                                    }
-                                    Label {
-                                        Layout.fillWidth: true
-                                        wrapMode: Text.Wrap
-                                        visible: text !== ""
-                                        text: tcpFallbackServerItem.modelData.reason
-                                        color: Theme.danger
-                                        font.pixelSize: 10
-                                    }
-                                    Label {
-                                        Layout.fillWidth: true
-                                        wrapMode: Text.Wrap
-                                        visible: text !== ""
-                                        text: tcpFallbackServerItem.modelData.note
-                                        color: Theme.muted
-                                        font.pixelSize: 10
-                                    }
+                                    spacing: 3
+                                    Label { text: candidate.modelData.name; elide: Text.ElideRight; Layout.fillWidth: true; color: candidate.enabled ? Theme.text : Theme.muted; font.bold: true }
+                                    Label { text: candidate.modelData.networkId; color: Theme.muted; font.pixelSize: 11 }
+                                    Label { text: candidate.modelData.reason || candidate.modelData.note || ""; visible: text !== ""; wrapMode: Text.Wrap; Layout.fillWidth: true; color: Theme.muted; font.pixelSize: 11 }
                                 }
-                                background: Rectangle {
-                                    radius: 4
-                                    color: tcpFallbackServerItem.highlighted ? Theme.selection
-                                        : tcpFallbackServerItem.hovered ? Theme.hover : "transparent"
-                                    opacity: tcpFallbackServerItem.enabled ? 1 : 0.65
-                                }
+                                background: Rectangle { radius: 4; color: candidate.highlighted ? Theme.selection : candidate.hovered ? Theme.hover : "transparent" }
                             }
+                            ScrollBar.vertical: ScrollBar {}
                         }
-                        Label {
-                            objectName: "tcpFallbackServersEmptyLabel"
-                            visible: !backend.tcpFallbackServersBusy && backend.tcpFallbackServers.length === 0
-                            text: "暂无可选网络"
-                            color: Theme.muted
-                            font.pixelSize: 11
-                        }
-                        ActionButton { text: "关闭"; Layout.alignment: Qt.AlignRight; onClicked: tcpFallbackPopup.close() }
                     }
-                }
-                ActionButton { objectName: "openPluginsButton"; text: "插件"; Layout.fillWidth: true; onClicked: { root.openPlugins() } }
-                Label { text: "存储与清理"; font.pixelSize: 16; font.bold: true; Layout.topMargin: 8 }
-                ColumnLayout {
-                    objectName: "storageSection"
-                    Layout.fillWidth: true
-                    spacing: 6
-                    Label {
-                        objectName: "storagePathLabel"
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        font.pixelSize: 11
-                        color: Theme.muted
-                        text: "模式：" + (backend.storageUsage.mode === "personal" ? "个人目录（程序目录不可写）"
-                            : backend.storageUsage.mode === "ephemeral" ? "临时目录（无法持久保存）" : "程序共享目录")
-                            + "\n活动目录：" + backend.storageUsage.root
-                            + "\n设置文件：" + backend.storageUsage.settings
-                            + "\n日志目录：" + backend.storageUsage.logs
-                            + "\n插件数据：" + backend.storageUsage.pluginData
-                            + "\n可丢弃缓存：" + backend.storageUsage.cache
-                    }
-                    Label {
-                        objectName: "storageUsageLabel"
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        font.pixelSize: 11
-                        text: "日志 " + backend.storageUsage.logFiles + " 个文件，"
-                            + (backend.storageUsage.logsBytes / 1048576).toFixed(1) + " MiB；插件数据 "
-                            + (backend.storageUsage.pluginDataBytes / 1048576).toFixed(1) + " MiB；缓存 "
-                            + (backend.storageUsage.cacheBytes / 1048576).toFixed(1) + " MiB"
-                    }
-                    Label {
-                        objectName: "storagePreviewLabel"
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        font.pixelSize: 11
-                        text: backend.storageUsage.previewText || ""
-                    }
-                    Label {
-                        objectName: "storageOrphansLabel"
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        font.pixelSize: 11
-                        color: Theme.muted
-                        text: backend.storageUsage.orphansText || ""
-                    }
-                    Label {
-                        objectName: "storageScanStateLabel"
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        font.pixelSize: 11
-                        color: Theme.muted
-                        visible: text !== ""
-                        text: backend.storageScanBusy ? "正在后台扫描存储…"
-                            : backend.storageBusy ? "正在清理存储…"
-                            : (backend.storageUsage.scanError || "")
-                    }
-                    Label {
-                        objectName: "storageMaintenanceLabel"
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        visible: text !== ""
-                        color: Theme.muted
-                        font.pixelSize: 11
-                        text: (backend.storageUsage.maintenance || "") + (backend.storageUsage.pendingDeletions
-                            ? (backend.storageUsage.maintenance ? "\n" : "") + backend.storageUsage.pendingDeletions : "")
-                    }
-                    Label {
-                        objectName: "storageWarningLabel"
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        visible: text !== ""
-                        color: Theme.danger
-                        text: backend.storageWarning
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        ActionButton { objectName: "cleanupLogsButton"; text: "清理历史日志"; enabled: !backend.storageBusy && !backend.storageScanBusy; onClicked: backend.cleanupStorage("logs") }
-                        ActionButton { objectName: "cleanupCacheButton"; text: "清理闲置缓存"; enabled: !backend.storageBusy && !backend.storageScanBusy; onClicked: backend.cleanupStorage("cache") }
-                    }
-                    ActionButton {
-                        objectName: "cleanupOrphansButton"
-                        text: "检查并清理无主数据"
-                        Layout.fillWidth: true
-                        enabled: !backend.storageBusy && !backend.storageScanBusy
-                        onClicked: { backend.cleanupStorage("orphans") }
-                    }
-                    Label { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: text !== ""; text: backend.feedback; color: Theme.muted; font.pixelSize: 11 }
-                }
-                ActionButton { objectName: "aboutButton"; text: "关于"; Layout.fillWidth: true; onClicked: { root.openAbout() } }
-                ActionButton { text: "退出"; Layout.fillWidth: true; onClicked: backend.requestQuit() }
-                ActionButton {
-                    objectName: "openLocalConfigButton"
-                    text: "打开本地配置文件"
-                    flat: true
-                    implicitHeight: 28
-                    font.pixelSize: 11
-                    horizontalPadding: 10
-                    Layout.alignment: Qt.AlignLeft
-                    onClicked: backend.revealLocalConfig()
                 }
             }
+            Label {
+                objectName: "tcpFallbackServersMessage"
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                visible: text !== ""
+                text: backend.tcpFallbackServersMessage || ""
+                font.pixelSize: 11
+                color: backend.tcpFallbackServersBusy ? Theme.muted : Theme.danger
+            }
+            Label { objectName: "localConfigErrorLabel"; text: backend.localConfig.error || ""; visible: text !== ""; wrapMode: Text.Wrap; Layout.fillWidth: true; color: Theme.danger; font.pixelSize: 11 }
+            ActionButton { text: "重试读取"; visible: !!backend.localConfig.error || (!backend.tcpFallbackServersBusy && backend.tcpFallbackServers.length === 0); onClicked: { backend.retryLocalConfig(); backend.refreshTcpFallbackServers() } }
+
+        }
+    }
+    AppPopup {
+        id: storagePopup
+        objectName: "storageDetailsPopup"
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(520, parent.width - 32)
+        height: Math.min(implicitHeight, parent.height - 32)
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        contentItem: BoundedScrollView {
+            id: storageScroll
+            contentWidth: availableWidth
+            implicitHeight: Math.min(420, storageContent.implicitHeight)
+            ColumnLayout {
+                id: storageContent
+                width: storageScroll.availableWidth
+                Label { text: "存储详情"; font.bold: true; font.pixelSize: 16 }
+                Label { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.muted; text: "模式：" + (backend.storageUsage.mode === "personal" ? "个人目录" : backend.storageUsage.mode === "ephemeral" ? "临时目录" : "程序共享目录") + "\n日志 " + backend.storageUsage.logFiles + " 个文件，" + (backend.storageUsage.logsBytes / 1048576).toFixed(1) + " MiB；插件数据 " + (backend.storageUsage.pluginDataBytes / 1048576).toFixed(1) + " MiB；缓存 " + (backend.storageUsage.cacheBytes / 1048576).toFixed(1) + " MiB" }
+                Label { objectName: "storagePathLabel"; Layout.fillWidth: true; wrapMode: Text.WrapAnywhere; text: "活动目录：" + backend.storageUsage.root + "\n设置文件：" + backend.storageUsage.settings + "\n日志目录：" + backend.storageUsage.logs + "\n插件数据：" + backend.storageUsage.pluginData + "\n缓存：" + backend.storageUsage.cache; color: Theme.muted }
+                Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: (backend.storageUsage.previewText || "") + "\n" + (backend.storageUsage.maintenance || "") + "\n" + (backend.storageUsage.pendingDeletions || "") + "\n" + (backend.storageUsage.orphansText || ""); color: Theme.muted }
+                Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: backend.storageScanBusy ? "正在后台扫描存储…" : (backend.storageUsage.scanError || "") + "\n" + (backend.storageWarning || ""); color: Theme.danger }
+                ActionButton { objectName: "cleanupOrphansButton"; text: "检查并清理无主数据"; enabled: !backend.storageBusy && !backend.storageScanBusy; onClicked: { storagePopup.close(); backend.cleanupStorage("orphans") } }
+            }
+        }
     }
 }

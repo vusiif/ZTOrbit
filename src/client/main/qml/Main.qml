@@ -13,13 +13,11 @@ ApplicationWindow {
     property string detailId: ""
     property var aboutPlugin: ({})
     property bool layoutReady: false
-    property var pluginNotices: []
-    function showNextPluginNotice() {
-        if (pluginNotices.length === 0 || (pluginNoticeLoader.item && pluginNoticeLoader.item.visible)) return
-        const notice = pluginNotices.shift()
-        const popup = pluginNoticeLoader.ensure()
-        popup.title = notice.title; popup.message = notice.message
-        pluginNoticeLoader.open()
+    readonly property bool operationPending: backend.busy || backend.closing
+    onOperationPendingChanged: {
+        if (!notificationBanner) return
+        if (operationPending) notificationBanner.present(backend.closing ? backend.shutdownMessage || "正在退出…" : "正在执行操作…", false, "", 0, true)
+        else if (notificationBanner.working) notificationBanner.present("操作已完成", false, "", 2400)
     }
     property real guideScrollPosition: 0
     // Host settings live in one INI owned by SettingsStore; QML persistence goes
@@ -96,16 +94,33 @@ ApplicationWindow {
         target: backend
         function onActiveMenuChanged() { if (!menuTransition.running) pageReveal.restart() }
         function onTrayRequested() { if (tray.available) window.hide(); else window.showMinimized() }
+        function onNodeIdCopied() { notificationBanner.present("已复制", false, "", 1300) }
         function onNetworkJoined() { joinLoader.close() }
         function onConfigurationImported(networkId) { joinLoader.ensure().setNetworkId(networkId) }
-        function onPluginNoticeRequested(title, message) {
-            window.pluginNotices.push({title: title, message: message})
-            window.showNextPluginNotice()
+        function onNotificationRequested(message, error) {
+            notificationBanner.present(message, error, "", 0, window.operationPending && !error)
+        }
+        function onPluginNoticeRequested(title, message, error) {
+            notificationBanner.present(message, error, title)
+        }
+        function onStateChanged() {
+            if (backend.closing && notificationBanner.working) notificationBanner.message = backend.shutdownMessage
         }
         function onConfirmationRequested(title, message, acceptLabel) {
             const popup = confirmationLoader.ensure()
             popup.title = title; popup.message = message; popup.acceptLabel = acceptLabel; confirmationLoader.open()
         }
+    }
+    NotificationBanner {
+        id: notificationBanner
+        objectName: "notificationBanner"
+        parent: Overlay.overlay
+        anchors.top: parent.top
+        anchors.topMargin: 18
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(560, parent.width - 32)
+        maximumHeight: Math.min(260, parent.height - 48)
+        z: 1000
     }
     SplitView {
         anchors.fill: parent
@@ -211,10 +226,13 @@ ApplicationWindow {
                                 id: nodeId
                                 objectName: "nodeId"
                                 text: backend.info.address || "—"
-                                color: Theme.text
+                                color: nodeHover.hovered && validId ? Theme.accent : Theme.text
+                                readonly property bool validId: /^[0-9a-fA-F]{10}$/.test(text)
+                                font.underline: nodeHover.hovered && validId
+                                HoverHandler { id: nodeHover; cursorShape: nodeId.validId ? Qt.PointingHandCursor : Qt.ArrowCursor }
                                 font.pixelSize: 28
                                 font.bold: true
-                                TapHandler { onTapped: backend.copyText(nodeId.text) }
+                                TapHandler { onTapped: backend.copyNodeId() }
                                 TapHandler { acceptedButtons: Qt.RightButton; onTapped: nodeMenu.popup() }
                                 AppMenu { id: nodeMenu; AppMenuItem { text: "完整节点信息"; onTriggered: nodeInfoLoader.open() } }
                             }
@@ -290,19 +308,34 @@ ApplicationWindow {
                         Item { Layout.fillWidth: true }
                         ActionButton { id: moonButton; objectName: "moonsButton"; text: "中转站"; onClicked: moonLoader.open() }
                     }
-                    Label { text: "成员"; font.pixelSize: 18; font.bold: true; color: Theme.text; Layout.leftMargin: 16 }
-                    RecordList {
-                        id: peers
-                        objectName: "peers"
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 16
+                        ToolButton { objectName: "togglePeersButton"; text: backend.peersExpanded ? "▾" : "▸"; Accessible.name: backend.peersExpanded ? "收起成员" : "展开成员"; onClicked: backend.peersExpanded = !backend.peersExpanded }
+                        Label { id: peersHeading; text: "成员"; font.pixelSize: 18; font.bold: true; color: Theme.text; TapHandler { onTapped: backend.peersExpanded = !backend.peersExpanded } HoverHandler { cursorShape: Qt.PointingHandCursor } }
+                        Item { Layout.fillWidth: true }
+                    }
+                    Item {
                         Layout.fillWidth: true
                         Layout.leftMargin: 16
                         Layout.rightMargin: 16
-                        backend: window.backend
-                        records: backend.peers
-                        kind: "peers"
-                        headers: ["名称", "角色", "连接", "IP 地址", "延迟（ms）"]
-                        statusText: backend.peerStatus
-                        onDetailsRequested: (kind, rowId, name) => window.showDetails(kind, rowId, name)
+                        implicitHeight: backend.peersExpanded ? peers.implicitHeight : 0
+                        opacity: backend.peersExpanded ? 1 : 0
+                        visible: implicitHeight > 0
+                        clip: true
+                        Behavior on implicitHeight { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
+                        Behavior on opacity { NumberAnimation { duration: 140 } }
+                        RecordList {
+                            id: peers
+                            objectName: "peers"
+                            width: parent.width
+                            backend: window.backend
+                            records: backend.peers
+                            kind: "peers"
+                            headers: ["名称", "角色", "连接", "IP 地址", "延迟（ms）"]
+                            statusText: backend.peerStatus
+                            onDetailsRequested: (kind, rowId, name) => window.showDetails(kind, rowId, name)
+                        }
                     }
                     Item { Layout.preferredHeight: 24 }
                 }
@@ -315,16 +348,6 @@ ApplicationWindow {
                 onOpenAbout: aboutLoader.open()
             }
             Item { id: pluginContainer; objectName: "pluginContainer"; anchors.fill: parent; visible: backend.activeMenu !== "builtin/zerotier" && backend.activeMenu !== "builtin/settings" }
-        }
-    }
-    footer: Pane {
-        visible: backend.busy || backend.feedback !== "" || backend.closing
-        padding: 12
-        background: Rectangle { color: Theme.side }
-        RowLayout {
-            anchors.fill: parent
-            BusyIndicator { running: backend.busy || backend.closing; visible: running; implicitWidth: 24; implicitHeight: 24 }
-            Label { text: backend.closing ? backend.shutdownMessage : backend.feedback || "正在执行操作…"; wrapMode: Text.Wrap; color: Theme.text; Layout.fillWidth: true }
         }
     }
     LazyPopup {
@@ -343,7 +366,6 @@ ApplicationWindow {
                 anchors.fill: parent
                 spacing: 16
                 TextField { id: networkIdInput; objectName: "networkIdInput"; placeholderText: "16 位网络 ID"; maximumLength: 16; Layout.fillWidth: true; enabled: !backend.busy; onAccepted: backend.joinNetwork(text) }
-                Label { text: backend.feedback; visible: text !== ""; wrapMode: Text.Wrap; color: Theme.danger; Layout.fillWidth: true }
                 RowLayout {
                     ActionButton { objectName: "importMoonButton"; text: "导入中转站"; enabled: !backend.busy; onClicked: importBundleLoader.open() }
                     Item { Layout.fillWidth: true }
@@ -351,20 +373,6 @@ ApplicationWindow {
                     ActionButton { objectName: "confirmJoinButton"; text: "确认加入"; primary: true; enabled: !backend.busy; onClicked: backend.joinNetwork(networkIdInput.text) }
                 }
             }
-        }
-    }
-    LazyPopup {
-        id: pluginNoticeLoader
-        sourceComponent: AppDialog {
-            id: pluginNotice
-            objectName: "pluginNoticeDialog"
-            property string message: ""
-            anchors.centerIn: parent
-            width: Math.min(500, window.width - 40)
-            modal: true
-            standardButtons: Dialog.Ok
-            onClosed: Qt.callLater(window.showNextPluginNotice)
-            Label { text: pluginNotice.message; wrapMode: Text.Wrap; width: parent.width }
         }
     }
     LazyPopup {
@@ -577,7 +585,7 @@ ApplicationWindow {
             id: guide
             objectName: "guideOverlay"
             parent: Overlay.overlay
-            targets: [serviceButton, nodeId, joinButton, networks, peers, moonButton]
+            targets: [serviceButton, nodeId, joinButton, networks, peersHeading, moonButton]
             onAboutToShow: window.guideScrollPosition = scroll.contentItem.contentY
             onClosed: scroll.contentItem.contentY = window.guideScrollPosition
             onTargetRequested: target => {

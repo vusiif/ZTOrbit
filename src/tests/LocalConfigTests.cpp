@@ -122,6 +122,21 @@ private slots:
         // Reading never projects defaults back into the file.
         QCOMPARE(readAll(path), existing);
     }
+    void directSaveRejectsConcurrentEdit()
+    {
+        const auto path = localConfigPath();
+        const auto original = defaultContent();
+        QVERIFY(writeAll(path, original));
+        const QByteArray external("{\"settings\":{\"primaryPort\":12345},\"external\":true}");
+        QVERIFY(writeAll(path, external));
+        const auto result = writeAtomic(path, original, sha256(original));
+        QVERIFY(!result.ok); QVERIFY(!result.permissionDenied);
+        QVERIFY(result.error.contains(QStringLiteral("其他程序修改")));
+        QCOMPARE(readAll(path), external);
+        QVERIFY(writeAtomic(path, original, sha256(external)).ok);
+        QCOMPARE(readAll(path), original);
+        QVERIFY(!writeAtomic(path, original, QString()).ok);
+    }
     void invalidJsonAndShapesAreReportedAndPreserved()
     {
         const auto path = localConfigPath();

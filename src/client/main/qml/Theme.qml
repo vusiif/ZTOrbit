@@ -19,6 +19,18 @@ QtObject {
     property color selection: dark ? "#365772" : "#d8eaf6"
     property color hover: dark ? "#354e61" : "#e3eff8"
     property color danger: dark ? "#ffaaa1" : "#a7352d"
+    property color noticeSuccess: dark ? "#284b3b" : "#e0f3e7"
+    property color noticeSuccessText: dark ? "#daf5e3" : "#16482b"
+    property color noticeSuccessBorder: dark ? "#56856a" : "#92c6a5"
+    property color noticeError: dark ? "#57363b" : "#fbe3e5"
+    property color noticeErrorText: dark ? "#ffe2e3" : "#7f2533"
+    property color noticeErrorBorder: dark ? "#a76b73" : "#dfa3ad"
+    Behavior on noticeSuccess { ColorAnimation { duration: 180 } }
+    Behavior on noticeSuccessText { ColorAnimation { duration: 180 } }
+    Behavior on noticeSuccessBorder { ColorAnimation { duration: 180 } }
+    Behavior on noticeError { ColorAnimation { duration: 180 } }
+    Behavior on noticeErrorText { ColorAnimation { duration: 180 } }
+    Behavior on noticeErrorBorder { ColorAnimation { duration: 180 } }
     Behavior on window { ColorAnimation { id: windowAnimation; duration: 180 } }
     Behavior on surface { ColorAnimation { duration: 180 } }
     Behavior on side { ColorAnimation { duration: 180 } }

@@ -4,6 +4,14 @@
 
 深浅主题沿用原有配色，Qt Quick Controls 使用Basic样式与应用palette。语音QML页面继承窗口palette，不导入宿主内部组件。现有 `names/`、`voice-chat/` 和主题设置保留；QML表格列宽使用 `tables/qml/`，窗口尺寸使用 `window/qml/`，不覆盖旧Widgets序列化布局。这些键由 `backend.hostSetting()`／`backend.setHostSetting()` 通过宿主 `SettingsStore` 读写同一 `settings.ini`；QML 不再使用 `Settings` 元素，因为它在加载时就会把默认属性写入文件，绕过宿主对未恢复设置文件的写入保护。
 
+设置页按外观、程序、ZeroTier、存储和其他分区；ZeroTier `local.conf` 与活动存储根 `settings.ini` 分别提供入口，日志入口使用同一存储上下文。存储扫描、预览、无主数据与维护信息收拢到详情弹窗，清理继续使用后台预览、确认及在用文件保护。
+
+TCP 回退浮窗复用 `AppPopup` 的透明度过渡，按需加载网络和 Moon 候选；选择框从实际配置恢复名称，不把暂选项当作保存成功。本机 ZTID 仅在有效时复制，通过顶部非模态提示反馈，连续复制复用提示计时器。网络成员及全局成员首次折叠；折叠暂停对应查询，增量刷新保留展开和备注编辑状态。
+
+主动停止、重启、卸载及 Moon 导入／删除重启开始执行时，控制器立即将服务可用性置为 false，并取消在途 info 查询、暂停新查询；服务状态后台查询按代际丢弃旧结果。操作完成（包括失败或取消授权）后恢复查询，只有新的成功响应才恢复在线。普通查询失败仍沿用原有重试次数和时间防抖。
+
+非阻塞反馈统一使用 `NotificationBanner`，放在窗口 Overlay 顶部居中，不使用占用内容高度的 footer。`notificationRequested` 按事件推送文字与明确的错误标记，通知不能从每次 `stateChanged` 重新触发；同文重试需刷新显示时间。结果通知与复制共用提示板，普通信息使用绿色语义色，错误使用红色语义色；长文字限高滚动，关闭后淡出并停止接收输入，悬停时暂停自动消失。系统操作确认仍由确认对话框处理。
+
 ## 插件与引擎寿命
 
 公开页面工厂接收借用的 `QQmlEngine*` 和 `QQuickItem* parent`，返回QObject父对象与可视父项均为parent的新页面。SDK的 `createQmlPage()` 在组件完成之前设置父项和初始属性，插件自己的QML存入DLL资源。控制器通过required属性注入，并由页面持有；传入QVariant时转换为 `QObject*`，避免注册DLL所有的控制器指针元类型。不得注册DLL所有的全局QML类型、单例或宿主内部类型。

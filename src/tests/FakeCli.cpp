@@ -36,15 +36,17 @@ int main(int argc, char **argv)
     if (mode == "empty" && (arguments.contains("listnetworks") || arguments.contains("listpeers") || arguments.contains("listmoons"))) {
         std::puts("[]"); return 0;
     }
+    if (arguments.contains("info")) QThread::msleep(qEnvironmentVariableIntValue("ZT_TEST_INFO_DELAY"));
     QJsonDocument document;
     if (arguments.contains("info")) {
-        document = QJsonDocument(QJsonObject{{"address", "0123456789"}, {"version", "1.16.0"},
+        document = QJsonDocument(QJsonObject{{"address", mode == "invalid-id" ? "—" : "0123456789"}, {"version", "1.16.0"},
             {"online", true}, {"tcpFallbackActive", mode == "tcp-fallback"}, {"extraField", "preserved"}});
     } else if (arguments.contains("listnetworks")) {
         QJsonArray networks;
-        if (mode == "members") {
-            networks.append(QJsonObject{{"nwid","0123456789abcdef"},{"status","OK"},
+        if (mode == "members" || mode == "ambiguous-relay") {
+            networks.append(QJsonObject{{"nwid","0123456789abcdef"},{"name",QStringLiteral("管理员网络")},{"status","OK"},
                 {"assignedAddresses",QJsonArray{"127.0.0.2/24"}}});
+            if (mode == "ambiguous-relay") networks.append(QJsonObject{{"nwid","0123456789000001"},{"name","Other network"}});
             const auto bytes = QJsonDocument(networks).toJson(QJsonDocument::Compact);
             std::fwrite(bytes.constData(), 1, bytes.size(), stdout);
             return 0;

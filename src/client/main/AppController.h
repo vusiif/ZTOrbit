@@ -118,6 +118,14 @@ public:
     Q_INVOKABLE void refreshTcpFallbackServers();
     Q_INVOKABLE void selectTcpFallbackServer(const QString &networkId);
     Q_INVOKABLE void revealLocalConfig();
+    Q_INVOKABLE void revealSettings();
+    Q_INVOKABLE void openLogs();
+    Q_PROPERTY(QString tcpFallbackNetworkName READ tcpFallbackNetworkName NOTIFY tcpFallbackServersChanged)
+    QString tcpFallbackNetworkName() const;
+    Q_PROPERTY(bool peersExpanded READ peersExpanded WRITE setPeersExpanded NOTIFY stateChanged)
+    bool peersExpanded() const { return m_peersExpanded; }
+    void setPeersExpanded(bool expanded);
+    Q_INVOKABLE bool copyNodeId();
     void setWindow(QQuickWindow *window);
     void setVisible(bool visible);
     plugins::PluginRegistry *pluginRegistry() { return &m_registry; }
@@ -156,11 +164,13 @@ signals:
     void localConfigChanged();
     void tcpFallbackServersChanged();
     void confirmationRequested(const QString &title, const QString &message, const QString &acceptLabel);
-    void pluginNoticeRequested(const QString &title, const QString &message);
+    void pluginNoticeRequested(const QString &title, const QString &message, bool error = true);
+    void notificationRequested(const QString &message, bool error);
     void networkJoined();
     void configurationImported(const QString &networkId);
     void exitFinished();
     void trayRequested();
+    void nodeIdCopied();
 private:
     storage::StorageContext m_storage;
     storage::SettingsStore m_settings;
@@ -212,6 +222,8 @@ private:
     void requestStorageScan();
     QString m_activeMenu = QString::fromLatin1(api::ZeroTierMenuId);
     bool m_busy = false, m_closing = false, m_shutdownReady = false, m_visible = false, m_moonsActive = false, m_apiAvailable = false;
+    bool m_serviceInterrupted = false, m_peersExpanded = false;
+    quint64 m_serviceGeneration = 0;
     bool m_serviceQueryPending = false, m_moonFilesPending = false, m_moonRefreshQueued = false;
     QHash<QString, QPointer<QObject>> m_memberRequests;
     QHash<QString, QPointer<QObject>> m_memberProbeContexts;
@@ -219,9 +231,11 @@ private:
     std::function<void(bool)> m_serviceMonitor;
     void ask(const QString &title, const QString &message, const QString &acceptLabel, std::function<void()> action);
     void setBusy(bool busy);
-    void feedback(const QString &message);
+    void feedback(const QString &message, bool error = true);
     void updatePolling();
     void updateService();
+    void beginServiceInterruption();
+    void endServiceInterruption();
     void refreshMembers();
     void refreshMoonFiles();
     QString localName(const QString &kind, const QString &id, const QString &fallback = {}) const;
