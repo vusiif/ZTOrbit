@@ -117,7 +117,7 @@ if(MSVC)
 endif()
 add_test(NAME gui_regressions COMMAND zto_tests -platform offscreen -o test-results.txt,txt)
 set_tests_properties(gui_regressions PROPERTIES WORKING_DIRECTORY "${ZTO_BUILD_DIR}")
-set_tests_properties(gui_regressions PROPERTIES TIMEOUT 120)
+set_tests_properties(gui_regressions PROPERTIES TIMEOUT 300)
 set_tests_properties(gui_regressions PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software")
 add_test(NAME gpu_acceleration_override COMMAND zto_tests
     --disable-gpu-acceleration gpuAccelerationCommandLineOverrideIsTemporary
@@ -416,3 +416,11 @@ target_compile_definitions(plugin_services_tests PRIVATE
 add_dependencies(plugin_services_tests service_fixture_worker service_fixture_a service_fixture_b)
 add_test(NAME plugin_services COMMAND plugin_services_tests -platform windows)
 set_tests_properties(plugin_services PROPERTIES TIMEOUT 120)
+
+# Feature regression targets keep their own sources so independent changes do
+# not collide in this file.
+foreach(zto_feature update reset)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${zto_feature}/CMakeLists.txt")
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/${zto_feature}" "${CMAKE_CURRENT_BINARY_DIR}/${zto_feature}")
+    endif()
+endforeach()

@@ -8,6 +8,8 @@
 #include <QApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlExpression>
+#include <QPixmap>
 #include <QQuickStyle>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -185,6 +187,21 @@ class QmlTests : public QObject {
     void click(const char *name) {
         auto *item = qobject_cast<QQuickItem *>(object(name)); QVERIFY(item);
         QTest::mouseClick(m_window, Qt::LeftButton, {}, item->mapToScene(QPointF(item->width()/2, item->height()/2)).toPoint());
+    }
+    QObject *named(const QString &name) const { return object(name.toLatin1().constData()); }
+    QQuickItem *item(const QString &name) const { return qobject_cast<QQuickItem *>(named(name)); }
+    QQuickItem *navigationItem(const QString &menuId) const { return item(QStringLiteral("navigation-") + menuId); }
+    void writeSetting(const QString &key, const QVariant &value) {
+        vusiif::zto::storage::SettingsStore store(m_storage.settingsFile());
+        store.setValue(key, value);
+        QString error;
+        QVERIFY2(store.sync(error), qPrintable(error));
+    }
+    QVariant evaluate(QObject *target, const QString &expression) const {
+        if (!target) return {};
+        QQmlExpression expr(qmlContext(target), target, expression);
+        if (expr.hasError()) return {};
+        return expr.evaluate();
     }
 private slots:
     void initTestCase() {
@@ -1600,6 +1617,330 @@ private slots:
         click("joinNetworkButton"); QTRY_VERIFY(object("joinNetworkDialog")); QTest::keyClick(m_window,Qt::Key_Escape);
         click("joinNetworkButton"); QTRY_VERIFY(object("joinNetworkDialog")->property("visible").toBool());
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
+    }
+    void sidebarUsesFixedWidthsAndIgnoresLegacyKey() {
+        // The retired draggable width key must neither size nor be touched.
+        writeSetting("window/qml/sidebarWidth", 320);
+        openWindow();
+        QTRY_COMPARE(m_controller->networks()->count(), 2);
+        auto *sidebar = item("sidebar"); QVERIFY(sidebar);
+        QCOMPARE(sidebar->width(), 184.0);
+        QCOMPARE(m_window->property("sidebarWidth").toReal(), 184.0);
+        QCOMPARE(m_window->minimumWidth(), 640);
+        QCOMPARE(m_window->minimumHeight(), 440);
+        QVERIFY(!object("sidebarHandle"));
+        // Dragging where the old SplitView handle lived does not resize anything.
+        const auto edge = sidebar->mapToScene(QPointF(sidebar->width() + 2, sidebar->height() / 2)).toPoint();
+        QTest::mousePress(m_window, Qt::LeftButton, {}, edge);
+        QTest::mouseMove(m_window, edge + QPoint(80, 0));
+        QTest::mouseRelease(m_window, Qt::LeftButton, {}, edge + QPoint(80, 0));
+        QTest::qWait(120);
+        QCOMPARE(sidebar->width(), 184.0);
+        QVERIFY(hasSetting("window/qml/sidebarWidth"));
+        QCOMPARE(setting("window/qml/sidebarWidth").toInt(), 320);
+        click("sidebarToggleButton");
+        QTRY_COMPARE(sidebar->width(), 56.0);
+        QVERIFY(m_window->property("sidebarCollapsed").toBool());
+        QCOMPARE(setting("window/qml/sidebarCollapsed").toBool(), true);
+        QCOMPARE(setting("window/qml/sidebarWidth").toInt(), 320);
+        // A recreated window restores the user's choice and keeps ignoring the old key.
+        m_engine.reset(); m_window = nullptr; m_controller.reset();
+        openWindow();
+        QTRY_COMPARE(item("sidebar")->width(), 56.0);
+        QVERIFY(m_window->property("sidebarCollapsed").toBool());
+        click("sidebarToggleButton");
+        QTRY_COMPARE(item("sidebar")->width(), 184.0);
+        QCOMPARE(setting("window/qml/sidebarCollapsed").toBool(), false);
+        QCOMPARE(setting("window/qml/sidebarWidth").toInt(), 320);
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void collapsedSidebarKeepsNavigationUsable() {
+        openWindow();
+        QTRY_COMPARE(m_controller->networks()->count(), 2);
+        auto *networkItem = navigationItem("builtin/zerotier"); QVERIFY(networkItem);
+        click("sidebarToggleButton");
+        QTRY_COMPARE(item("sidebar")->width(), 56.0);
+        // The menu name survives both as a bound mirror and as the attached property.
+        QCOMPARE(networkItem->property("accessibleName").toString(), QStringLiteral("ZeroTier"));
+        QCOMPARE(evaluate(networkItem, "Accessible.name").toString(), QStringLiteral("ZeroTier"));
+        auto *label = item("navigationLabel-builtin/zerotier"); QVERIFY(label);
+        QVERIFY(!label->isVisible());
+        auto *zeroTierIcon = item("zeroTierMenuIcon"); QVERIFY(zeroTierIcon);
+        QVERIFY(zeroTierIcon->isVisible());
+        auto *builtinFallback = item("navigationFallbackIcon-builtin/zerotier"); QVERIFY(builtinFallback);
+        QVERIFY(!builtinFallback->isVisible());
+        // Disabled/loading plugin menus keep their icon slot and spinner when collapsed.
+        MenuContribution preparing; preparing.id = "preparing"; preparing.title = "准备中插件";
+        preparing.createPage = [](QQmlEngine *, QQuickItem *owner) { return new QQuickItem(owner); };
+        QVERIFY(m_controller->pluginRegistry()->registerPlugin({{"test-sidebar-preparing", "Preparing", "1"}, {preparing}}, nullptr, true).ok());
+        QTRY_VERIFY(navigationItem("test-sidebar-preparing/preparing"));
+        auto *pending = navigationItem("test-sidebar-preparing/preparing");
+        QVERIFY(!pending->property("enabled").toBool());
+        auto *busy = item("navigationBusy-test-sidebar-preparing/preparing"); QVERIFY(busy);
+        QVERIFY(busy->isVisible());
+        // Selection and keyboard focus stay visible in the narrow sidebar.
+        MenuContribution page; page.id = "page"; page.title = "Sidebar Page";
+        page.createPage = [](QQmlEngine *, QQuickItem *owner) {
+            auto *created = new QQuickItem(owner); created->setObjectName("sidebarStatePage"); return created;
+        };
+        QVERIFY(m_controller->pluginRegistry()->registerPlugin({{"test-sidebar-state", "State", "1"}, {page}}).ok());
+        QTRY_VERIFY(navigationItem("test-sidebar-state/page"));
+        click(qPrintable(QStringLiteral("navigation-test-sidebar-state/page")));
+        QTRY_COMPARE(m_controller->activeMenu(), QStringLiteral("test-sidebar-state/page"));
+        auto *selected = navigationItem("test-sidebar-state/page"); QVERIFY(selected);
+        QVERIFY(selected->property("highlighted").toBool());
+        m_window->requestActivate(); QTest::qWait(50);
+        selected->forceActiveFocus();
+        QTRY_VERIFY(selected->hasActiveFocus());
+        QCOMPARE(selected->property("focusPolicy").toInt(), int(Qt::StrongFocus));
+        QCOMPARE(evaluate(selected, "background.border.width").toInt(), 2);
+        // Hovering a collapsed entry shows its name even without a status message.
+        QTest::mouseMove(m_window, QPoint(2, 2)); QTest::qWait(120);
+        QTest::mouseMove(m_window, selected->mapToScene(QPointF(selected->width() / 2, selected->height() / 2)).toPoint());
+        auto *tip = named("navigationTooltip-test-sidebar-state/page"); QVERIFY(tip);
+        QTRY_VERIFY_WITH_TIMEOUT(tip->property("visible").toBool(), 4000);
+        QCOMPARE(tip->property("text").toString(), QStringLiteral("Sidebar Page"));
+        QTest::mouseMove(m_window, QPoint(m_window->width() - 20, 20));
+        QTRY_VERIFY(!tip->property("visible").toBool());
+        // Collapsed layout is checked at the minimum window size in both themes.
+        m_window->resize(640, 440); QTest::qWait(150);
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-sidebar-collapsed-light.png"));
+        m_controller->setTheme("dark"); QTest::qWait(300);
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-sidebar-collapsed-dark.png"));
+        // A collapsed entry is still clickable and switches the active page.
+        // Registering menus rebuilt the ListView model, so look the delegate up again.
+        click(qPrintable(QStringLiteral("navigation-builtin/zerotier")));
+        QTRY_COMPARE(m_controller->activeMenu(), QStringLiteral("builtin/zerotier"));
+        auto *builtinItem = navigationItem("builtin/zerotier"); QVERIFY(builtinItem);
+        QVERIFY(builtinItem->property("highlighted").toBool());
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void sidebarToggleKeepsPluginPageAndState() {
+        openWindow();
+        int created = 0;
+        MenuContribution page; page.id = "page"; page.title = "Survivor";
+        page.createPage = [&created](QQmlEngine *, QQuickItem *owner) {
+            ++created;
+            auto *createdItem = new QQuickItem(owner);
+            createdItem->setObjectName("sidebarSurvivorPage");
+            return createdItem;
+        };
+        QVERIFY(m_controller->pluginRegistry()->registerPlugin({{"test-sidebar-survivor", "Survivor", "1"}, {page}}).ok());
+        auto *container = item("pluginContainer"); QVERIFY(container);
+        QVERIFY(m_controller->navigate("test-sidebar-survivor/page", container));
+        QTRY_VERIFY(named("sidebarSurvivorPage"));
+        auto *survivor = item("sidebarSurvivorPage"); QVERIFY(survivor);
+        QPointer<QQuickItem> guard(survivor);
+        survivor->setProperty("keptState", 42);
+        click("sidebarToggleButton");
+        QTRY_COMPARE(item("sidebar")->width(), 56.0);
+        QVERIFY(guard); QCOMPARE(created, 1);
+        QVERIFY(survivor->isVisible());
+        QCOMPARE(survivor->property("keptState").toInt(), 42);
+        QTRY_COMPARE(survivor->width(), container->width());
+        // Leave the toggle so a delayed tooltip cannot intercept the next click.
+        QTest::mouseMove(m_window, QPoint(2, 2)); QTest::qWait(120);
+        click("sidebarToggleButton");
+        QTRY_COMPARE(item("sidebar")->width(), 184.0);
+        QVERIFY(guard); QCOMPARE(created, 1);
+        QCOMPARE(m_controller->activeMenu(), QStringLiteral("test-sidebar-survivor/page"));
+        QVERIFY(survivor->isVisible());
+        QCOMPARE(survivor->property("keptState").toInt(), 42);
+        QTRY_COMPARE(survivor->width(), container->width());
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void sidebarPluginIconsAndFallbacks() {
+        openWindow();
+        QPixmap pixmap(20, 20); pixmap.fill(Qt::red);
+        MenuContribution withIcon; withIcon.id = "withicon"; withIcon.title = "With Icon"; withIcon.icon = QIcon(pixmap);
+        MenuContribution withoutIcon; withoutIcon.id = "noicon"; withoutIcon.title = "No Icon";
+        const auto simplePage = [](QQmlEngine *, QQuickItem *owner) { return new QQuickItem(owner); };
+        withIcon.createPage = simplePage; withoutIcon.createPage = simplePage;
+        QVERIFY(m_controller->pluginRegistry()->registerPlugin({{"test-sidebar-icons", "Icons", "1"}, {withIcon, withoutIcon}}).ok());
+        QTRY_VERIFY(item("navigationIcon-test-sidebar-icons/withicon"));
+        auto *image = item("navigationIcon-test-sidebar-icons/withicon"); QVERIFY(image->isVisible());
+        auto *withIconFallback = item("navigationFallbackIcon-test-sidebar-icons/withicon"); QVERIFY(withIconFallback);
+        QVERIFY(!withIconFallback->isVisible());
+        auto *fallback = item("navigationFallbackIcon-test-sidebar-icons/noicon"); QVERIFY(fallback);
+        QVERIFY(fallback->isVisible());
+        auto *noIconImage = item("navigationIcon-test-sidebar-icons/noicon"); QVERIFY(noIconImage);
+        QVERIFY(!noIconImage->isVisible());
+        // The built-in ZeroTier menu uses the network icon, not the plugin fallback.
+        auto *zeroTierIcon = item("zeroTierMenuIcon"); QVERIFY(zeroTierIcon);
+        QVERIFY(zeroTierIcon->isVisible());
+        QVERIFY(object("gearIcon")); QVERIFY(object("chevronIcon"));
+        click("sidebarToggleButton");
+        QTRY_COMPARE(item("sidebar")->width(), 56.0);
+        QVERIFY(image->isVisible()); QVERIFY(fallback->isVisible());
+        QVERIFY(!item("navigationLabel-test-sidebar-icons/noicon")->isVisible());
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void sidebarLongTitlesElideAndManyMenusScroll() {
+        openWindow();
+        QList<MenuContribution> menus;
+        for (int index = 0; index < 26; ++index) {
+            MenuContribution menu;
+            menu.id = QStringLiteral("menu-%1").arg(index);
+            menu.title = QStringLiteral("很长的插件菜单名称用于检查省略与滚动的行为第%1项").arg(index);
+            menu.createPage = [](QQmlEngine *, QQuickItem *owner) { return new QQuickItem(owner); };
+            menus.append(menu);
+        }
+        QVERIFY(m_controller->pluginRegistry()->registerPlugin({{"test-sidebar-many", "Many", "1"}, menus}).ok());
+        auto *navigation = item("navigation"); QVERIFY(navigation);
+        QTRY_VERIFY(navigation->property("contentHeight").toReal() > navigation->height());
+        QVERIFY(navigation->property("clip").toBool());
+        auto *label = item("navigationLabel-test-sidebar-many/menu-0"); QVERIFY(label);
+        QTRY_VERIFY(label->property("truncated").toBool());
+        QVERIFY(label->property("elide").toInt() != 0);
+        // Scrolling to the end instantiates the trailing delegates and keeps the
+        // last one inside the viewport.
+        for (int attempt = 0; attempt < 50 && !navigationItem("test-sidebar-many/menu-25"); ++attempt) {
+            navigation->setProperty("contentY", std::max(0.0, navigation->property("contentHeight").toReal() - navigation->height()));
+            QTest::qWait(30);
+        }
+        QVERIFY(navigation->property("contentY").toReal() > 0);
+        auto *last = navigationItem("test-sidebar-many/menu-25"); QVERIFY(last);
+        auto lastTop = last->mapToItem(navigation, 0, 0).y();
+        for (int attempt = 0; attempt < 30; ++attempt) {
+            navigation->setProperty("contentY", std::max(0.0, navigation->property("contentHeight").toReal() - navigation->height()));
+            QTest::qWait(20);
+            lastTop = last->mapToItem(navigation, 0, 0).y();
+            if (lastTop >= 0 && lastTop + last->height() <= navigation->height() + 1) break;
+        }
+        QVERIFY(lastTop >= 0);
+        QVERIFY(lastTop + last->height() <= navigation->height() + 1);
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-sidebar-many-menus.png"));
+        // Collapsing keeps the same scrolling list and its clipping.
+        click("sidebarToggleButton");
+        QTRY_COMPARE(item("sidebar")->width(), 56.0);
+        QVERIFY(navigation->property("contentHeight").toReal() > navigation->height());
+        QVERIFY(navigation->property("clip").toBool());
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void windowSizeUsesCompactDefaultsAndClampsRestoredValues() {
+        // A size saved on a large display is clamped to the work area, never above it.
+        writeSetting("window/qml/savedWidth", 5000);
+        writeSetting("window/qml/savedHeight", 5000);
+        openWindow();
+        const auto area = m_window->screen() ? m_window->screen()->availableGeometry() : QRect();
+        QCOMPARE(m_window->minimumWidth(), 640);
+        QCOMPARE(m_window->minimumHeight(), 440);
+        const auto clamped = [](int value, int minimum, int available) {
+            const int candidate = std::max(minimum, value);
+            return available > 0 ? std::max(minimum, std::min(candidate, available)) : candidate;
+        };
+        QCOMPARE(m_window->width(), clamped(5000, 640, area.width()));
+        QCOMPARE(m_window->height(), clamped(5000, 440, area.height()));
+        m_engine.reset(); m_window = nullptr; m_controller.reset();
+        // A too-small saved size snaps back to the documented minimum.
+        writeSetting("window/qml/savedWidth", 120);
+        writeSetting("window/qml/savedHeight", 120);
+        openWindow();
+        QCOMPARE(m_window->width(), 640);
+        QCOMPARE(m_window->height(), 440);
+        m_engine.reset(); m_window = nullptr; m_controller.reset();
+        // With no saved geometry the compact defaults apply (clamped if needed).
+        QFile::remove(m_storage.settingsFile());
+        openWindow();
+        QCOMPARE(m_window->width(), clamped(960, 640, area.width()));
+        QCOMPARE(m_window->height(), clamped(700, 440, area.height()));
+        // The clamp arithmetic is testable without a small monitor: below-minimum
+        // values snap to the minimum, oversized ones to the work area.
+        QCOMPARE(evaluate(m_window, "clampWindowSize(5000, minimumWidth, 800)").toInt(), 800);
+        QCOMPARE(evaluate(m_window, "clampWindowSize(120, minimumWidth, 800)").toInt(), 640);
+        QCOMPARE(evaluate(m_window, "clampWindowSize(5000, minimumWidth, 0)").toInt(), 5000);
+        QCOMPARE(evaluate(m_window, "clampWindowSize(5000, minimumHeight, 300)").toInt(), 440);
+        // Critical page controls stay reachable at the documented minimum size.
+        m_window->resize(640, 440); QTest::qWait(150);
+        auto *container = item("pluginContainer"); QVERIFY(container);
+        QVERIFY(m_controller->navigate(SettingsMenuId, container)); QTest::qWait(250);
+        auto *settingsPage = item("settingsPage"); QVERIFY(settingsPage);
+        QVERIFY(settingsPage->property("visible").toBool());
+        QVERIFY(settingsPage->mapToScene(QPointF(0, 0)).y() + settingsPage->height() <= m_window->height() + 1);
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-window-minimum-settings.png"));
+        m_controller->setTheme("dark"); QTest::qWait(300);
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-window-minimum-settings-dark.png"));
+        QVERIFY(m_controller->navigate(ZeroTierMenuId, container)); QTest::qWait(250);
+        auto *join = item("joinNetworkButton"); QVERIFY(join);
+        QVERIFY(join->width() > 0 && join->height() > 0);
+        const auto joinPoint = join->mapToScene(QPointF(0, 0));
+        QVERIFY(joinPoint.x() >= 0 && joinPoint.x() + join->width() <= m_window->width());
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-window-minimum-zerotier-dark.png"));
+        m_controller->setTheme("light"); QTest::qWait(300);
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-window-minimum-zerotier.png"));
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    // The settings page hosts both feature sections. The update section must be
+    // honest about an unconfigured build instead of pretending to check.
+    void settingsHostsUpdateAndResetSections() {
+        openWindow(); click("settingsButton");
+        QTRY_VERIFY(object("settingsPage")->property("visible").toBool());
+        QVERIFY(object("updateSection"));
+        QVERIFY(object("resetSection"));
+        auto *update = m_controller->updateObject(); QVERIFY(update);
+        auto *reset = m_controller->resetObject(); QVERIFY(reset);
+        auto *check = object("checkUpdateButton"); QVERIFY(check);
+        QCOMPARE(check->property("text").toString(), QStringLiteral("检查更新"));
+        QCOMPARE(check->property("enabled").toBool(), update->property("configured").toBool()
+                 && !update->property("busy").toBool());
+        QVERIFY(!object("updateUnconfiguredLabel"));
+        QVERIFY(!object("updateServerInput"));
+        QVERIFY(!object("clearUpdateServerButton"));
+        QVERIFY(object("updateServerButton"));
+        auto *resetButton = object("resetZeroTierStateButton"); QVERIFY(resetButton);
+        QCOMPARE(resetButton->property("enabled").toBool(), reset->property("canReset").toBool());
+        QCOMPARE(resetButton->property("text").toString(), QStringLiteral("重置 ZeroTier 本地状态"));
+        // Neither section may fire a network or elevated operation on its own.
+        QVERIFY(!update->property("busy").toBool());
+        QVERIFY(!reset->property("busy").toBool());
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void updateServerCanBeSavedAndClearedFromSettings() {
+        writeSetting("update/server", QString());
+        openWindow(); click("settingsButton");
+        QTRY_VERIFY(object("settingsPage")->property("visible").toBool());
+        auto *update = m_controller->updateObject(); QVERIFY(update);
+        auto *check = object("checkUpdateButton"); QVERIFY(check);
+        QVERIFY(!check->property("enabled").toBool());
+        scrollSettingsTo("updateServerButton"); click("updateServerButton");
+        auto *popup = object("updateServerPopup"); QVERIFY(popup);
+        QTRY_VERIFY(popup->property("visible").toBool());
+        auto *input = item("updateServerIpInput"); QVERIFY(input);
+        auto *port = object("updateServerPortInput"); QVERIFY(port);
+        QCOMPARE(port->property("text").toString(), QStringLiteral("18102"));
+        QTest::qWait(180); click("updateServerIpInput");
+        const auto clipboard = QApplication::clipboard()->text();
+        QApplication::clipboard()->setText(QStringLiteral("127.0.0.1"));
+        QTest::keyClick(m_window, Qt::Key_V, Qt::ControlModifier);
+        QTRY_COMPARE(input->property("text").toString(), QStringLiteral("127.0.0.1"));
+        QApplication::clipboard()->setText(clipboard);
+        QVERIFY(update->property("feedUrl").toString().isEmpty());
+        click("saveUpdateServerButton");
+        QTRY_VERIFY(!popup->property("visible").toBool());
+        QCOMPARE(update->property("feedUrl").toString(), QStringLiteral("http://127.0.0.1:18102/updater"));
+        QCOMPARE(setting("update/server").toString(), QStringLiteral("http://127.0.0.1:18102"));
+        QVERIFY(!update->property("busy").toBool());
+
+        click("updateServerButton"); QTRY_VERIFY(popup->property("visible").toBool());
+        input->setProperty("text", QStringLiteral("999.1.1.1"));
+        QTest::qWait(180); click("saveUpdateServerButton");
+        QVERIFY(popup->property("visible").toBool());
+        QCOMPARE(update->property("serverIp").toString(), QStringLiteral("127.0.0.1"));
+        input->setProperty("text", QString()); click("saveUpdateServerButton");
+        QTRY_VERIFY(!popup->property("visible").toBool());
+        QVERIFY(!hasSetting("update/server"));
+        QVERIFY(!check->property("enabled").toBool());
+        QCOMPARE(update->property("state").toString(), QStringLiteral("unconfigured"));
+
+        m_window->resize(640, 440); scrollSettingsTo("updateServerButton");
+        click("updateServerButton"); QTRY_VERIFY(popup->property("visible").toBool());
+        m_controller->setTheme("light"); QTest::qWait(300);
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-update-server-light.png"));
+        m_controller->setTheme("dark"); QTest::qWait(300);
+        QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-update-server-dark.png"));
+        QTest::keyClick(m_window, Qt::Key_Escape);
+        QTRY_VERIFY(!popup->property("visible").toBool());
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
     }
 };
 int main(int argc,char **argv) {

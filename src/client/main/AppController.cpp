@@ -241,6 +241,61 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
     // background filesystem scans during unrelated timing-sensitive cases.
     m_maintenance->start();
 #endif
+    connectFeatureControllers();
+}
+void AppController::connectFeatureControllers()
+{
+    // The update controller owns the network protocol, verification and the
+    // staging transaction. It never quits the application itself; the host
+    // keeps the normal exit flow (plugins stopped, caches reclaimed).
+    m_update = std::make_unique<update::UpdateController>(
+        QCoreApplication::applicationDirPath(), m_storage.activeRoot(), m_storage.settingsFile(), this);
+    connect(m_update.get(), &update::UpdateController::notificationRequested, this,
+            [this](const QString &message, bool error) { if (!message.isEmpty()) feedback(message, error); });
+    connect(m_update.get(), &update::UpdateController::quitRequested, this, &AppController::requestQuit);
+
+    m_reset = std::make_unique<reset::ResetController>(*m_operations, this);
+    connect(m_reset.get(), &reset::ResetController::notificationRequested, this,
+            [this](const QString &message, bool error) { if (!message.isEmpty()) feedback(message, error); });
+    connect(m_reset.get(), &reset::ResetController::confirmationRequested, this,
+            [this](const QString &title, const QString &message, const QString &acceptLabel) {
+        // Reuse the single host confirmation slot; cancel is forwarded below.
+        m_resetConfirmationPending = true;
+        ask(title, message, acceptLabel, [this] { if (m_reset) m_reset->confirm(true); });
+    });
+    connect(m_reset.get(), &reset::ResetController::interruptionBegan, this, [this] {
+        beginServiceInterruption();
+        setBusy(true);
+    });
+    connect(m_reset.get(), &reset::ResetController::interruptionEnded, this, [this] {
+        setBusy(false);
+        endServiceInterruption();
+        refresh();
+    });
+    connect(m_reset.get(), &reset::ResetController::busyChanged, this, &AppController::stateChanged);
+    connect(m_reset.get(), &reset::ResetController::canResetChanged, this, &AppController::stateChanged);
+    connect(m_reset.get(), &reset::ResetController::statusChanged, this, &AppController::stateChanged);
+
+    // Update, reset, service, package, import and plugin operations are mutually
+    // exclusive; each controller polls the other two through this provider.
+    m_update->setHostBusyProvider([this] {
+        return m_busy || m_closing || (m_reset && m_reset->busy());
+    });
+    m_reset->setBlockedProvider([this] {
+        return m_busy || m_closing || (m_update && m_update->busy());
+    });
+}
+void AppController::scheduleStartupUpdateCheck()
+{
+    if (m_updateStartupChecked || !m_update) return;
+    m_updateStartupChecked = true;
+#ifndef ZTO_TESTING
+    // Non-blocking: the window is already visible and the check can take as
+    // long as its network timeouts without owning the GUI thread.
+    QTimer::singleShot(4000, this, [this] {
+        if (m_update && !m_closing) m_update->checkOnStartup();
+    });
+#endif
 }
 AppController::~AppController()
 {
@@ -600,7 +655,7 @@ QString AppController::localName(const QString &kind, const QString &id, const Q
 }
 QVariantList AppController::menus() const
 {
-    QVariantList result{QVariantMap{{"id", QString::fromLatin1(api::ZeroTierMenuId)}, {"title", QStringLiteral("ZeroTier")}, {"ready", true}, {"message", QString()}}};
+    QVariantList result{QVariantMap{{"id", QString::fromLatin1(api::ZeroTierMenuId)}, {"title", QStringLiteral("ZeroTier")}, {"iconName", QStringLiteral("zerotier")}, {"ready", true}, {"message", QString()}}};
     for (const auto &menu : m_registry.menus()) {
         QByteArray icon; QBuffer buffer(&icon); buffer.open(QIODevice::WriteOnly);
         if (!menu.icon.isNull()) menu.icon.pixmap(20,20).save(&buffer,"PNG");
@@ -637,6 +692,8 @@ void AppController::setWindow(QQuickWindow *window)
     connect(window, &QWindow::visibleChanged, this, &AppController::setVisible);
     connect(window, &QWindow::windowStateChanged, this, [this] { setVisible(m_window && m_window->isVisible() && m_window->windowState() != Qt::WindowMinimized); });
     setVisible(window->isVisible() && window->windowState() != Qt::WindowMinimized);
+    // The startup update check must never delay the first frame.
+    if (window->isVisible()) scheduleStartupUpdateCheck();
 #if defined(Q_OS_MACOS) && !defined(ZTO_TESTING)
     if (!zerotier::executable().isEmpty()) {
         setBusy(true);
@@ -715,7 +772,12 @@ void AppController::ask(const QString &title, const QString &message, const QStr
 void AppController::confirm(bool accepted)
 {
     auto action = std::move(m_confirmation); m_confirmation = {};
-    if (accepted && !m_closing && action) action();
+    const bool resetPending = m_resetConfirmationPending;
+    m_resetConfirmationPending = false;
+    // A rejected reset must also reach the feature controller so it can clear
+    // its pending state without touching the service.
+    if (resetPending && m_reset) m_reset->confirm(accepted && !m_closing);
+    else if (accepted && !m_closing && action) action();
 }
 void AppController::beginServiceInterruption()
 {

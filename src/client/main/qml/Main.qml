@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQuick.Dialogs
@@ -12,7 +13,6 @@ ApplicationWindow {
     property string detailKind: ""
     property string detailId: ""
     property var aboutPlugin: ({})
-    property bool layoutReady: false
     readonly property bool operationPending: backend.busy || backend.closing
     onOperationPendingChanged: {
         if (!notificationBanner) return
@@ -20,15 +20,40 @@ ApplicationWindow {
         else if (notificationBanner.working) notificationBanner.present("操作已完成", false, "", 2400)
     }
     property real guideScrollPosition: 0
+    // Compact defaults derived from the real content: the ZeroTier table uses
+    // 710 px of columns plus row padding, and the settings sections fit below
+    // the default height without hiding their primary buttons.
+    readonly property int defaultWindowWidth: 960
+    readonly property int defaultWindowHeight: 700
+    readonly property int minimumAppWidth: 640
+    readonly property int minimumAppHeight: 440
+    // Fixed sidebar widths. The old draggable window/qml/sidebarWidth key is
+    // intentionally no longer read; only the explicit collapsed flag persists.
+    readonly property int sidebarExpandedWidth: 184
+    readonly property int sidebarCollapsedWidth: 56
+    readonly property int availableWorkWidth: Screen.desktopAvailableWidth
+    readonly property int availableWorkHeight: Screen.desktopAvailableHeight
     // Host settings live in one INI owned by SettingsStore; QML persistence goes
     // through the backend so the shared-root migration gate covers it too.
-    property int savedWidth: Number(backend.hostSetting("window/qml/savedWidth", 1024))
-    property int savedHeight: Number(backend.hostSetting("window/qml/savedHeight", 760))
-    property real sidebarWidth: Number(backend.hostSetting("window/qml/sidebarWidth", 190))
+    property int savedWidth: Number(backend.hostSetting("window/qml/savedWidth", defaultWindowWidth))
+    property int savedHeight: Number(backend.hostSetting("window/qml/savedHeight", defaultWindowHeight))
+    property bool sidebarCollapsed: backend.hostSetting("window/qml/sidebarCollapsed", false) === true
+    property real sidebarWidth: sidebarCollapsed ? sidebarCollapsedWidth : sidebarExpandedWidth
+    Behavior on sidebarWidth { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
+    function clampWindowSize(value, minimum, available) {
+        const candidate = Math.max(minimum, Math.round(Number(value) || 0))
+        if (!(Number(available) > 0)) return candidate
+        return Math.max(minimum, Math.min(candidate, Number(available)))
+    }
+    function setSidebarCollapsed(collapsed) {
+        if (sidebarCollapsed === collapsed) return
+        sidebarCollapsed = collapsed
+        backend.setHostSetting("window/qml/sidebarCollapsed", collapsed)
+    }
     width: savedWidth
     height: savedHeight
-    minimumWidth: 720
-    minimumHeight: 480
+    minimumWidth: minimumAppWidth
+    minimumHeight: minimumAppHeight
     visible: true
     title: "Z2"
     color: Theme.window
@@ -47,7 +72,12 @@ ApplicationWindow {
     palette.dark: Theme.border
     palette.alternateBase: Theme.side
     onClosing: close => { close.accepted = false; backend.requestQuit() }
-    Component.onCompleted: { Theme.dark = Qt.binding(() => backend.dark); layoutReady = true }
+    Component.onCompleted: {
+        // A saved size from a larger display must still open fully visible.
+        width = clampWindowSize(savedWidth, minimumWidth, availableWorkWidth)
+        height = clampWindowSize(savedHeight, minimumHeight, availableWorkHeight)
+        Theme.dark = Qt.binding(() => backend.dark)
+    }
     Component.onDestruction: {
         if (visibility !== Window.Maximized && visibility !== Window.Minimized) {
             backend.setHostSetting("window/qml/savedWidth", Math.max(minimumWidth, width))
@@ -122,37 +152,67 @@ ApplicationWindow {
         maximumHeight: Math.min(260, parent.height - 48)
         z: 1000
     }
-    SplitView {
+    Item {
+        id: workspace
+        objectName: "workspace"
         anchors.fill: parent
         anchors.margins: 12
-        orientation: Qt.Horizontal
         enabled: !backend.closing
-        handle: Rectangle { implicitWidth: 10; color: "transparent" }
         Rectangle {
             id: sidebar
-            SplitView.preferredWidth: window.sidebarWidth
-            SplitView.minimumWidth: 150
-            SplitView.maximumWidth: 270
-            onWidthChanged: if (window.layoutReady && width >= 150) backend.setHostSetting("window/qml/sidebarWidth", width)
-            color: Theme.side
+            objectName: "sidebar"
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: window.sidebarWidth
             radius: 6
+            color: Theme.side
+            clip: true
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 14
-                spacing: 20
-                RowLayout {
+                anchors.margins: window.sidebarCollapsed ? 8 : 12
+                spacing: 16
+                Item {
+                    id: sidebarHeader
+                    objectName: "sidebarHeader"
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 32
                     Rectangle {
                         objectName: "serviceStatusDot"
                         implicitWidth: 10; implicitHeight: 10; radius: 5
+                        x: window.sidebarCollapsed ? (sidebarHeader.width - width) / 2 : 0
+                        y: (sidebarHeader.height - height) / 2
                         color: backend.service.available ? "#25a773" : "#d95059"
                         Accessible.name: backend.service.available ? "ZeroTier 在线" : "ZeroTier 离线"
                         ToolTip.visible: statusHover.hovered
                         ToolTip.text: backend.service.available ? "ZeroTier 在线" : "ZeroTier 离线"
                         HoverHandler { id: statusHover }
+                        Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
                         Behavior on color { enabled: !Theme.transitioning; ColorAnimation { duration: 140 } }
                     }
-                    Label { text: "ZTOrbit"; font.pixelSize: 24; font.bold: true; color: Theme.accent; Layout.fillWidth: true }
-                    Label { objectName: "sidebarVersionLabel"; text: "v" + backend.version; font.pixelSize: 11; color: Theme.muted }
+                    Label {
+                        objectName: "sidebarBrandLabel"
+                        text: "ZTOrbit"
+                        font.pixelSize: 24
+                        font.bold: true
+                        color: Theme.accent
+                        x: 18
+                        y: (sidebarHeader.height - height) / 2
+                        opacity: window.sidebarCollapsed ? 0 : 1
+                        visible: opacity > 0.01
+                        Behavior on opacity { NumberAnimation { duration: 120 } }
+                    }
+                    Label {
+                        objectName: "sidebarVersionLabel"
+                        text: "v" + backend.version
+                        font.pixelSize: 11
+                        color: Theme.muted
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        opacity: window.sidebarCollapsed ? 0 : 1
+                        visible: opacity > 0.01
+                        Behavior on opacity { NumberAnimation { duration: 120 } }
+                    }
                 }
                 ListView {
                     id: navigation
@@ -163,6 +223,7 @@ ApplicationWindow {
                     spacing: 5
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
+                    Accessible.name: "导航菜单"
                     delegate: ItemDelegate {
                         id: navigationItem
                         required property var modelData
@@ -172,31 +233,134 @@ ApplicationWindow {
                         text: modelData.title
                         enabled: modelData.ready
                         highlighted: backend.activeMenu === modelData.id
+                        hoverEnabled: true
+                        focusPolicy: Qt.StrongFocus
+                        activeFocusOnTab: true
+                        padding: 0
+                        readonly property string title: modelData.title || ""
+                        readonly property string iconSource: modelData.iconSource || ""
+                        readonly property bool loading: modelData.loading || false
+                        readonly property bool hasIcon: iconSource.length > 0
+                        readonly property bool usesZeroTierIcon: !hasIcon && !loading && modelData.iconName === "zerotier"
+                        readonly property bool usesFallbackIcon: !hasIcon && !loading && modelData.iconName !== "zerotier"
+                        readonly property string tooltipText: window.sidebarCollapsed ? title : (modelData.message || modelData.toolTip || "")
+                        readonly property string accessibleName: title
+                        Accessible.name: navigationItem.accessibleName
+                        Accessible.description: modelData.message || modelData.toolTip || ""
                         onClicked: window.navigateTo(modelData.id)
-                        contentItem: RowLayout {
-                            spacing: 8
-                            Image { visible: source.toString().length > 0; source: navigationItem.modelData.iconSource || ""; Layout.preferredWidth: 20; Layout.preferredHeight: 20 }
-                            BusyIndicator { running: navigationItem.modelData.loading || false; visible: running; Layout.preferredWidth: 18; Layout.preferredHeight: 18 }
-                            Label { text: navigationItem.text + (navigationItem.modelData.loading ? " · 加载中…" : ""); elide: Text.ElideRight; color: navigationItem.enabled ? Theme.text : Theme.muted; font.pixelSize: 16; horizontalAlignment: Text.AlignLeft; verticalAlignment: Text.AlignVCenter; Layout.fillWidth: true }
+                        contentItem: Item {
+                            implicitWidth: 24
+                            implicitHeight: 24
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 8
+                                Item {
+                                    implicitWidth: 24
+                                    implicitHeight: 24
+                                    Image {
+                                        objectName: "navigationIcon-" + navigationItem.modelData.id
+                                        visible: navigationItem.hasIcon
+                                        anchors.centerIn: parent
+                                        width: 20; height: 20
+                                        source: navigationItem.iconSource
+                                        sourceSize.width: 20; sourceSize.height: 20
+                                        fillMode: Image.PreserveAspectFit
+                                        opacity: navigationItem.enabled ? 1 : 0.45
+                                    }
+                                    ZeroTierIcon {
+                                        visible: navigationItem.usesZeroTierIcon
+                                        anchors.centerIn: parent
+                                        width: 20; height: 20
+                                        ink: navigationItem.enabled ? Theme.text : Theme.muted
+                                        opacity: navigationItem.enabled ? 1 : 0.55
+                                    }
+                                    PluginIcon {
+                                        objectName: "navigationFallbackIcon-" + navigationItem.modelData.id
+                                        visible: navigationItem.usesFallbackIcon
+                                        anchors.centerIn: parent
+                                        width: 20; height: 20
+                                        ink: navigationItem.enabled ? Theme.text : Theme.muted
+                                        opacity: navigationItem.enabled ? 1 : 0.55
+                                    }
+                                    BusyIndicator {
+                                        objectName: "navigationBusy-" + navigationItem.modelData.id
+                                        anchors.centerIn: parent
+                                        width: 20; height: 20
+                                        running: navigationItem.loading
+                                        visible: running
+                                    }
+                                }
+                                Label {
+                                    id: navigationLabel
+                                    objectName: "navigationLabel-" + navigationItem.modelData.id
+                                    text: navigationItem.title + (navigationItem.loading ? " · 加载中…" : "")
+                                    elide: Text.ElideRight
+                                    color: navigationItem.enabled ? Theme.text : Theme.muted
+                                    font.pixelSize: 16
+                                    horizontalAlignment: Text.AlignLeft
+                                    verticalAlignment: Text.AlignVCenter
+                                    Layout.fillWidth: true
+                                    opacity: window.sidebarCollapsed ? 0 : 1
+                                    visible: opacity > 0.01
+                                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                                }
+                            }
                         }
                         background: Rectangle {
                             radius: 5
-                            color: parent.highlighted ? Theme.selection : parent.hovered ? Theme.hover : "transparent"
-                            Rectangle { visible: parent.parent.highlighted; width: 3; height: 22; anchors.verticalCenter: parent.verticalCenter; color: Theme.accent }
+                            color: navigationItem.highlighted ? Theme.selection : navigationItem.hovered ? Theme.hover : "transparent"
+                            border.width: navigationItem.activeFocus ? 2 : 0
+                            border.color: Theme.accent
+                            Behavior on color { enabled: !Theme.transitioning; ColorAnimation { duration: 100 } }
+                            Rectangle {
+                                visible: parent.parent.highlighted
+                                width: 3; height: 22
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: Theme.accent
+                            }
                         }
                         AppToolTip {
+                            objectName: "navigationTooltip-" + navigationItem.modelData.id
                             parent: navigationItem
-                            visible: navigationItem.hovered && ((navigationItem.modelData.message || "") !== "" || (navigationItem.modelData.toolTip || "") !== "")
-                            text: navigationItem.modelData.message || navigationItem.modelData.toolTip || ""
+                            visible: navigationItem.hovered && navigationItem.tooltipText !== ""
+                            text: navigationItem.tooltipText
                         }
                     }
                 }
-                GearButton { objectName: "settingsButton"; Layout.alignment: Qt.AlignLeft; selected: backend.activeMenu === "builtin/settings"; onClicked: window.navigateTo("builtin/settings") }
+                Item {
+                    id: sidebarFooter
+                    objectName: "sidebarFooter"
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: window.sidebarCollapsed ? 92 : 40
+                    GearButton {
+                        id: settingsButton
+                        objectName: "settingsButton"
+                        x: 0
+                        y: window.sidebarCollapsed ? 52 : 0
+                        selected: backend.activeMenu === "builtin/settings"
+                        onClicked: window.navigateTo("builtin/settings")
+                        Behavior on y { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
+                    }
+                    SidebarToggleButton {
+                        id: sidebarToggle
+                        collapsed: window.sidebarCollapsed
+                        x: window.sidebarCollapsed ? (sidebarFooter.width - width) / 2 : sidebarFooter.width - width
+                        y: 0
+                        Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
+                        onToggleRequested: window.setSidebarCollapsed(!window.sidebarCollapsed)
+                    }
+                }
             }
         }
         Item {
             id: pageHost
-            SplitView.fillWidth: true
+            anchors.left: sidebar.right
+            anchors.leftMargin: 10
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
             BoundedScrollView {
                 id: scroll
                 objectName: "zeroTierScroll"

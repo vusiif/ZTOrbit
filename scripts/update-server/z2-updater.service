@@ -1,0 +1,34 @@
+[Unit]
+Description=Z2Updater signed static update feed
+Wants=network-online.target
+After=network-online.target zerotier-one.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+DynamicUser=yes
+RuntimeDirectory=z2-updater
+LogsDirectory=z2-updater
+WorkingDirectory=/srv/z2-updater
+BindReadOnlyPaths=/root/Server/Z2Updater:/srv/z2-updater
+ExecStart=/usr/sbin/nginx -c /srv/z2-updater/conf/nginx.conf -p /run/z2-updater
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGQUIT
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=5
+ProtectSystem=strict
+ProtectHome=tmpfs
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+CapabilityBoundingSet=
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

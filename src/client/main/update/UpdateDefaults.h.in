@@ -1,0 +1,9 @@
+#pragma once
+
+// Generated at configure time from the ZTO_UPDATE_* CMake cache variables.
+// The #ifndef guards keep the header usable by targets that inject the values
+// through target_compile_definitions (the isolated tests do this).
+
+#ifndef ZTO_UPDATE_PUBLIC_KEY_BASE64
+#define ZTO_UPDATE_PUBLIC_KEY_BASE64 "@ZTO_UPDATE_PUBLIC_KEY_BASE64@"
+#endif

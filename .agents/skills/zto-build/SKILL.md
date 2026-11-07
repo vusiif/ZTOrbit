@@ -32,6 +32,10 @@ Windows默认运行包只保留宿主使用的Basic控件样式、中文／英�
 
 脚本用显式目标 `zto` 构建主程序。不要用默认“构建全部目标”替代，以免现有构建缓存启用了测试或插件。GUI 回归、服务端、语音面板和音频测试不是普通打包的默认构建目标；根据用户要求或实际代码变化选择需要的验证。
 
+## 自动更新 ZIP
+
+将干净的 `build/dist/Z2-windows-x64.zip` 上传到服务器选定位置，在 `/root/Server/Z2Updater/` 运行 `bash ./update.sh --version <VERSION> --file <ZIP路径>`。`--file` 必填，支持绝对路径或相对执行时工作目录的路径，不约定固定文件或上传目录。本技能的 `scripts/publish-update.py` 部署为服务器 `tools/publish-update.py`，负责读取包内 PE 版本、转换 ZIP 外目录、生成清单并用服务器 root 专用私钥签名、校验和切换发布；同版本不同内容拒绝覆盖。发布入口源文件是仓库 `scripts/update-server/update.sh`。当前部署与发布步骤见 [更新服务器](../../../docs/update-server.md)。发布已有 ZIP 不要求重新编译主程序、服务端、SDK 或插件。
+
 ## API 是否更新
 
 API 是头文件 SDK，另附本机封装命令工具，生成过程是独立 CMake 配置、安装公开头文件/版本头/CMake 导出，再压缩，无须构造额外 API DLL；安装前构建 ztplugin_pack，随 SDK 部署工具运行依赖。
@@ -81,7 +85,7 @@ API 是头文件 SDK，另附本机封装命令工具，生成过程是独立 CM
 - SDK：`build/dist/Z2-api-v<API版本>/` 及同名 `.zip`。
 - 指定插件：`build/dist/plugins/<插件文件>`，主程序压缩包不带应用插件。
 
-主程序只部署自身基础依赖和 libsodium，windeployqt 输入只包含主程序。禁止读取现有业务插件缓存；Multimedia、媒体后端和 FFmpeg 由独立插件收集、封装。不得在用户运行目录批量删除媒体文件。
+主程序只部署自身基础依赖和 libsodium，windeployqt 输入只包含主程序。运行包同时包含自动更新助手 `z2_updater.exe`（纯 Win32，无 Qt 依赖，必须与 `Z2.exe` 同级，缺失时打包脚本失败），更新协议见 `docs/auto-update.md`。禁止读取现有业务插件缓存；Multimedia、媒体后端和 FFmpeg 由独立插件收集、封装。不得在用户运行目录批量删除媒体文件。
 
 使用干净暂存目录，成功校验后替换发行目录；不创建或保留作为交付结果的构建备份。不把日志、插件数据、模拟 CLI 或测试可执行文件带入包。每步确认成功再使用产物，失败不能宣称新包已完成。
 

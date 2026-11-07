@@ -12,6 +12,16 @@ TCP 回退浮窗复用 `AppPopup` 的透明度过渡，按需加载网络和 Moo
 
 非阻塞反馈统一使用 `NotificationBanner`，放在窗口 Overlay 顶部居中，不使用占用内容高度的 footer。`notificationRequested` 按事件推送文字与明确的错误标记，通知不能从每次 `stateChanged` 重新触发；同文重试需刷新显示时间。结果通知与复制共用提示板，普通信息使用绿色语义色，错误使用红色语义色；长文字限高滚动，关闭后淡出并停止接收输入，悬停时暂停自动消失。系统操作确认仍由确认对话框处理。
 
+## 侧边栏与窗口尺寸
+
+主导航使用固定宽度侧边栏，不再使用 `SplitView` 和可拖动分隔条。展开宽度 184 px（图标 + 文本，长标题省略），折叠宽度 56 px（仅图标）；折叠时菜单名通过悬停提示和 `Accessible.name` 暴露，选中、加载、禁用和键盘焦点状态仍然可见可用。底部齿轮按钮和展开/收起按钮始终可达，切换按钮是真正的 `ToolButton`（可键盘聚焦，带悬停与焦点样式），宽度以 180 ms 动画过渡；页面（包括插件页）实例和状态在切换时保留，不重建。
+
+折叠状态使用 `window/qml/sidebarCollapsed` 持久化；旧的 `window/qml/sidebarWidth` 不再读取或写入（文件中已有的值原样保留）。侧边栏宽度不再由用户拖动调整。
+
+菜单图标由 `LineIcon` 派生（24 px 画布、约 1.7 px 单线描边、主题变化时重绘）：`ZeroTierIcon`、`GearIcon`、`ChevronIcon`、`PluginIcon`。内置 ZeroTier 菜单在 `AppController::menus()` 中带 `iconName: "zerotier"`；插件菜单优先使用插件图标，缺失或为空时回退到统一的 `PluginIcon`。不使用 QtSvg，图标在 20 px 导航尺寸和 24 px 按钮尺寸下都保持清晰。
+
+窗口默认 960×700，最小 640×440。默认宽度让 ZeroTier 网络表（710 px 列宽加行内边距）在展开侧边栏下无需横向滚动；最小尺寸下设置页与 ZeroTier 页的主要按钮仍完整可见，其余内容交给既有滚动容器。恢复的 `window/qml/savedWidth`／`savedHeight` 通过 `clampWindowSize(value, minimum, available)` 夹到最小尺寸与当前屏幕工作区之间，避免大屏幕上保存的尺寸在小屏幕上超出可视区域。工作区取自窗口屏幕的 `Screen.desktopAvailableWidth/Height`（Qt 6.8 的 Screen 附件属性没有 `availableGeometry`，这两个值就是 `QScreen::availableGeometry()` 的宽高）。
+
 ## 插件与引擎寿命
 
 公开页面工厂接收借用的 `QQmlEngine*` 和 `QQuickItem* parent`，返回QObject父对象与可视父项均为parent的新页面。SDK的 `createQmlPage()` 在组件完成之前设置父项和初始属性，插件自己的QML存入DLL资源。控制器通过required属性注入，并由页面持有；传入QVariant时转换为 `QObject*`，避免注册DLL所有的控制器指针元类型。不得注册DLL所有的全局QML类型、单例或宿主内部类型。

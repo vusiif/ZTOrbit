@@ -1,0 +1,2 @@
+# Preserve the bytes covered by the detached signature on Windows.
+manifest.json text eol=lf

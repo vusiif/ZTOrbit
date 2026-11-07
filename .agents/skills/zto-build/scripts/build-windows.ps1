@@ -48,6 +48,10 @@ try {
     # Build this target only, even if this build tree also has src/tests/plugins configured.
     Invoke-Checked cmake (@('-S', '.', '-B', 'build/cmake-build-release', '-G', 'Visual Studio 17 2022', '-A', 'x64', '-DZTO_BUILD_TESTS=OFF', "-DCMAKE_PREFIX_PATH=$qtSdk") + $sodiumConfigure)
     Invoke-Checked cmake @('--build', 'build/cmake-build-release', '--config', 'Release', '--target', 'zto', '--parallel')
+    # The automatic-update helper is a standalone Win32 executable with no Qt
+    # dependency. It must be packaged next to Z2.exe so a verified update can
+    # hand the installation transaction to an independent process.
+    Invoke-Checked cmake @('--build', 'build/cmake-build-release', '--config', 'Release', '--target', 'z2_updater', '--parallel')
 
     # The API is a header-only SDK. Configuration, clean installation and ZIP creation
     # are necessary only when its inputs or installed contents changed.
@@ -101,6 +105,10 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $stagingPath 'licenses') -Force | Out-Null
     Copy-Item -LiteralPath 'src/shared/package/libsodium-LICENSE.txt' -Destination (Join-Path $stagingPath 'licenses')
     Copy-Item -LiteralPath 'build/cmake-build-release/Release/Z2.exe' -Destination $stagingPath
+    # z2_updater.exe is required at runtime by the automatic update transaction;
+    # publishing the host without it would make every verified update fail.
+    Copy-Item -LiteralPath 'build/cmake-build-release/Release/z2_updater.exe' -Destination $stagingPath
+    if (!(Test-Path -LiteralPath (Join-Path $stagingPath 'z2_updater.exe'))) { throw 'z2_updater.exe was not deployed' }
     $deployArguments = @('--release', '--translations', 'en,zh_CN,zh_TW', '--skip-plugin-types', 'qmltooling', '--qmldir', (Join-Path $projectRoot 'src/client/main/qml'), '--dir', $stagingPath, (Join-Path $stagingPath 'Z2.exe'))
     # Qt Quick uses D3D11 by default on Windows. Its CPU scene graph backend
     # does not need the separate Mesa OpenGL software renderer.

@@ -8,6 +8,8 @@
 #include "storage/StorageMaintenanceScheduler.h"
 #include "plugins/PluginRegistry.h"
 #include "plugins/PluginLoader.h"
+#include "reset/ResetController.h"
+#include "update/UpdateController.h"
 #include <QFutureWatcher>
 #include <QQuickWindow>
 #include <QPointer>
@@ -55,6 +57,11 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList tcpFallbackServers READ tcpFallbackServers NOTIFY tcpFallbackServersChanged)
     Q_PROPERTY(bool tcpFallbackServersBusy READ tcpFallbackServersBusy NOTIFY tcpFallbackServersChanged)
     Q_PROPERTY(QString tcpFallbackServersMessage READ tcpFallbackServersMessage NOTIFY tcpFallbackServersChanged)
+    // Feature controllers own their own UI state. They are exposed as QObject
+    // pointers so the settings sections only depend on the documented QML
+    // contract, not on host internals.
+    Q_PROPERTY(QObject *update READ updateObject CONSTANT)
+    Q_PROPERTY(QObject *reset READ resetObject CONSTANT)
 public:
     explicit AppController(QObject *parent = nullptr, const QString &pluginDirectory = {},
                            SystemOperations *operations = nullptr,
@@ -109,6 +116,8 @@ public:
     bool moonsActive() const { return m_moonsActive; }
     void setMoonsActive(bool active);
     QVariantMap localConfig() const;
+    QObject *updateObject() { return m_update.get(); }
+    QObject *resetObject() { return m_reset.get(); }
     QVariantList tcpFallbackServers() const { return m_tcpFallbackServers; }
     bool tcpFallbackServersBusy() const { return m_tcpFallbackServersBusy; }
     QString tcpFallbackServersMessage() const { return m_tcpFallbackServersMessage; }
@@ -229,6 +238,12 @@ private:
     QHash<QString, QPointer<QObject>> m_memberProbeContexts;
     std::function<void()> m_confirmation;
     std::function<void(bool)> m_serviceMonitor;
+    std::unique_ptr<update::UpdateController> m_update;
+    std::unique_ptr<reset::ResetController> m_reset;
+    bool m_updateStartupChecked = false;
+    bool m_resetConfirmationPending = false;
+    void connectFeatureControllers();
+    void scheduleStartupUpdateCheck();
     void ask(const QString &title, const QString &message, const QString &acceptLabel, std::function<void()> action);
     void setBusy(bool busy);
     void feedback(const QString &message, bool error = true);

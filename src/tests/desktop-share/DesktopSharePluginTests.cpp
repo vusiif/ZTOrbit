@@ -987,7 +987,7 @@ private slots:
         if (Process32FirstW(snapshot, &entry)) {
             do {
                 const QString name = QString::fromWCharArray(entry.szExeFile);
-                if (name.contains(QStringLiteral("zto_media_worker"), Qt::CaseInsensitive)
+                if (name.contains(QStringLiteral("z2_media_worker"), Qt::CaseInsensitive)
                     && entry.th32ParentProcessID == GetCurrentProcessId())
                     result.insert(entry.th32ProcessID);
             } while (Process32NextW(snapshot, &entry));
@@ -1008,7 +1008,7 @@ private slots:
         if (Process32FirstW(snapshot, &entry)) {
             do {
                 const QString name = QString::fromWCharArray(entry.szExeFile);
-                if (name.contains(QStringLiteral("zto_media_worker"), Qt::CaseInsensitive)
+                if (name.contains(QStringLiteral("z2_media_worker"), Qt::CaseInsensitive)
                     && entry.th32ParentProcessID == GetCurrentProcessId())
                     result.append(name + QLatin1Char(':') + QString::number(entry.th32ProcessID));
             } while (Process32NextW(snapshot, &entry));

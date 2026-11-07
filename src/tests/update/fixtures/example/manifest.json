@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "channel": "stable",
+  "publishedAt": "2026-11-02T12:00:00Z",
+  "minUpdatableVersion": "0.5.0",
+  "artifacts": [
+    {
+      "platform": "windows",
+      "arch": "x64",
+      "version": "0.5.4",
+      "url": "https://updates.example.invalid/z2/stable/windows-x64/Z2-0.5.4-windows-x64.zip",
+      "size": 481,
+      "sha256": "99520eb11110084c6ee9f880652ddfb7685436409b9780e5f83f0e7ff24931d7",
+      "removeFiles": [
+        "old-plugin.dll"
+      ]
+    }
+  ]
+}

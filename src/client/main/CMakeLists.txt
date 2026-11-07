@@ -7,6 +7,14 @@ set(ZTO_MAIN_HEADERS
     AppController.h RecordModel.h SystemOperations.h AppLog.h SingleInstance.h PluginImport.h ZeroTierClient.h
     NetworkBundle.h LocalConfig.h MemberPing.h MacPlatform.h storage/StorageContext.h storage/CoordinationLock.h storage/SettingsStore.h storage/PluginDataStore.h storage/StorageMaintenance.h storage/StorageMaintenanceScheduler.h
     plugins/PluginRegistry.h plugins/PluginLoader.h plugins/HostServicesImpl.h plugins/ServiceBroker.h)
+# Feature modules keep their host sources and helper targets next to the
+# implementation so unrelated changes do not collide in this list. A module
+# that is not present in the working tree is skipped.
+foreach(zto_feature update reset)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${zto_feature}/CMakeLists.txt")
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/${zto_feature}" "${CMAKE_CURRENT_BINARY_DIR}/${zto_feature}")
+    endif()
+endforeach()
 list(TRANSFORM ZTO_MAIN_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 list(TRANSFORM ZTO_MAIN_HEADERS PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 set(ZTO_MAIN_SOURCES "${ZTO_MAIN_SOURCES}" PARENT_SCOPE)
@@ -50,7 +58,7 @@ function(zto_add_qml_ui target)
         list(APPEND qml_options NO_CACHEGEN)
     endif()
     set(qml_sources)
-    foreach(name SettingsPage NotificationBanner AppToolTip Main Theme ActionButton RecordList Guide StartupError LazyPopup AppPopup AppDialog AppMenu AppMenuItem BoundedScrollView GearButton GearIcon ThemeToggle)
+    foreach(name SettingsPage NotificationBanner AppToolTip Main Theme ActionButton RecordList Guide StartupError LazyPopup AppPopup AppDialog AppMenu AppMenuItem BoundedScrollView GearButton GearIcon ThemeToggle UpdateSection ResetSection LineIcon ZeroTierIcon ChevronIcon PluginIcon SidebarToggleButton)
         set(source "${ZTO_ROOT_DIR}/src/client/main/qml/${name}.qml")
         set_source_files_properties("${source}" PROPERTIES QT_RESOURCE_ALIAS "qml/${name}.qml")
         list(APPEND qml_sources "${source}")

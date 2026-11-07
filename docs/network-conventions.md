@@ -33,6 +33,7 @@ Moon 文件名： 000000a1b2c3d4e.moon
 | --- | --- | --- |
 | ZeroTier / Moon | `9993/UDP` | 服务器公网 IPv4；Moon 的 `stableEndpoints` 使用 `服务器公网IPv4/9993` |
 | ZTOrbitHub | `18100/TCP` 和 `18100/UDP` | 各 ZeroTier 网络内服务器固定虚拟 IP `.1`；用于查询、控制及应用数据转发 |
+| Z2Updater | `18102/TCP`（HTTP） | 独立更新服务；当前部署仅监听 `10.10.10.1`，客户端手动填写 IP，端口默认 18102 |
 | Pylon `reflect` | `9443/TCP` | 同一服务器公网 IPv4；Docker 宿主机 `9443/TCP` 映射容器 `443/TCP`，用于 ZeroTier TCP 回退 |
 
 客户端的 TCP 回退中继端点按 `服务器公网IPv4/9443` 配置。ZTOrbitHub 的端点按所在网络的 `.1:18100` 确定。部署时应保证相应防火墙与安全组允许这些连接。
@@ -42,6 +43,12 @@ ZeroTier 的 `local.conf` 中 `settings.tcpFallbackRelay` 使用原生 `IP/9443`
 ZeroTier 本地管理 API 使用服务器回环地址 `127.0.0.1:9993/TCP`，与公网 `9993/UDP` 的数据通信分开；它不是 Pylon 的监听端口。
 
 更改上述端口、将服务拆分到其他服务器或使用不同连接地址，均属于约定之外的设置。
+
+### 客户端更新服务
+
+Z2Updater 独立于 ZTOrbitHub 业务协议，在 `/root/Server/Z2Updater/` 提供两个 HTTP 接口：客户端 `GET /updater` 获取签名版本信息，独立的 `z2_updater.exe` 通过 `GET /file?version=<版本>` 下载对应更新包；直接 `GET /file` 重定向到当前版本。当前部署经开发者明确选择使用内网 HTTP，固定地址为 `http://10.10.10.1:18102`；仅绑定该虚拟 IP，不监听公网网卡，也不新增公网防火墙或云安全组规则。设置浮窗只接收 IPv4 与端口，默认端口为 18102；IP 为空时不检查更新。
+
+客户端必须能到达该内网地址；更新源不根据当前所连房间的 `.1` 自动推导，也不经 `18100` 转发。HTTP 下仍必须验证编译期公钥对应的清单签名，以及包的大小和 SHA-256。发布流程为先上传 ZIP 到服务器选定位置，再以 root 执行 `bash ./update.sh --version <版本> --file <ZIP路径>`，文件位置不固定；服务器私钥位于 `secrets/`，目录 700、文件 600，Web 进程无读取权限，也不通过 HTTP 提供。公钥可公开，发布者保留离线密钥备份。切换公网访问、HTTPS 或其他地址前先更新本约定和部署配置。部署与发布操作见[更新服务器](update-server.md)。
 
 ## ztncui 网络与服务器固定地址
 

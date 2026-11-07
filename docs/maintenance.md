@@ -32,7 +32,7 @@ Windows 启动、安装后启动及重启先检查 IPv4/IPv6 的 TCP/UDP exclude
 
 ## 发行包边界
 
-正式发行包只包含主程序及运行依赖，测试辅助程序和测试数据不随包发布，避免模拟 CLI 被误当作真实服务工具。
+正式发行包只包含主程序及运行依赖，测试辅助程序和测试数据不随包发布，避免模拟 CLI 被误当作真实服务工具。自动更新使用独立的 `z2_updater.exe`（与 `Z2.exe` 同级，无 Qt 依赖），协议、配置与静态托管要求见[自动更新](auto-update.md)；本机状态重置的删除范围与失败处理见[重置 ZeroTier](reset-zerotier.md)。
 
 Windows 主程序及当前 API SDK 分别压缩为 `build/dist/Z2-windows-x64.zip` 和 `build/dist/Z2-api-v<API版本>.zip`。插件独立放在 `build/dist/plugins/`，正式入口是包含私有运行依赖和许可证的 `.z2plugin`，不进入主程序包。主程序只部署基础 Qt 与 libsodium；客户端导入包即可使用，构建目录中的裸 DLL 仅作诊断。
 

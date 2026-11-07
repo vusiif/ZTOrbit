@@ -8,7 +8,7 @@ ToolButton {
     implicitHeight: 40
     hoverEnabled: true
     Accessible.name: "设置"
-    contentItem: GearIcon {}
+    contentItem: GearIcon { ink: control.hovered || control.activeFocus ? Theme.accent : Theme.text }
     background: Rectangle {
         radius: 6
         color: control.down || control.selected ? Theme.selection : control.hovered ? Theme.hover : "transparent"

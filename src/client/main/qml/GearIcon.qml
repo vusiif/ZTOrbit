@@ -1,35 +1,25 @@
 import QtQuick
 
-Canvas {
-    id: gear
-    property color ink: Theme.text
-    implicitWidth: 24
-    implicitHeight: 24
-    onInkChanged: requestPaint()
-    onWidthChanged: requestPaint()
-    onHeightChanged: requestPaint()
-    onPaint: {
-        const ctx = getContext("2d")
-        ctx.reset()
-        ctx.translate(width / 2, height / 2)
-        const scale = Math.min(width, height) / 26
-        ctx.scale(scale, scale)
-        ctx.strokeStyle = ink
-        ctx.lineWidth = 1.7
-        ctx.lineJoin = "round"
+// Settings gear, drawn with the shared 24 px line-icon surface. Coordinates are
+// the former standalone gear scaled from its 26 px box to the family box.
+LineIcon {
+    objectName: "gearIcon"
+    painter: function(ctx) {
         ctx.beginPath()
         for (let i = 0; i < 8; ++i) {
             const a = i * Math.PI / 4
-            for (const point of [[a - .28, 8], [a - .18, 11], [a + .18, 11], [a + .28, 8]]) {
-                const x = Math.cos(point[0]) * point[1], y = Math.sin(point[0]) * point[1]
-                if (i === 0 && point[0] === a - .28) ctx.moveTo(x, y)
+            const points = [[a - .28, 7.4], [a - .18, 10.15], [a + .18, 10.15], [a + .28, 7.4]]
+            for (let p = 0; p < points.length; ++p) {
+                const x = Math.cos(points[p][0]) * points[p][1]
+                const y = Math.sin(points[p][0]) * points[p][1]
+                if (i === 0 && p === 0) ctx.moveTo(x, y)
                 else ctx.lineTo(x, y)
             }
         }
         ctx.closePath()
         ctx.stroke()
         ctx.beginPath()
-        ctx.arc(0, 0, 3.5, 0, Math.PI * 2)
+        ctx.arc(0, 0, 3.2, 0, Math.PI * 2)
         ctx.stroke()
     }
 }
