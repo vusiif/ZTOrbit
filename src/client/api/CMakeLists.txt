@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.21.1)
 
 # This SDK can be configured independently with cmake -S src/client/api.
-set(ZTO_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../../VERSION")
+get_filename_component(
+        ZTO_VERSION_FILE
+        "${CMAKE_CURRENT_LIST_DIR}/../../../VERSION"
+        REALPATH
+)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ZTO_VERSION_FILE}")
 file(READ "${ZTO_VERSION_FILE}" ZTO_APP_VERSION)
 string(STRIP "${ZTO_APP_VERSION}" ZTO_APP_VERSION)
