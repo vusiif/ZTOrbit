@@ -137,6 +137,7 @@ public:
     Q_INVOKABLE bool copyNodeId();
     void setWindow(QQuickWindow *window);
     void setVisible(bool visible);
+    void updateWindowIcon();
     plugins::PluginRegistry *pluginRegistry() { return &m_registry; }
     Q_INVOKABLE bool navigate(const QString &menuId, QQuickItem *container);
     Q_INVOKABLE void refresh();
@@ -191,6 +192,7 @@ private:
     QTimer m_statusTimer, m_memberTimer;
     QPointer<QQuickWindow> m_window;
     WId m_windowId = 0;
+    int m_windowIconState = -1; // -1 unset, 0 offline, 1 online
     QPointer<QQuickItem> m_page;
     QVariantMap m_info;
     QJsonDocument m_moonMetadata;

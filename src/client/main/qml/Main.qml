@@ -56,6 +56,20 @@ ApplicationWindow {
     minimumHeight: minimumAppHeight
     visible: true
     title: "Z2"
+    // Windows draws its own caption buttons in the title bar below; other
+    // platforms keep the native frame (macOS traffic lights stay native).
+    readonly property bool customFrame: Qt.platform.os === "windows"
+    readonly property bool maximized: visibility === Window.Maximized || visibility === Window.FullScreen
+    readonly property int titleBarHeight: 48
+    flags: customFrame
+        ? Qt.Window | Qt.FramelessWindowHint | Qt.WindowSystemMenuHint | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint
+        : Qt.Window
+    function toggleMaximized() { if (maximized) showNormal(); else showMaximized() }
+    function openGuide() {
+        // The guide points at ZeroTier page controls, so show that page first.
+        if (backend.activeMenu !== "builtin/zerotier") backend.navigate("builtin/zerotier", pluginContainer)
+        Qt.callLater(() => guideLoader.open())
+    }
     color: Theme.window
     palette.window: Theme.window
     palette.windowText: Theme.text
@@ -71,7 +85,10 @@ ApplicationWindow {
     palette.light: Theme.button
     palette.dark: Theme.border
     palette.alternateBase: Theme.side
-    onClosing: close => { close.accepted = false; backend.requestQuit() }
+    // Closing the window keeps ZTOrbit running in the tray; quitting is an
+    // explicit choice (tray menu or Settings > 退出程序).
+    onClosing: close => { close.accepted = false; if (backend.closing) backend.requestQuit(); else backend.hideToTray() }
+    property bool trayHintShown: false
     Component.onCompleted: {
         // A saved size from a larger display must still open fully visible.
         width = clampWindowSize(savedWidth, minimumWidth, availableWorkWidth)
@@ -112,8 +129,8 @@ ApplicationWindow {
         id: tray
         objectName: "systemTrayIcon"
         visible: true
-        tooltip: backend.closing ? "ZTOrbit · 正在退出" : "ZTOrbit"
-        icon.source: "qrc:/assets/app-icon.png"
+        tooltip: backend.closing ? "Z2 · 正在退出" : backend.service.available === true ? "Z2 · ZeroTier 在线" : "Z2 · ZeroTier 离线"
+        icon.source: backend.service.available === true ? "qrc:/qt/qml/ZTOrbit/assets/logo-online.png" : "qrc:/qt/qml/ZTOrbit/assets/logo-offline.png"
         onActivated: reason => { if (reason === Platform.SystemTrayIcon.Trigger || reason === Platform.SystemTrayIcon.DoubleClick) backend.restoreWindow() }
         menu: Platform.Menu {
             Platform.MenuItem { text: "显示窗口"; enabled: !backend.closing; onTriggered: backend.restoreWindow() }
@@ -123,7 +140,14 @@ ApplicationWindow {
     Connections {
         target: backend
         function onActiveMenuChanged() { if (!menuTransition.running) pageReveal.restart() }
-        function onTrayRequested() { if (tray.available) window.hide(); else window.showMinimized() }
+        function onTrayRequested() {
+            if (!tray.available) { window.showMinimized(); return }
+            window.hide()
+            if (!window.trayHintShown && tray.supportsMessages) {
+                window.trayHintShown = true
+                tray.showMessage("Z2 仍在后台运行", "点击托盘图标可重新打开窗口；如需退出，请在托盘菜单中选择“退出”。")
+            }
+        }
         function onNodeIdCopied() { notificationBanner.present("已复制", false, "", 1300) }
         function onNetworkJoined() { joinLoader.close() }
         function onConfigurationImported(networkId) { joinLoader.ensure().setNetworkId(networkId) }
@@ -152,11 +176,145 @@ ApplicationWindow {
         maximumHeight: Math.min(260, parent.height - 48)
         z: 1000
     }
+    // Title bar: the Z logo (service state + sidebar toggle) stays at a fixed
+    // spot on the left, the window can be dragged by any empty area, and on
+    // Windows the caption buttons sit flush in the top-right corner.
+    Item {
+        id: titleBar
+        objectName: "titleBar"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: window.titleBarHeight
+        enabled: !backend.closing
+        DragHandler {
+            target: null
+            enabled: window.customFrame
+            grabPermissions: PointerHandler.CanTakeOverFromAnything
+            onActiveChanged: if (active) window.startSystemMove()
+        }
+        TapHandler {
+            enabled: window.customFrame
+            onDoubleTapped: window.toggleMaximized()
+        }
+        AbstractButton {
+            id: logoButton
+            objectName: "sidebarToggleButton"
+            readonly property bool online: backend.service.available === true
+            readonly property string stateText: online ? "ZeroTier 在线" : "ZeroTier 离线"
+            // Centred over the collapsed sidebar, so it never moves.
+            x: 12 + (window.sidebarCollapsedWidth - width) / 2
+            anchors.verticalCenter: parent.verticalCenter
+            implicitWidth: 34
+            implicitHeight: 34
+            hoverEnabled: true
+            focusPolicy: Qt.StrongFocus
+            activeFocusOnTab: true
+            Accessible.role: Accessible.Button
+            Accessible.name: window.sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"
+            Accessible.description: stateText
+            onClicked: window.setSidebarCollapsed(!window.sidebarCollapsed)
+            contentItem: Item {
+                Image {
+                    objectName: "serviceStatusLogo"
+                    anchors.centerIn: parent
+                    width: logoButton.down ? 28 : 30
+                    height: width
+                    source: logoButton.online ? "qrc:/qt/qml/ZTOrbit/assets/logo-online.png" : "qrc:/qt/qml/ZTOrbit/assets/logo-offline.png"
+                    sourceSize.width: 64
+                    sourceSize.height: 64
+                    smooth: true
+                    mipmap: true
+                    Behavior on width { NumberAnimation { duration: 80 } }
+                }
+            }
+            background: Rectangle {
+                radius: 9
+                color: logoButton.hovered ? Theme.hover : "transparent"
+                border.width: logoButton.activeFocus ? 2 : 0
+                border.color: Theme.accent
+            }
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
+            AppToolTip {
+                objectName: "sidebarToggleTooltip"
+                parent: logoButton
+                visible: logoButton.hovered
+                text: logoButton.stateText + " · " + (window.sidebarCollapsed ? "点击展开侧边栏" : "点击收起侧边栏")
+            }
+        }
+        Label {
+            id: brandLabel
+            objectName: "sidebarBrandLabel"
+            text: "ZTOrbit"
+            font.pixelSize: 22
+            font.bold: true
+            color: Theme.accent
+            anchors.left: logoButton.right
+            anchors.leftMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        AbstractButton {
+            id: guideButton
+            objectName: "beginnerGuideButton"
+            anchors.left: brandLabel.right
+            anchors.leftMargin: 14
+            anchors.verticalCenter: parent.verticalCenter
+            implicitHeight: 26
+            implicitWidth: guideRow.implicitWidth + 20
+            hoverEnabled: true
+            focusPolicy: Qt.StrongFocus
+            Accessible.role: Accessible.Button
+            Accessible.name: "新手指南"
+            onClicked: window.openGuide()
+            contentItem: Item {
+                Row {
+                    id: guideRow
+                    anchors.centerIn: parent
+                    spacing: 6
+                    Rectangle {
+                        width: 16; height: 16; radius: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: Theme.primary
+                        Text { anchors.centerIn: parent; text: "?"; color: Theme.primaryText; font.pixelSize: 11; font.bold: true }
+                    }
+                    Label {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "新手指南"
+                        font.pixelSize: Theme.fontCaption
+                        color: guideButton.hovered ? Theme.accent : Theme.muted
+                    }
+                }
+            }
+            background: Rectangle {
+                radius: height / 2
+                color: guideButton.down ? Theme.selection : guideButton.hovered ? Theme.hover : "transparent"
+                border.color: guideButton.activeFocus || guideButton.hovered ? Theme.accent : Theme.cardBorder
+                border.width: guideButton.activeFocus ? 2 : 1
+                Behavior on color { enabled: !Theme.transitioning; ColorAnimation { duration: 100 } }
+            }
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
+        }
+        Row {
+            objectName: "windowButtons"
+            visible: window.customFrame
+            anchors.top: parent.top
+            anchors.right: parent.right
+            WindowButton { objectName: "minimizeWindowButton"; kind: "minimize"; Accessible.name: "最小化"; onClicked: window.showMinimized() }
+            WindowButton {
+                objectName: "maximizeWindowButton"
+                kind: window.maximized ? "restore" : "maximize"
+                Accessible.name: window.maximized ? "还原" : "最大化"
+                onClicked: window.toggleMaximized()
+            }
+            WindowButton { objectName: "closeWindowButton"; kind: "close"; Accessible.name: "关闭"; onClicked: backend.hideToTray() }
+        }
+    }
     Item {
         id: workspace
         objectName: "workspace"
         anchors.fill: parent
         anchors.margins: 12
+        anchors.topMargin: window.titleBarHeight
         enabled: !backend.closing
         Rectangle {
             id: sidebar
@@ -172,48 +330,6 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.margins: window.sidebarCollapsed ? 8 : 12
                 spacing: 16
-                Item {
-                    id: sidebarHeader
-                    objectName: "sidebarHeader"
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 32
-                    Rectangle {
-                        objectName: "serviceStatusDot"
-                        implicitWidth: 10; implicitHeight: 10; radius: 5
-                        x: window.sidebarCollapsed ? (sidebarHeader.width - width) / 2 : 0
-                        y: (sidebarHeader.height - height) / 2
-                        color: backend.service.available ? Theme.online : Theme.offline
-                        Accessible.name: backend.service.available ? "ZeroTier 在线" : "ZeroTier 离线"
-                        ToolTip.visible: statusHover.hovered
-                        ToolTip.text: backend.service.available ? "ZeroTier 在线" : "ZeroTier 离线"
-                        HoverHandler { id: statusHover }
-                        Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
-                        Behavior on color { enabled: !Theme.transitioning; ColorAnimation { duration: 140 } }
-                    }
-                    Label {
-                        objectName: "sidebarBrandLabel"
-                        text: "ZTOrbit"
-                        font.pixelSize: 24
-                        font.bold: true
-                        color: Theme.accent
-                        x: 18
-                        y: (sidebarHeader.height - height) / 2
-                        opacity: window.sidebarCollapsed ? 0 : 1
-                        visible: opacity > 0.01
-                        Behavior on opacity { NumberAnimation { duration: 120 } }
-                    }
-                    Label {
-                        objectName: "sidebarVersionLabel"
-                        text: "v" + backend.version
-                        font.pixelSize: 11
-                        color: Theme.muted
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        opacity: window.sidebarCollapsed ? 0 : 1
-                        visible: opacity > 0.01
-                        Behavior on opacity { NumberAnimation { duration: 120 } }
-                    }
-                }
                 ListView {
                     id: navigation
                     objectName: "navigation"
@@ -333,23 +449,26 @@ ApplicationWindow {
                     id: sidebarFooter
                     objectName: "sidebarFooter"
                     Layout.fillWidth: true
-                    Layout.preferredHeight: window.sidebarCollapsed ? 92 : 40
+                    Layout.preferredHeight: 40
                     GearButton {
                         id: settingsButton
                         objectName: "settingsButton"
-                        x: 0
-                        y: window.sidebarCollapsed ? 52 : 0
+                        x: window.sidebarCollapsed ? (sidebarFooter.width - width) / 2 : 0
                         selected: backend.activeMenu === "builtin/settings"
                         onClicked: window.navigateTo("builtin/settings")
-                        Behavior on y { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
-                    }
-                    SidebarToggleButton {
-                        id: sidebarToggle
-                        collapsed: window.sidebarCollapsed
-                        x: window.sidebarCollapsed ? (sidebarFooter.width - width) / 2 : sidebarFooter.width - width
-                        y: 0
                         Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
-                        onToggleRequested: window.setSidebarCollapsed(!window.sidebarCollapsed)
+                    }
+                    Label {
+                        objectName: "sidebarVersionLabel"
+                        text: "v" + backend.version
+                        font.pixelSize: Theme.fontCaption
+                        color: Theme.muted
+                        anchors.left: settingsButton.right
+                        anchors.leftMargin: 10
+                        anchors.verticalCenter: settingsButton.verticalCenter
+                        opacity: window.sidebarCollapsed ? 0 : 1
+                        visible: opacity > 0.01
+                        Behavior on opacity { NumberAnimation { duration: 120 } }
                     }
                 }
             }
@@ -379,7 +498,6 @@ ApplicationWindow {
                         Layout.leftMargin: 16
                         Layout.rightMargin: 16
                         Label { text: "ZeroTier"; color: Theme.text; font.pixelSize: Theme.fontTitle; font.bold: true; Layout.fillWidth: true }
-                        ActionButton { objectName: "beginnerGuideButton"; text: "新手指南"; flat: true; onClicked: guideLoader.open() }
                     }
                     // This device: service state, node identity and the service
                     // controls live together, because they describe one thing.
@@ -824,6 +942,45 @@ ApplicationWindow {
                 Label { text: "API " + backend.apiVersion }
                 Label { objectName: "aboutServerVersionLabel"; text: "服务端 " + backend.serverVersion + "（API " + backend.serverApiVersion + "）" }
                 Label { text: "Qt " + backend.qtVersion }
+            }
+        }
+    }
+    // Frameless windows lose the system border: draw a hairline and keep the
+    // edges and corners resizable through the window manager.
+    Rectangle {
+        anchors.fill: parent
+        visible: window.customFrame && !window.maximized
+        color: "transparent"
+        border.color: Theme.border
+        z: 900
+    }
+    Item {
+        id: resizeEdges
+        anchors.fill: parent
+        visible: window.customFrame && !window.maximized
+        z: 901
+        readonly property int grip: 5
+        Repeater {
+            // Edges and corners; each grip hands the resize to the window manager.
+            model: [Qt.LeftEdge, Qt.RightEdge, Qt.TopEdge, Qt.BottomEdge,
+                    Qt.LeftEdge | Qt.TopEdge, Qt.RightEdge | Qt.TopEdge,
+                    Qt.LeftEdge | Qt.BottomEdge, Qt.RightEdge | Qt.BottomEdge]
+            delegate: MouseArea {
+                required property int modelData
+                readonly property bool atLeft: (modelData & Qt.LeftEdge) !== 0
+                readonly property bool atRight: (modelData & Qt.RightEdge) !== 0
+                readonly property bool atTop: (modelData & Qt.TopEdge) !== 0
+                readonly property bool atBottom: (modelData & Qt.BottomEdge) !== 0
+                readonly property bool corner: (atLeft || atRight) && (atTop || atBottom)
+                readonly property int grip: resizeEdges.grip
+                width: atLeft || atRight ? (corner ? grip * 2 : grip) : resizeEdges.width - grip * 2
+                height: atTop || atBottom ? (corner ? grip * 2 : grip) : resizeEdges.height - grip * 2
+                x: atLeft ? 0 : atRight ? resizeEdges.width - width : grip
+                y: atTop ? 0 : atBottom ? resizeEdges.height - height : grip
+                acceptedButtons: Qt.LeftButton
+                cursorShape: !corner ? (atLeft || atRight ? Qt.SizeHorCursor : Qt.SizeVerCursor)
+                    : (atLeft && atTop) || (atRight && atBottom) ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
+                onPressed: window.startSystemResize(modelData)
             }
         }
     }

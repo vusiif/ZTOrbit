@@ -102,8 +102,6 @@ qt_add_executable(zto_tests QmlTests.cpp ${ZTO_MAIN_SOURCES} ${ZTO_MAIN_HEADERS}
 zto_configure_host(zto_tests)
 target_link_libraries(zto_tests PRIVATE Qt6::Test Qt6::Widgets)
 zto_add_qml_ui(zto_tests)
-qt_add_resources(zto_tests test_app_icon PREFIX "/" BASE "${ZTO_ROOT_DIR}/src/client"
-    FILES "${ZTO_ROOT_DIR}/src/client/assets/app-icon.png")
 target_compile_definitions(zto_tests PRIVATE ZTO_TESTING
     ZTO_FAKE_PING_DIRECTORY="$<TARGET_FILE_DIR:fake_ping>"
     ZTO_SOURCE_VERSION_FILE="${ZTO_ROOT_DIR}/VERSION")

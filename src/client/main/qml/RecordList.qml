@@ -13,8 +13,6 @@ ColumnLayout {
     property string editingId: ""
     property string editingText: ""
     property var columnWidths: []
-    property int sortColumn: -1
-    property bool sortAscending: true
     readonly property real columnsWidth: headers.reduce((sum, value, index) => sum + preferredWidth(index), 0)
     readonly property real tableWidth: Math.max(width, columnsWidth + 28)
     function preferredWidth(index) {
@@ -39,6 +37,10 @@ ColumnLayout {
     spacing: 0
 
     function edit(id, name) { editingText = name; editingId = id }
+    function toggleSort(model, column) {
+        if (!model) return
+        model.sortBy(column, model.sortColumn === column ? !model.sortAscending : true)
+    }
     Flickable {
         id: horizontal
         Layout.fillWidth: true
@@ -71,14 +73,19 @@ ColumnLayout {
                     Layout.minimumWidth: root.columnWidth(index)
                     Layout.maximumWidth: root.columnWidth(index)
                     Layout.fillHeight: true
-                    Label { anchors.fill: parent; text: header.modelData + (root.sortColumn === header.index ? root.sortAscending ? " ▴" : " ▾" : ""); color: Theme.muted; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter }
-                    TapHandler {
-                        enabled: root.kind !== "peers"
-                        onTapped: {
-                            root.sortAscending = root.sortColumn === header.index ? !root.sortAscending : true
-                            root.sortColumn = header.index
-                            root.records.sortBy(root.sortColumn, root.sortAscending)
-                        }
+                    // Click a header to sort by it; click again to reverse.
+                    Label {
+                        objectName: "tableHeader-" + root.kind + "-" + header.index
+                        anchors.fill: parent
+                        anchors.rightMargin: 10
+                        text: header.modelData + (root.records.sortColumn === header.index ? root.records.sortAscending ? "  ↑" : "  ↓" : "")
+                        color: headerHover.hovered || root.records.sortColumn === header.index ? Theme.accent : Theme.muted
+                        font.pixelSize: 12
+                        font.bold: root.records.sortColumn === header.index
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
+                        HoverHandler { id: headerHover; cursorShape: Qt.PointingHandCursor }
+                        TapHandler { onTapped: root.toggleSort(root.records, header.index) }
                     }
                     MouseArea {
                         id: resizeHandle
@@ -236,9 +243,23 @@ ColumnLayout {
                     RowLayout {
                         Layout.leftMargin: 46
                         Layout.preferredHeight: 28
-                        Label { text: "名称"; color: Theme.muted; font.pixelSize: 12; Layout.preferredWidth: 180 }
-                        Label { text: "内网 IP"; color: Theme.muted; font.pixelSize: 12; Layout.preferredWidth: 240 }
-                        Label { text: "延迟"; color: Theme.muted; font.pixelSize: 12 }
+                        Repeater {
+                            // Member columns: 0 name, 1 IP (not sortable), 2 latency.
+                            model: [{ title: "名称", column: 0, width: 180 }, { title: "内网 IP", column: -1, width: 240 }, { title: "延迟", column: 2, width: 110 }]
+                            delegate: Label {
+                                required property var modelData
+                                readonly property var members: record.members
+                                readonly property bool sorted: !!members && modelData.column >= 0 && members.sortColumn === modelData.column
+                                objectName: "memberHeader-" + modelData.column
+                                text: modelData.title + (sorted ? (members.sortAscending ? "  ↑" : "  ↓") : "")
+                                color: modelData.column >= 0 && (memberHeaderHover.hovered || sorted) ? Theme.accent : Theme.muted
+                                font.pixelSize: 12
+                                font.bold: sorted
+                                Layout.preferredWidth: modelData.width
+                                HoverHandler { id: memberHeaderHover; enabled: modelData.column >= 0; cursorShape: Qt.PointingHandCursor }
+                                TapHandler { enabled: modelData.column >= 0; onTapped: root.toggleSort(record.members, modelData.column) }
+                            }
+                        }
                     }
                 Repeater {
                     model: record.members

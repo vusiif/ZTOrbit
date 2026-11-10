@@ -12,6 +12,8 @@
 #include <QDesktopServices>
 #include <QDateTime>
 #include <QGuiApplication>
+#include <QStyleHints>
+#include <QIcon>
 #include <QFutureWatcher>
 #include <QtConcurrentRun>
 #include <QStandardPaths>
@@ -105,6 +107,9 @@ AppController::AppController(QObject *parent, const QString &pluginDirectory, Sy
     for (const auto &warning : warnings) util::log::write(QStringLiteral("存储：") + warning);
     if (!errorMessage.isEmpty()) util::log::write(QStringLiteral("存储错误：") + errorMessage);
     m_storageWarning = errorMessage.isEmpty() ? warnings.join(QLatin1Char('\n')) : errorMessage;
+    // 'system' follows the OS light/dark preference live.
+    if (auto *hints = QGuiApplication::styleHints())
+        connect(hints, &QStyleHints::colorSchemeChanged, this, [this] { if (theme() == QLatin1String("system")) emit themeChanged(); });
     m_loader.setSettings(&m_settings);
     m_loader.setStorage(m_storage);
     m_loader.setCacheWriteNotifier([this](const QString &path) {
@@ -336,11 +341,22 @@ void AppController::updateService()
     m_serviceStatus = zerotier::serviceStatus(); emit stateChanged();
 #endif
 }
-QString AppController::theme() const { return m_settings.value("appearance/theme", "light").toString() == "dark" ? "dark" : "light"; }
-bool AppController::dark() const { return theme() == "dark"; }
+QString AppController::theme() const
+{
+    const QString value = m_settings.value("appearance/theme", "system").toString();
+    return value == "light" || value == "dark" ? value : QStringLiteral("system");
+}
+bool AppController::dark() const
+{
+    const QString value = theme();
+    if (value != "system") return value == "dark";
+    const auto *hints = QGuiApplication::styleHints();
+    return hints && hints->colorScheme() == Qt::ColorScheme::Dark;
+}
 void AppController::setTheme(const QString &value)
 {
-    if (value != "light" && value != "dark") return;
+    if (value != "system" && value != "light" && value != "dark") return;
+    if (value == theme()) return;
     m_settings.setValue("appearance/theme", value); emit themeChanged();
 }
 bool AppController::disableGpuAcceleration() const
@@ -692,6 +708,10 @@ void AppController::setWindow(QQuickWindow *window)
     connect(window, &QWindow::visibleChanged, this, &AppController::setVisible);
     connect(window, &QWindow::windowStateChanged, this, [this] { setVisible(m_window && m_window->isVisible() && m_window->windowState() != Qt::WindowMinimized); });
     setVisible(window->isVisible() && window->windowState() != Qt::WindowMinimized);
+    // The taskbar icon mirrors the title-bar logo: blue online, red offline.
+    connect(this, &AppController::stateChanged, window, [this] { updateWindowIcon(); });
+    m_windowIconState = -1;
+    updateWindowIcon();
     // The startup update check must never delay the first frame.
     if (window->isVisible()) scheduleStartupUpdateCheck();
 #if defined(Q_OS_MACOS) && !defined(ZTO_TESTING)
@@ -702,6 +722,15 @@ void AppController::setWindow(QQuickWindow *window)
 #endif
 }
 void AppController::setVisible(bool visible) { m_visible = visible; updatePolling(); }
+void AppController::updateWindowIcon()
+{
+    if (!m_window) return;
+    const int state = service().value("available").toBool() ? 1 : 0;
+    if (state == m_windowIconState) return;
+    m_windowIconState = state;
+    m_window->setIcon(QIcon(state ? QStringLiteral(":/qt/qml/ZTOrbit/assets/logo-online.png")
+                                  : QStringLiteral(":/qt/qml/ZTOrbit/assets/logo-offline.png")));
+}
 void AppController::updatePolling()
 {
     const bool active = m_visible && !m_closing;

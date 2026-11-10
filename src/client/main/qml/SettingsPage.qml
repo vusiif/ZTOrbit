@@ -58,9 +58,10 @@ Pane {
                     Layout.fillWidth: true
                     SettingRow {
                         title: "主题"
-                        description: backend.dark ? "深色" : "浅色"
+                        description: backend.theme === "system" ? "跟随系统（当前" + (backend.dark ? "深色" : "浅色") + "）"
+                            : backend.dark ? "深色" : "浅色"
                         showDivider: false
-                        ThemeToggle { objectName: "themeSelector"; checked: backend.dark; onClicked: backend.theme = checked ? "dark" : "light" }
+                        ThemeSelector { objectName: "themeSelector"; value: backend.theme; onSelected: value => backend.theme = value }
                     }
                 }
 

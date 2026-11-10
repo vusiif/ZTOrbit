@@ -75,11 +75,11 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle("Basic");
 #ifdef Q_OS_MACOS
     app.setFont(QFont("PingFang SC", 10));
-    app.setWindowIcon(QIcon(":/assets/app-icon.png"));
 #else
     app.setFont(QFont("Microsoft YaHei UI", 10));
-    app.setWindowIcon(QIcon(":/assets/app-icon.ico"));
 #endif
+    // Blue Z until the controller knows the service state (red = offline).
+    app.setWindowIcon(QIcon(QStringLiteral(":/qt/qml/ZTOrbit/assets/logo-online.png")));
     vusiif::zto::platform::SingleInstance instance;
     const auto acquired = instance.acquire();
     if (acquired == vusiif::zto::platform::SingleInstance::Result::Activated) return 0;

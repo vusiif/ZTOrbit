@@ -1,8 +1,47 @@
 #include "RecordModel.h"
+#include <QCollator>
 #include <QSet>
 #include <algorithm>
 
 namespace vusiif::zto::ui {
+namespace {
+// Placeholders ("—", "-", "不可达", empty) mean "no value" and always sort last.
+bool isPlaceholder(const QString &value)
+{
+    const auto text = value.trimmed();
+    return text.isEmpty() || text == QStringLiteral("—") || text == QStringLiteral("-") || text == QStringLiteral("不可达");
+}
+// Latency cells look like "12", "12.5 ms" or "<1 ms"; "<1" sorts just below 1.
+bool sortNumber(QString text, double &value)
+{
+    text = text.trimmed();
+    const bool below = text.startsWith(QLatin1Char('<'));
+    if (below) text.remove(0, 1);
+    if (text.endsWith(QStringLiteral("ms"), Qt::CaseInsensitive)) text.chop(2);
+    bool ok = false;
+    value = text.trimmed().toDouble(&ok);
+    if (ok && below) value -= 0.001;
+    return ok;
+}
+}
+
+int compareSortValues(const QString &left, const QString &right, bool ascending)
+{
+    const bool leftEmpty = isPlaceholder(left), rightEmpty = isPlaceholder(right);
+    if (leftEmpty || rightEmpty) return leftEmpty == rightEmpty ? 0 : leftEmpty ? 1 : -1;
+    double leftValue = 0, rightValue = 0;
+    int result = 0;
+    if (sortNumber(left, leftValue) && sortNumber(right, rightValue)) {
+        result = leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
+    } else {
+        // Natural, case-insensitive order: "node2" before "node10", IPs by octet.
+        static const QCollator collator = [] {
+            QCollator value; value.setNumericMode(true); value.setCaseSensitivity(Qt::CaseInsensitive); return value;
+        }();
+        result = collator.compare(left, right);
+    }
+    return ascending ? result : -result;
+}
 QHash<int, QByteArray> RecordModel::roleNames() const
 {
     static const QHash<int, QByteArray> roles{{RowId, "rowId"}, {Name, "name"}, {Cells, "cells"}, {Details, "details"},
@@ -63,11 +102,7 @@ void RecordModel::updateRows(const QList<QVariantMap> &rows)
     if (m_sortColumn >= 0) {
         const auto text = [this](const QVariantMap &row) { return m_sortColumn == 0 ? row.value("name").toString() : row.value("cells").toStringList().value(m_sortColumn - 1); };
         std::stable_sort(unique.begin(), unique.end(), [&](const auto &a, const auto &b) {
-            const auto left = text(a), right = text(b);
-            bool leftNumber = false, rightNumber = false;
-            const auto leftValue = left.toDouble(&leftNumber), rightValue = right.toDouble(&rightNumber);
-            const int result = leftNumber && rightNumber ? (leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0) : QString::localeAwareCompare(left, right);
-            return m_sortAscending ? result < 0 : result > 0;
+            return compareSortValues(text(a), text(b), m_sortAscending) < 0;
         });
     }
     const int previousCount = count();
@@ -94,7 +129,10 @@ void RecordModel::updateRows(const QList<QVariantMap> &rows)
 }
 void RecordModel::sortBy(int column, bool ascending)
 {
-    m_sortColumn = column; m_sortAscending = ascending;
+    if (m_sortColumn != column || m_sortAscending != ascending) {
+        m_sortColumn = column; m_sortAscending = ascending;
+        emit sortChanged();
+    }
     updateRows(m_rows);
 }
 }

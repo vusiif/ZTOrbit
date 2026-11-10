@@ -58,13 +58,21 @@ function(zto_add_qml_ui target)
         list(APPEND qml_options NO_CACHEGEN)
     endif()
     set(qml_sources)
-    foreach(name SettingsPage NotificationBanner AppToolTip Main Theme ActionButton RecordList Guide StartupError LazyPopup AppPopup AppDialog AppMenu AppMenuItem BoundedScrollView GearButton GearIcon ThemeToggle UpdateSection ResetSection LineIcon ZeroTierIcon ChevronIcon PluginIcon SidebarToggleButton AppSwitch Card SectionCard SettingRow)
+    foreach(name SettingsPage NotificationBanner AppToolTip Main Theme ActionButton RecordList Guide StartupError LazyPopup AppPopup AppDialog AppMenu AppMenuItem BoundedScrollView GearButton GearIcon ThemeSelector UpdateSection ResetSection LineIcon ZeroTierIcon ChevronIcon PluginIcon WindowButton AppSwitch Card SectionCard SettingRow)
         set(source "${ZTO_ROOT_DIR}/src/client/main/qml/${name}.qml")
         set_source_files_properties("${source}" PROPERTIES QT_RESOURCE_ALIAS "qml/${name}.qml")
         list(APPEND qml_sources "${source}")
     endforeach()
     set_source_files_properties("${ZTO_ROOT_DIR}/src/client/main/qml/Theme.qml" PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
-    qt_add_qml_module(${target} URI ZTOrbit VERSION 1.0 RESOURCE_PREFIX /qt/qml ${qml_options} QML_FILES ${qml_sources})
+    # Title-bar logo: blue while ZeroTier is online, red while it is offline.
+    set(qml_resources)
+    foreach(name logo-online logo-offline)
+        set(source "${ZTO_ROOT_DIR}/src/client/assets/${name}.png")
+        set_source_files_properties("${source}" PROPERTIES QT_RESOURCE_ALIAS "assets/${name}.png")
+        list(APPEND qml_resources "${source}")
+    endforeach()
+    qt_add_qml_module(${target} URI ZTOrbit VERSION 1.0 RESOURCE_PREFIX /qt/qml ${qml_options}
+        QML_FILES ${qml_sources} RESOURCES ${qml_resources})
 endfunction()
 zto_add_qml_ui(zto)
 set_target_properties(zto PROPERTIES OUTPUT_NAME "Z2")
@@ -76,13 +84,22 @@ if(APPLE)
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${ZTO_VERSION_NUMERIC}"
         MACOSX_BUNDLE_INFO_PLIST "${ZTO_ROOT_DIR}/src/client/assets/Info.plist.in")
 endif()
-qt_add_resources(zto app_icon PREFIX "/" BASE "${ZTO_ROOT_DIR}/src/client"
-    FILES "${ZTO_ROOT_DIR}/src/client/assets/app-icon.ico" "${ZTO_ROOT_DIR}/src/client/assets/app-icon.png")
 if(WIN32)
     configure_file("${ZTO_ROOT_DIR}/src/client/assets/app-icon.rc.in" "${CMAKE_CURRENT_BINARY_DIR}/app-icon.rc" @ONLY)
     target_sources(zto PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/app-icon.rc")
+    # rc.exe reports no include dependencies to Ninja, so name the icon
+    # explicitly; otherwise a replaced .ico keeps the old embedded icon.
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/app-icon.rc" PROPERTIES
+        OBJECT_DEPENDS "${ZTO_ROOT_DIR}/src/client/assets/app-icon.ico")
     if(MSVC)
-        target_link_options(zto PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
+        # Request elevation through a manifest source, not /MANIFESTUAC: with
+        # Ninja, Qt's generated asInvoker manifest silently overrode the link
+        # flag and Z2 could not read ZeroTier's authtoken.secret.
+        configure_file("${ZTO_ROOT_DIR}/src/client/assets/Z2.exe.manifest.in" "${CMAKE_CURRENT_BINARY_DIR}/Z2.exe.manifest" @ONLY)
+        target_sources(zto PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/Z2.exe.manifest")
+        # The manifest owns trustInfo; the linker's default asInvoker snippet
+        # would otherwise conflict with it when mt merges the two.
+        target_link_options(zto PRIVATE "/MANIFESTUAC:NO")
     endif()
 endif()
 if(MSVC)

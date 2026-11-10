@@ -38,21 +38,40 @@ void SystemOperations::runElevatedScript(const QString &label, const QString &sc
 {
 #ifdef Q_OS_WIN
     const auto invocation = vusiif::zto::zerotier::preparePowerShell(script);
-    if (!invocation.directory->isValid()) {
-        report(QStringLiteral("无法创建操作日志\n"));
+    if (!invocation.directory->isValid() || invocation.arguments.isEmpty()) {
+        report(label + QStringLiteral("：未执行，无法在临时目录中准备操作脚本\n"));
         if (finished) finished(false);
         return;
     }
-    const QString parameters = invocation.arguments.join(' ');
+    // ShellExecute takes one command line; quote arguments that contain
+    // whitespace (the script path can, e.g. under a user name with spaces).
+    QStringList quoted;
+    for (const auto &argument : invocation.arguments)
+        quoted << (argument.contains(QLatin1Char(' ')) || argument.contains(QLatin1Char('\t'))
+                       ? QLatin1Char('"') + argument + QLatin1Char('"') : argument);
+    const QString parameters = quoted.join(' ');
+    // Launch the system copy by absolute path rather than searching PATH.
+    wchar_t systemDirectory[MAX_PATH] = {};
+    const UINT length = GetSystemDirectoryW(systemDirectory, MAX_PATH);
+    const QString powershell = (length > 0 && length < MAX_PATH)
+        ? QString::fromWCharArray(systemDirectory, int(length)) + QStringLiteral("\\WindowsPowerShell\\v1.0\\powershell.exe")
+        : QStringLiteral("powershell.exe");
     SHELLEXECUTEINFOW info = {};
     info.cbSize = sizeof(info);
-    info.fMask = SEE_MASK_NOCLOSEPROCESS;
+    // NO_UI: report failures in the application instead of a raw shell dialog.
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
     info.lpVerb = L"runas";
-    info.lpFile = L"powershell.exe";
+    info.lpFile = reinterpret_cast<LPCWSTR>(powershell.utf16());
     info.lpParameters = reinterpret_cast<LPCWSTR>(parameters.utf16());
     info.nShow = SW_HIDE;
     if (!ShellExecuteExW(&info) || !info.hProcess) {
-        report(label + QStringLiteral("：未执行，提权被取消或启动失败\n"));
+        const DWORD error = GetLastError();
+        QString reason;
+        if (error == ERROR_CANCELLED) reason = QStringLiteral("已取消管理员授权");
+        else if (error == ERROR_ACCESS_DENIED)
+            reason = QStringLiteral("系统拒绝启动 PowerShell（错误 5），可能被安全软件拦截，请在安全软件中允许 Z2 运行 PowerShell");
+        else reason = QStringLiteral("无法启动 PowerShell（错误 %1）").arg(error);
+        report(label + QStringLiteral("：未执行，") + reason + QLatin1Char('\n'));
         if (finished) finished(false);
         return;
     }

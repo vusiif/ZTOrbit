@@ -18,6 +18,7 @@
 #include <QJsonArray>
 #include <QFontDatabase>
 #include <QIcon>
+#include <QStyleHints>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <ztprotocol/WireProtocol.h>
@@ -323,7 +324,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(m_controller->pluginRegistry()->plugins().size(),2,80000);
         QTRY_COMPARE(m_controller->pluginRegistry()->preparationState("voice-chat"),vusiif::zto::plugins::PreparationState::Ready);
         click("settingsButton"); QTest::qWait(200);
-        if(dark) { click("themeSelector"); QTRY_VERIFY(m_controller->dark()); QTest::qWait(250); }
+        if(dark) { click("themeOption-dark"); QTRY_VERIFY(m_controller->dark()); QTest::qWait(250); }
         click("openPluginsButton"); QTRY_VERIFY(object("pluginDialog") && object("pluginDialog")->property("visible").toBool()); QTest::qWait(200);
         click("pluginRow-media"); QVERIFY(!object("pluginAboutDialog")); QVERIFY(object("pluginRow-media")->property("highlighted").toBool());
         auto *selected=qobject_cast<QQuickItem *>(object("pluginRow-media")); QVERIFY(selected);
@@ -459,12 +460,52 @@ private slots:
         QCOMPARE(aboutVersion->property("text").toString(), "v" + expectedVersion);
         QVERIFY2(m_errors.isEmpty(),qPrintable(m_errors.join('\n')));
     }
+    void tableSortingUsesNaturalOrderAndKeepsPlaceholdersLast() {
+        using vusiif::zto::ui::compareSortValues;
+        QVERIFY(compareSortValues("node2", "node10", true) < 0);
+        QVERIFY(compareSortValues("Alpha", "beta", true) < 0);
+        QVERIFY(compareSortValues("<1 ms", "1 ms", true) < 0);
+        QVERIFY(compareSortValues("9 ms", "12.5 ms", true) < 0);
+        QVERIFY(compareSortValues("9 ms", "12.5 ms", false) > 0);
+        QVERIFY(compareSortValues("—", "3", true) > 0);
+        QVERIFY(compareSortValues("—", "3", false) > 0);
+        QVERIFY(compareSortValues("-", "不可达", true) == 0);
+        openWindow();
+        click("togglePeersButton"); QTRY_COMPARE(m_controller->peers()->count(), 4);
+        // Let the expand animation settle so the header is where it will be clicked.
+        QTest::qWait(400);
+        click("tableHeader-peers-4");
+        QTRY_COMPARE(m_controller->peers()->sortColumn(), 4); QVERIFY(m_controller->peers()->sortAscending());
+        QStringList latencies;
+        for (int row = 0; row < m_controller->peers()->count(); ++row)
+            latencies << m_controller->peers()->get(row)["cells"].toStringList().value(3);
+        for (int row = 1; row < latencies.size(); ++row)
+            QVERIFY2(compareSortValues(latencies[row - 1], latencies[row], true) <= 0, qPrintable(latencies.join(',')));
+        click("tableHeader-peers-4"); QTRY_VERIFY(!m_controller->peers()->sortAscending());
+        click("tableHeader-peers-0"); QTRY_COMPARE(m_controller->peers()->sortColumn(), 0);
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
+    void themeDefaultsToSystemAndTitleBarHasWindowControls() {
+        openWindow();
+        QCOMPARE(m_controller->theme(), QStringLiteral("system"));
+        QCOMPARE(m_controller->dark(), QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark);
+        QVERIFY(object("serviceStatusLogo")); QVERIFY(object("beginnerGuideButton"));
+#ifdef Q_OS_WIN
+        QVERIFY(m_window->flags().testFlag(Qt::FramelessWindowHint));
+        QVERIFY(object("minimizeWindowButton")); QVERIFY(object("maximizeWindowButton")); QVERIFY(object("closeWindowButton"));
+#endif
+        click("settingsButton"); QTRY_VERIFY(object("settingsPage")); QTest::qWait(220);
+        click("themeOption-light"); QTRY_COMPARE(m_controller->theme(), QStringLiteral("light")); QVERIFY(!m_controller->dark());
+        click("themeOption-dark"); QTRY_COMPARE(m_controller->theme(), QStringLiteral("dark")); QVERIFY(m_controller->dark());
+        click("themeOption-system"); QTRY_COMPARE(m_controller->theme(), QStringLiteral("system"));
+        QVERIFY2(m_errors.isEmpty(), qPrintable(m_errors.join('\n')));
+    }
     void themeToggleAndMoonPopupHaveUsableGeometry() {
         openWindow();
         QTRY_VERIFY(m_controller->service()["available"].toBool());
-        QVERIFY(object("serviceStatusDot"));
+        QVERIFY(object("serviceStatusLogo"));
         click("settingsButton"); QTRY_VERIFY(object("settingsPage"));
-        QTest::qWait(220); click("themeSelector"); QTRY_VERIFY(m_controller->dark());
+        QTest::qWait(220); click("themeOption-dark"); QTRY_VERIFY(m_controller->dark());
         QTest::qWait(250); QVERIFY(m_window->grabWindow().save(".tmp/screenshots/qml-settings-dark.png"));
         m_controller->navigate(ZeroTierMenuId,qobject_cast<QQuickItem *>(object("pluginContainer"))); QTest::qWait(180);
         const auto dir=QDir(vusiif::zto::zerotier::moonDirectory()); QVERIFY(QDir().mkpath(dir.path()));
@@ -635,7 +676,7 @@ private slots:
         QVERIFY(m_controller->busy()); QVERIFY(!m_controller->service()["available"].toBool());
         QVERIFY(bool(operations.completion));
         QTest::qWait(2000); QVERIFY(!m_controller->service()["available"].toBool());
-        QCOMPARE(object("serviceStatusDot")->property("color").value<QColor>(), QColor("#d95059"));
+        QVERIFY(!object("sidebarToggleButton")->property("online").toBool()); QVERIFY(object("serviceStatusLogo")->property("source").toUrl().toString().endsWith("logo-offline.png"));
         qputenv("ZT_TEST_MODE", "error"); operations.complete(success);
         QVERIFY(!m_controller->busy()); QTest::qWait(1000);
         QVERIFY(!m_controller->service()["available"].toBool());
@@ -1154,7 +1195,7 @@ private slots:
         auto *tray=object("systemTrayIcon"); QVERIFY(tray);
         QVERIFY(tray->property("visible").toBool());
         QVERIFY(tray->property("available").toBool());
-        QVERIFY(!QIcon(":/assets/app-icon.png").isNull());
+        QVERIFY(!QIcon(":/qt/qml/ZTOrbit/assets/logo-online.png").isNull()); QVERIFY(!QIcon(":/qt/qml/ZTOrbit/assets/logo-offline.png").isNull());
         SendMessageW(reinterpret_cast<HWND>(m_window->winId()),WM_SYSCOMMAND,SC_CLOSE,1);
         QTRY_COMPARE(requested.size(),1); QTRY_VERIFY(!m_window->isVisible() || m_window->windowState()==Qt::WindowMinimized);
         m_controller->restoreWindow(); QTRY_VERIFY(m_window->isVisible()); QVERIFY(m_window->windowState()!=Qt::WindowMinimized);

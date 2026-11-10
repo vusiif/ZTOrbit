@@ -4,17 +4,24 @@
 #include <QtQml/qqmlregistration.h>
 
 namespace vusiif::zto::ui {
+// Sort order shared by every table: numbers (including latency text) numerically,
+// other text naturally; placeholders always last. Returns <0, 0 or >0.
+int compareSortValues(const QString &left, const QString &right, bool ascending);
 // Stable row IDs retain delegates, focus, selection and expanded members across
 // polling updates. UI state belongs to this model rather than recycled delegates.
 class RecordModel : public QAbstractListModel {
     Q_OBJECT
     QML_ANONYMOUS
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    Q_PROPERTY(int sortColumn READ sortColumn NOTIFY sortChanged)
+    Q_PROPERTY(bool sortAscending READ sortAscending NOTIFY sortChanged)
 public:
     enum Role { RowId = Qt::UserRole + 1, Name, Cells, Details, Expanded, Members, MemberStatus };
     explicit RecordModel(QObject *parent = nullptr) : QAbstractListModel(parent) {}
     int rowCount(const QModelIndex &parent = {}) const override { return parent.isValid() ? 0 : m_rows.size(); }
     int count() const { return m_rows.size(); }
+    int sortColumn() const { return m_sortColumn; }
+    bool sortAscending() const { return m_sortAscending; }
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
     void updateRows(const QList<QVariantMap> &rows);
@@ -24,6 +31,7 @@ public:
     QVariantMap record(const QString &id) const;
 signals:
     void countChanged();
+    void sortChanged();
 private:
     QList<QVariantMap> m_rows;
     QHash<QString, RecordModel *> m_memberModels;

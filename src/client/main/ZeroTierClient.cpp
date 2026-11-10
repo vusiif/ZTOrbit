@@ -4,6 +4,7 @@
 #include "WindowsPortScript.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -324,10 +325,22 @@ vusiif::zto::zerotier::PowerShellInvocation vusiif::zto::zerotier::preparePowerS
     const QString wrapped = "$ProgressPreference = 'SilentlyContinue'\n"
         "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'\n& {\n"
         + script + "\n} *> " + quotePowerShell(invocation.logPath);
-    const auto encoded = QByteArray(reinterpret_cast<const char *>(wrapped.utf16()),
-                                    wrapped.size() * 2).toBase64();
-    invocation.arguments = {"-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
-                            "-EncodedCommand", QString::fromLatin1(encoded)};
+    // Run from a script file instead of -EncodedCommand: security software
+    // (observed with Kaspersky) denies hidden PowerShell launches carrying a
+    // base64 command line, which made every elevated operation fail before it
+    // started. The file lives in the caller's private temporary directory and
+    // is removed with it. The UTF-8 BOM lets Windows PowerShell 5.1 read the
+    // non-ASCII messages correctly.
+    const QString scriptPath = invocation.directory->filePath("operation.ps1");
+    QFile file(scriptPath);
+    const QByteArray bytes = QByteArray("\xEF\xBB\xBF") + wrapped.toUtf8();
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.flush()) {
+        invocation.arguments.clear();
+        return invocation;
+    }
+    file.close();
+    invocation.arguments = {"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                            "-WindowStyle", "Hidden", "-File", QDir::toNativeSeparators(scriptPath)};
     return invocation;
 }
 
