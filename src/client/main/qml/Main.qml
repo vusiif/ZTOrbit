@@ -182,7 +182,7 @@ ApplicationWindow {
                         implicitWidth: 10; implicitHeight: 10; radius: 5
                         x: window.sidebarCollapsed ? (sidebarHeader.width - width) / 2 : 0
                         y: (sidebarHeader.height - height) / 2
-                        color: backend.service.available ? "#25a773" : "#d95059"
+                        color: backend.service.available ? Theme.online : Theme.offline
                         Accessible.name: backend.service.available ? "ZeroTier 在线" : "ZeroTier 离线"
                         ToolTip.visible: statusHover.hovered
                         ToolTip.text: backend.service.available ? "ZeroTier 在线" : "ZeroTier 离线"
@@ -371,137 +371,221 @@ ApplicationWindow {
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                 ColumnLayout {
                     width: scroll.availableWidth
-                    spacing: 20
-                    Item { Layout.preferredHeight: 2 }
+                    spacing: 16
+                    // Page header: title on the left, help on the right.
                     RowLayout {
                         Layout.fillWidth: true
+                        Layout.topMargin: 8
                         Layout.leftMargin: 16
                         Layout.rightMargin: 16
-                        Label { text: "ZeroTier"; color: Theme.text; font.pixelSize: 26; font.bold: true; Layout.fillWidth: true }
-                        ActionButton { objectName: "beginnerGuideButton"; text: "新手指南"; onClicked: guideLoader.open() }
+                        Label { text: "ZeroTier"; color: Theme.text; font.pixelSize: Theme.fontTitle; font.bold: true; Layout.fillWidth: true }
+                        ActionButton { objectName: "beginnerGuideButton"; text: "新手指南"; flat: true; onClicked: guideLoader.open() }
                     }
-                    RowLayout {
+                    // This device: service state, node identity and the service
+                    // controls live together, because they describe one thing.
+                    Card {
+                        id: nodeCard
+                        objectName: "nodeCard"
                         Layout.fillWidth: true
                         Layout.leftMargin: 16
                         Layout.rightMargin: 16
-                        ColumnLayout {
+                        readonly property color stateColor: !backend.service.known ? Theme.muted
+                            : backend.service.available ? Theme.online
+                            : backend.service.running ? Theme.warning : Theme.offline
+                        readonly property string stateText: !backend.service.known ? "正在检测 ZeroTier 服务…"
+                            : !backend.service.exists ? "ZeroTier 未安装"
+                            : backend.service.available ? "服务运行中"
+                            : backend.service.running ? "服务已启动，等待响应…" : "服务已停止"
+                        RowLayout {
                             Layout.fillWidth: true
-                            Label {
-                                id: nodeId
-                                objectName: "nodeId"
-                                text: backend.info.address || "—"
-                                color: nodeHover.hovered && validId ? Theme.accent : Theme.text
-                                readonly property bool validId: /^[0-9a-fA-F]{10}$/.test(text)
-                                font.underline: nodeHover.hovered && validId
-                                HoverHandler { id: nodeHover; cursorShape: nodeId.validId ? Qt.PointingHandCursor : Qt.ArrowCursor }
-                                font.pixelSize: 28
-                                font.bold: true
-                                TapHandler { onTapped: backend.copyNodeId() }
-                                TapHandler { acceptedButtons: Qt.RightButton; onTapped: nodeMenu.popup() }
-                                AppMenu { id: nodeMenu; AppMenuItem { text: "完整节点信息"; onTriggered: nodeInfoLoader.open() } }
-                            }
-                            Label { text: backend.info.version ? "v" + backend.info.version : "节点信息尚未读取"; color: Theme.muted }
-                        }
-                        Rectangle {
-                            implicitWidth: serviceActions.implicitWidth
-                            implicitHeight: 36
-                            radius: 5
-                            color: Theme.selection
-                            border.color: Theme.border
-                            clip: true
-                            RowLayout {
-                                id: serviceActions
-                                anchors.fill: parent
-                                spacing: 0
-                                ActionButton {
-                                    id: serviceButton
-                                    objectName: "serviceAction"
-                                    text: backend.service.action
-                                    flat: true
-                                    Layout.fillHeight: true
-                                    enabled: !backend.busy && backend.service.known
-                                    onClicked: { if (!backend.service.exists) backend.packageAction(false); else backend.serviceAction(backend.service.running ? "stop" : "start") }
+                            spacing: 16
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 4
+                                RowLayout {
+                                    spacing: 8
+                                    Rectangle { implicitWidth: 8; implicitHeight: 8; radius: 4; color: nodeCard.stateColor }
+                                    Label { objectName: "serviceStateLabel"; text: nodeCard.stateText; color: Theme.muted; font.pixelSize: Theme.fontCaption }
                                 }
-                                Rectangle { visible: backend.service.exists; implicitWidth: 1; Layout.preferredHeight: 20; color: Theme.border }
-                                ActionButton {
-                                    objectName: "serviceMore"
-                                    text: "▾"
-                                    flat: true
-                                    horizontalPadding: 9
-                                    visible: backend.service.exists
-                                    enabled: !backend.busy && backend.service.known
-                                    Accessible.name: "更多服务操作"
-                                    onClicked: serviceMenu.open()
-                                    AppMenu {
-                                        id: serviceMenu
-                                        y: parent.height + 5
-                                        x: parent.width - width
-                                        AppMenuItem { text: "重启"; visible: backend.service.running; onTriggered: backend.serviceAction("restart") }
-                                        AppMenuItem { text: "卸载"; onTriggered: backend.packageAction(true) }
+                                Label {
+                                    id: nodeId
+                                    objectName: "nodeId"
+                                    text: backend.info.address || "—"
+                                    color: nodeHover.hovered && validId ? Theme.accent : Theme.text
+                                    readonly property bool validId: /^[0-9a-fA-F]{10}$/.test(text)
+                                    font.underline: nodeHover.hovered && validId
+                                    font.pixelSize: 26
+                                    font.bold: true
+                                    font.letterSpacing: 0.5
+                                    HoverHandler { id: nodeHover; cursorShape: nodeId.validId ? Qt.PointingHandCursor : Qt.ArrowCursor }
+                                    TapHandler { onTapped: backend.copyNodeId() }
+                                    TapHandler { acceptedButtons: Qt.RightButton; onTapped: nodeMenu.popup() }
+                                    AppMenu { id: nodeMenu; AppMenuItem { text: "完整节点信息"; onTriggered: nodeInfoLoader.open() } }
+                                    AppToolTip { parent: nodeId; visible: nodeHover.hovered && nodeId.validId; delay: 600; text: "单击复制节点 ID，右键查看完整信息" }
+                                }
+                                Label {
+                                    text: "本机节点 ID" + (backend.info.version ? " · ZeroTier v" + backend.info.version : " · 节点信息尚未读取")
+                                    color: Theme.muted
+                                    font.pixelSize: Theme.fontCaption
+                                }
+                            }
+                            // Split button: the main service action plus a menu
+                            // for the rarer restart / uninstall.
+                            Rectangle {
+                                Layout.alignment: Qt.AlignVCenter
+                                implicitWidth: serviceActions.implicitWidth
+                                implicitHeight: 34
+                                radius: Theme.radius
+                                color: Theme.button
+                                border.color: Theme.border
+                                RowLayout {
+                                    id: serviceActions
+                                    anchors.fill: parent
+                                    spacing: 0
+                                    ActionButton {
+                                        id: serviceButton
+                                        objectName: "serviceAction"
+                                        text: backend.service.action
+                                        flat: true
+                                        Layout.fillHeight: true
+                                        enabled: !backend.busy && backend.service.known
+                                        onClicked: { if (!backend.service.exists) backend.packageAction(false); else backend.serviceAction(backend.service.running ? "stop" : "start") }
+                                    }
+                                    Rectangle { visible: backend.service.exists; implicitWidth: 1; Layout.preferredHeight: 18; color: Theme.border }
+                                    ActionButton {
+                                        id: serviceMoreButton
+                                        objectName: "serviceMore"
+                                        flat: true
+                                        implicitWidth: 34
+                                        horizontalPadding: 0
+                                        Layout.fillHeight: true
+                                        visible: backend.service.exists
+                                        enabled: !backend.busy && backend.service.known
+                                        Accessible.name: "更多服务操作"
+                                        contentItem: Item { ChevronIcon { anchors.centerIn: parent; width: 16; height: 16; pointingRight: true; rotation: 90; ink: serviceMoreButton.enabled ? Theme.text : Theme.muted } }
+                                        onClicked: serviceMenu.open()
+                                        AppMenu {
+                                            id: serviceMenu
+                                            y: parent.height + 5
+                                            x: parent.width - width
+                                            AppMenuItem { text: "重启服务"; visible: backend.service.running; onTriggered: backend.serviceAction("restart") }
+                                            AppMenuItem { text: "卸载 ZeroTier"; onTriggered: backend.packageAction(true) }
+                                        }
                                     }
                                 }
                             }
                         }
+                        Label { text: backend.service.warning; visible: text !== ""; color: Theme.danger; wrapMode: Text.Wrap; font.pixelSize: Theme.fontCaption; Layout.fillWidth: true }
                     }
-                    Label { text: backend.service.warning; visible: text !== ""; color: Theme.danger; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.leftMargin: 16; Layout.rightMargin: 16 }
-                    RowLayout {
+                    // Networks: the section's actions sit in its own header, so
+                    // "join" is found where the list is, even when it is empty.
+                    Card {
+                        objectName: "networksCard"
                         Layout.fillWidth: true
                         Layout.leftMargin: 16
                         Layout.rightMargin: 16
-                        Label { text: "网络"; font.pixelSize: 18; font.bold: true; color: Theme.text; Layout.fillWidth: true }
-                    }
-                    RecordList {
-                        id: networks
-                        objectName: "networks"
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 16
-                        Layout.rightMargin: 16
-                        backend: window.backend
-                        records: backend.networks
-                        kind: "networks"
-                        headers: ["名称", "网络 ID", "状态", "分配的 IP"]
-                        statusText: backend.networkStatus
-                        onDetailsRequested: (kind, rowId, name) => window.showDetails(kind, rowId, name)
-                        onExportRequested: rowId => window.exportMoon(rowId)
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 16
-                        Layout.rightMargin: 16
-                        ActionButton { id: joinButton; objectName: "joinNetworkButton"; text: "加入网络"; primary: true; enabled: !backend.busy; onClicked: { joinLoader.ensure().setNetworkId(""); joinLoader.open() } }
-                        Item { Layout.fillWidth: true }
-                        ActionButton { id: moonButton; objectName: "moonsButton"; text: "中转站"; onClicked: moonLoader.open() }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 16
-                        ToolButton { objectName: "togglePeersButton"; text: backend.peersExpanded ? "▾" : "▸"; Accessible.name: backend.peersExpanded ? "收起成员" : "展开成员"; onClicked: backend.peersExpanded = !backend.peersExpanded }
-                        Label { id: peersHeading; text: "成员"; font.pixelSize: 18; font.bold: true; color: Theme.text; TapHandler { onTapped: backend.peersExpanded = !backend.peersExpanded } HoverHandler { cursorShape: Qt.PointingHandCursor } }
-                        Item { Layout.fillWidth: true }
-                    }
-                    Item {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 16
-                        Layout.rightMargin: 16
-                        implicitHeight: backend.peersExpanded ? peers.implicitHeight : 0
-                        opacity: backend.peersExpanded ? 1 : 0
-                        visible: implicitHeight > 0
-                        clip: true
-                        Behavior on implicitHeight { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
-                        Behavior on opacity { NumberAnimation { duration: 140 } }
+                        padding: 0
+                        spacing: 0
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.margins: 16
+                            Layout.bottomMargin: 12
+                            spacing: 8
+                            Label { text: "网络"; font.pixelSize: Theme.fontHeading; font.bold: true; color: Theme.text }
+                            Label { text: backend.networks.count > 0 ? String(backend.networks.count) : ""; visible: text !== ""; color: Theme.muted; font.pixelSize: Theme.fontCaption }
+                            Item { Layout.fillWidth: true }
+                            ActionButton { id: moonButton; objectName: "moonsButton"; text: "中转站"; flat: true; onClicked: moonLoader.open() }
+                            ActionButton { id: joinButton; objectName: "joinNetworkButton"; text: "加入网络"; primary: true; enabled: !backend.busy; onClicked: { joinLoader.ensure().setNetworkId(""); joinLoader.open() } }
+                        }
                         RecordList {
-                            id: peers
-                            objectName: "peers"
-                            width: parent.width
+                            id: networks
+                            objectName: "networks"
+                            Layout.fillWidth: true
+                            Layout.bottomMargin: 6
                             backend: window.backend
-                            records: backend.peers
-                            kind: "peers"
-                            headers: ["名称", "角色", "连接", "IP 地址", "延迟（ms）"]
-                            statusText: backend.peerStatus
+                            records: backend.networks
+                            kind: "networks"
+                            headers: ["名称", "网络 ID", "状态", "分配的 IP"]
+                            statusText: backend.networkStatus
                             onDetailsRequested: (kind, rowId, name) => window.showDetails(kind, rowId, name)
+                            onExportRequested: rowId => window.exportMoon(rowId)
                         }
                     }
-                    Item { Layout.preferredHeight: 24 }
+                    // Members: collapsible, the whole header toggles it.
+                    Card {
+                        objectName: "peersCard"
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 16
+                        Layout.rightMargin: 16
+                        padding: 0
+                        spacing: 0
+                        Item {
+                            Layout.fillWidth: true
+                            implicitHeight: peersHeader.implicitHeight + 24
+                            HoverHandler { id: peersHeaderHover; cursorShape: Qt.PointingHandCursor }
+                            TapHandler {
+                                // The chevron button handles its own clicks; never toggle twice.
+                                onTapped: (eventPoint) => {
+                                    const local = togglePeersButton.mapFromItem(parent, eventPoint.position.x, eventPoint.position.y)
+                                    if (togglePeersButton.contains(local)) return
+                                    backend.peersExpanded = !backend.peersExpanded
+                                }
+                            }
+                            RowLayout {
+                                id: peersHeader
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 16
+                                spacing: 4
+                                ToolButton {
+                                    id: togglePeersButton
+                                    objectName: "togglePeersButton"
+                                    implicitWidth: 28
+                                    implicitHeight: 28
+                                    focusPolicy: Qt.TabFocus
+                                    Accessible.name: backend.peersExpanded ? "收起成员" : "展开成员"
+                                    onClicked: backend.peersExpanded = !backend.peersExpanded
+                                    contentItem: Item {
+                                        ChevronIcon {
+                                            anchors.centerIn: parent
+                                            width: 16; height: 16
+                                            pointingRight: true
+                                            rotation: backend.peersExpanded ? 90 : 0
+                                            ink: peersHeaderHover.hovered ? Theme.accent : Theme.text
+                                            Behavior on rotation { NumberAnimation { duration: 160; easing.type: Easing.InOutCubic } }
+                                        }
+                                    }
+                                    background: Rectangle { radius: Theme.radius; color: togglePeersButton.hovered ? Theme.hover : "transparent"; border.color: togglePeersButton.activeFocus ? Theme.accent : "transparent" }
+                                }
+                                Label { id: peersHeading; text: "成员"; font.pixelSize: Theme.fontHeading; font.bold: true; color: Theme.text }
+                                Label { text: backend.peers.count > 0 ? String(backend.peers.count) : ""; visible: text !== ""; color: Theme.muted; font.pixelSize: Theme.fontCaption; Layout.leftMargin: 4 }
+                                Item { Layout.fillWidth: true }
+                            }
+                        }
+                        Item {
+                            Layout.fillWidth: true
+                            implicitHeight: backend.peersExpanded ? peers.implicitHeight + 6 : 0
+                            opacity: backend.peersExpanded ? 1 : 0
+                            visible: implicitHeight > 0
+                            clip: true
+                            Behavior on implicitHeight { NumberAnimation { duration: 180; easing.type: Easing.InOutCubic } }
+                            Behavior on opacity { NumberAnimation { duration: 140 } }
+                            RecordList {
+                                id: peers
+                                objectName: "peers"
+                                width: parent.width
+                                backend: window.backend
+                                records: backend.peers
+                                kind: "peers"
+                                headers: ["名称", "角色", "连接", "IP 地址", "延迟（ms）"]
+                                statusText: backend.peerStatus
+                                onDetailsRequested: (kind, rowId, name) => window.showDetails(kind, rowId, name)
+                            }
+                        }
+                    }
+                    Item { Layout.preferredHeight: 16 }
                 }
             }
             SettingsPage {
@@ -530,6 +614,7 @@ ApplicationWindow {
                 anchors.fill: parent
                 spacing: 16
                 TextField { id: networkIdInput; objectName: "networkIdInput"; placeholderText: "16 位网络 ID"; maximumLength: 16; Layout.fillWidth: true; enabled: !backend.busy; onAccepted: backend.joinNetwork(text) }
+                Label { text: "填写管理员提供的网络 ID；加入后仍需管理员授权本机。也可以导入管理员提供的中转站配置包。"; color: Theme.muted; font.pixelSize: Theme.fontCaption; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 RowLayout {
                     ActionButton { objectName: "importMoonButton"; text: "导入中转站"; enabled: !backend.busy; onClicked: importBundleLoader.open() }
                     Item { Layout.fillWidth: true }

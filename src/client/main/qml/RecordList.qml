@@ -81,10 +81,22 @@ ColumnLayout {
                         }
                     }
                     MouseArea {
+                        id: resizeHandle
                         anchors.right: parent.right
                         width: 10
                         height: parent.height
+                        hoverEnabled: true
                         cursorShape: Qt.SplitHCursor
+                        // A visible column edge so resizing can be discovered.
+                        Rectangle {
+                            visible: header.index < root.headers.length - 1
+                            anchors.right: parent.right
+                            anchors.rightMargin: 4
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: resizeHandle.containsMouse || resizeHandle.pressed ? 2 : 1
+                            height: resizeHandle.containsMouse || resizeHandle.pressed ? parent.height - 8 : 14
+                            color: resizeHandle.containsMouse || resizeHandle.pressed ? Theme.accent : Theme.border
+                        }
                         property real previousX: 0
                         onPressed: mouse => previousX = mapToItem(table, mouse.x, mouse.y).x
                         onPositionChanged: mouse => {
@@ -142,11 +154,24 @@ ColumnLayout {
                         RowLayout {
                             anchors.fill: parent
                             ToolButton {
+                                id: expandButton
                                 visible: root.kind === "networks"
-                                text: record.expanded ? "▾" : "▸"
-                                implicitWidth: 22
+                                implicitWidth: 24
+                                implicitHeight: 24
+                                focusPolicy: Qt.TabFocus
                                 onClicked: root.backend.setExpanded(record.rowId, !record.expanded)
                                 Accessible.name: record.expanded ? "收起网络成员" : "展开网络成员"
+                                contentItem: Item {
+                                    ChevronIcon {
+                                        anchors.centerIn: parent
+                                        width: 14; height: 14
+                                        pointingRight: true
+                                        rotation: record.expanded ? 90 : 0
+                                        ink: expandButton.hovered ? Theme.accent : Theme.muted
+                                        Behavior on rotation { NumberAnimation { duration: 160; easing.type: Easing.InOutCubic } }
+                                    }
+                                }
+                                background: Rectangle { radius: 4; color: expandButton.hovered ? Theme.hover : "transparent"; border.color: expandButton.activeFocus ? Theme.accent : "transparent" }
                             }
                             Label { visible: root.editingId !== record.rowId; text: record.name; color: Theme.text; elide: Text.ElideRight; Layout.fillWidth: true }
                             Loader {
@@ -212,7 +237,7 @@ ColumnLayout {
                         Layout.leftMargin: 46
                         Layout.preferredHeight: 28
                         Label { text: "名称"; color: Theme.muted; font.pixelSize: 12; Layout.preferredWidth: 180 }
-                        Label { text: "内网 IP ▴"; color: Theme.muted; font.pixelSize: 12; Layout.preferredWidth: 240 }
+                        Label { text: "内网 IP"; color: Theme.muted; font.pixelSize: 12; Layout.preferredWidth: 240 }
                         Label { text: "延迟"; color: Theme.muted; font.pixelSize: 12 }
                     }
                 Repeater {
@@ -275,7 +300,7 @@ ColumnLayout {
     }
     Label {
         visible: root.records.count === 0 || root.statusText !== ""
-        text: root.statusText !== "" ? root.statusText : root.kind === "networks" ? "尚未加入网络，点击下方按钮加入。" : root.kind === "moons" ? "还没有 Moon 文件，可以选择文件或拖入此处。" : "暂无可达成员。"
+        text: root.statusText !== "" ? root.statusText : root.kind === "networks" ? "尚未加入网络。点击右上角的“加入网络”，填写管理员提供的网络 ID。" : root.kind === "moons" ? "还没有 Moon 文件，可以选择文件或拖入此处。" : "暂无可达成员。"
         color: Theme.muted
         wrapMode: Text.Wrap
         Layout.fillWidth: true

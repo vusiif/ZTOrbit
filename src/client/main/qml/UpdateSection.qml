@@ -2,45 +2,50 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 
+// Settings row for application updates: status on the left, the server
+// configuration and the check action on the right, progress underneath.
 ColumnLayout {
     id: root
     required property var update
-    spacing: 8
+    spacing: 0
     readonly property bool busy: !!root.update && root.update.busy
+    readonly property bool showStatus: !!root.update && (root.busy || root.update.state === "failed" || root.update.state === "uptodate")
     onVisibleChanged: if (!visible) serverPopup.close()
 
-    ActionButton {
-        id: serverButton
-        objectName: "updateServerButton"
-        Layout.fillWidth: true
-        text: "更新服务器"
-        enabled: !root.busy
-        onClicked: serverPopup.visible ? serverPopup.close() : serverPopup.open()
-    }
-    ActionButton {
-        objectName: "checkUpdateButton"
-        Layout.fillWidth: true
-        text: root.busy ? "正在更新…" : "检查更新"
-        enabled: !!root.update && root.update.configured && !root.busy
-        onClicked: root.update.checkManually()
+    SettingRow {
+        title: "软件更新"
+        description: root.showStatus ? root.update.status
+            : root.update && root.update.configured ? "从更新服务器获取新版本"
+            : "尚未配置更新服务器"
+        descriptionColor: root.update && root.update.state === "failed" ? Theme.danger : Theme.muted
+        ActionButton {
+            id: serverButton
+            objectName: "updateServerButton"
+            text: "服务器…"
+            flat: true
+            enabled: !root.busy
+            onClicked: serverPopup.visible ? serverPopup.close() : serverPopup.open()
+        }
+        ActionButton {
+            objectName: "checkUpdateButton"
+            text: root.busy ? "正在更新…" : "检查更新"
+            enabled: !!root.update && root.update.configured && !root.busy
+            onClicked: root.update.checkManually()
+        }
     }
     ProgressBar {
         objectName: "updateProgressBar"
         Layout.fillWidth: true
+        Layout.leftMargin: 16
+        Layout.rightMargin: 16
+        Layout.bottomMargin: 12
         visible: root.busy
         from: 0; to: 100
         value: root.update ? root.update.progress : 0
         indeterminate: root.update && root.update.state === "checking"
     }
-    Label {
-        objectName: "updateStatusLabel"
-        Layout.fillWidth: true
-        wrapMode: Text.Wrap
-        visible: root.update && (root.busy || root.update.state === "failed" || root.update.state === "uptodate")
-        text: root.update ? root.update.status : ""
-        color: root.update && root.update.state === "failed" ? Theme.danger : Theme.text
-        font.pixelSize: 12
-    }
+    // Kept addressable for diagnostics; the row description shows the text.
+    Label { objectName: "updateStatusLabel"; visible: false; text: root.update ? root.update.status : "" }
     AppPopup {
         id: serverPopup
         objectName: "updateServerPopup"
@@ -65,7 +70,8 @@ ColumnLayout {
         }
         contentItem: ColumnLayout {
             spacing: 12
-            Label { text: "更新服务器"; font.pixelSize: 16; font.bold: true; color: Theme.text }
+            Label { text: "更新服务器"; font.pixelSize: Theme.fontHeading; font.bold: true; color: Theme.text }
+            Label { text: "留空 IP 并保存可清除设置。"; color: Theme.muted; font.pixelSize: Theme.fontCaption; wrapMode: Text.Wrap; Layout.fillWidth: true }
             GridLayout {
                 Layout.fillWidth: true
                 columns: 2
@@ -83,7 +89,7 @@ ColumnLayout {
                     selectionColor: Theme.selection
                     selectedTextColor: Theme.text
                     onAccepted: serverPopup.save()
-                    background: Rectangle { radius: 5; color: Theme.field; border.color: ipInput.activeFocus ? Theme.accent : Theme.border }
+                    background: Rectangle { radius: Theme.radius; color: Theme.field; border.color: ipInput.activeFocus ? Theme.accent : Theme.border }
                 }
                 Label { text: "端口"; color: Theme.text }
                 TextField {
@@ -99,7 +105,7 @@ ColumnLayout {
                     selectionColor: Theme.selection
                     selectedTextColor: Theme.text
                     onAccepted: serverPopup.save()
-                    background: Rectangle { radius: 5; color: Theme.field; border.color: portInput.activeFocus ? Theme.accent : Theme.border }
+                    background: Rectangle { radius: Theme.radius; color: Theme.field; border.color: portInput.activeFocus ? Theme.accent : Theme.border }
                 }
             }
             Label {
@@ -108,7 +114,7 @@ ColumnLayout {
                 text: serverPopup.formError
                 wrapMode: Text.Wrap
                 color: Theme.danger
-                font.pixelSize: 12
+                font.pixelSize: Theme.fontCaption
             }
             ActionButton {
                 objectName: "saveUpdateServerButton"

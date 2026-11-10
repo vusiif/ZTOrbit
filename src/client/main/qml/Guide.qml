@@ -42,10 +42,10 @@ Popup {
     background: Item {}
     contentItem: Item {
         MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }
-        Rectangle { width: parent.width; height: Math.max(0, guide.targetRect.y); color: "#9941464c" }
-        Rectangle { y: guide.targetRect.y; width: Math.max(0, guide.targetRect.x); height: guide.targetRect.height; color: "#9941464c" }
-        Rectangle { x: guide.targetRect.x + guide.targetRect.width; y: guide.targetRect.y; width: Math.max(0, parent.width - x); height: guide.targetRect.height; color: "#9941464c" }
-        Rectangle { y: guide.targetRect.y + guide.targetRect.height; width: parent.width; height: Math.max(0, parent.height - y); color: "#9941464c" }
+        Rectangle { width: parent.width; height: Math.max(0, guide.targetRect.y); color: Theme.scrim }
+        Rectangle { y: guide.targetRect.y; width: Math.max(0, guide.targetRect.x); height: guide.targetRect.height; color: Theme.scrim }
+        Rectangle { x: guide.targetRect.x + guide.targetRect.width; y: guide.targetRect.y; width: Math.max(0, parent.width - x); height: guide.targetRect.height; color: Theme.scrim }
+        Rectangle { y: guide.targetRect.y + guide.targetRect.height; width: parent.width; height: Math.max(0, parent.height - y); color: Theme.scrim }
         Rectangle { x: guide.targetRect.x; y: guide.targetRect.y; width: guide.targetRect.width; height: guide.targetRect.height; radius: 6; color: "transparent"; border.color: Theme.accent; border.width: 2 }
         Rectangle {
             id: card

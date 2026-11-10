@@ -1431,8 +1431,8 @@ private slots:
         writeMoonFile(); qputenv("ZT_TEST_MODE", "members");
         openWindow(); click("settingsButton");
         QTRY_VERIFY(object("settingsPage")->property("visible").toBool());
-        QCOMPARE(object("openLocalConfigButton")->property("text").toString(), QStringLiteral("ZeroTier配置文件"));
-        QCOMPARE(object("openSettingsButton")->property("text").toString(), QStringLiteral("打开程序设置文件"));
+        QCOMPARE(object("openLocalConfigButton")->property("text").toString(), QStringLiteral("显示"));
+        QCOMPARE(object("openSettingsButton")->property("text").toString(), QStringLiteral("显示"));
         m_window->resize(720, 480);
         for (const auto &theme : {"dark", "light"}) {
             m_controller->setTheme(theme); QTest::qWait(300);
@@ -1889,7 +1889,7 @@ private slots:
         QVERIFY(object("updateServerButton"));
         auto *resetButton = object("resetZeroTierStateButton"); QVERIFY(resetButton);
         QCOMPARE(resetButton->property("enabled").toBool(), reset->property("canReset").toBool());
-        QCOMPARE(resetButton->property("text").toString(), QStringLiteral("重置 ZeroTier 本地状态"));
+        QCOMPARE(resetButton->property("text").toString(), QStringLiteral("重置"));
         // Neither section may fire a network or elevated operation on its own.
         QVERIFY(!update->property("busy").toBool());
         QVERIFY(!reset->property("busy").toBool());
