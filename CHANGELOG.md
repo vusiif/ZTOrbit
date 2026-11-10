@@ -13,6 +13,8 @@
 - 关闭主窗口（右上角关闭按钮、Alt+F4 等）改为隐藏到托盘，程序继续在后台运行；每次启动后首次隐藏时托盘提示一次。退出改由托盘菜单“退出”或设置页“退出程序”完成。
 - 表格表头点击排序：成员表与网络表的各列、展开网络后的成员子列表的“名称”和“延迟”列，点击按该列排序，再点反向；当前排序列高亮并显示 ↑／↓。名称按自然顺序、不区分大小写（`node2` 在 `node10` 之前），延迟按数值（识别 `12 ms`、`<1 ms`），“—”“-”“不可达”等无值项始终排在最后；排序状态保存在模型中，轮询刷新后保持。
 - 应用图标改为开发者提供的 Z 标志：`app-icon.ico`（蓝色，16–256 px）嵌入 `Z2.exe`，`app-icon.png`（蓝色 1024 px）用于 macOS 图标；托盘图标与任务栏（窗口）图标随 ZeroTier 状态切换，在线为蓝色、离线为红色，托盘提示同时显示在线状态。程序内不再打包旧的 `app-icon.ico`／`app-icon.png` 资源。修复 Ninja 构建中更换 `.ico` 后 `app-icon.rc` 不重新编译、exe 仍嵌旧图标的问题（为资源文件声明对图标的依赖）。
+- 新增 Windows 安装包：`.agents/skills/zto-build/scripts/build-installer.ps1` 用 Inno Setup 6 和 `z2-setup.iss` 把 `build/dist/Z2-windows-x64/` 打包成 `build/dist/Z2-setup-<VERSION>-windows-x64.exe`。安装需要管理员权限，默认装到 `Program Files\Z2`，提供开始菜单快捷方式，可选桌面图标；升级时自动关闭托盘中的 Z2。打包前会核对 exe 版本与 `VERSION` 一致。自动更新仍使用 ZIP。
+- 打包脚本 `build-windows.ps1` 不再写死 `Visual Studio 17 2022` 生成器，改为根据 vswhere 找到的 MSVC 版本自动选择 VS 2022 或 VS 2026 生成器，使只装了 VS 2026 Build Tools 的机器也能打包。
 - 主题新增“跟随系统”并设为默认：`appearance/theme` 取 `system`／`light`／`dark`，缺省或无法识别时跟随系统，系统切换深浅色时界面实时跟随；设置页改为三段式选择。已保存为 `light`／`dark` 的用户保持原选择。
 - Gitee 远程仓库名称和路径更新为 `ZTOrbit`，本地 `origin` 同步使用 `https://gitee.com/vusiif/ZTOrbit.git`。
 - 集中网络部署与默认连接约定到 `docs/network-conventions.md`：明确网络 ID／服务器 ZTID／Moon ID 的对应关系、ZeroTier 9993/UDP、ZTServer 18100/TCP+UDP、Pylon 9443/TCP、ztncui 网络 IPv4 /24 与服务器固定 `.1` 地址。相关文档统一引用，并明确约定之外的设置由部署者自行负责；本次仅调整文档。

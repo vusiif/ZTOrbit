@@ -17,7 +17,7 @@ description: 为 ZTOrbit 编译、打包和清理构建产物，按 API 变化�
 
 ## Windows 入口
 
-当前已验证的交付目标是 Windows x64、MSVC 2022、动态 Qt 6.8+。优先使用用户提供的 Qt SDK；未提供时从现有 CMakeCache 或本机 SDK 定位，不写死某一开发者的路径。
+当前已验证的交付目标是 Windows x64、MSVC 2022 或 2026、动态 Qt 6.8+。脚本按 vswhere 找到的最新 MSVC 自动选择 `Visual Studio 17 2022` 或 `Visual Studio 18 2026` 生成器；后者需要 CMake 4.2 及以上。优先使用用户提供的 Qt SDK；未提供时从现有 CMakeCache 或本机 SDK 定位，不写死某一开发者的路径。
 
 在仓库根目录执行本技能的脚本：
 
@@ -82,6 +82,7 @@ API 是头文件 SDK，另附本机封装命令工具，生成过程是独立 CM
 ## 产物与完成条件
 
 - 主程序：`build/dist/Z2-windows-x64/` 和 `build/dist/Z2-windows-x64.zip`。
+- 安装包（用户要求时）：主程序打包成功后执行 `./.agents/skills/zto-build/scripts/build-installer.ps1`，需要 Inno Setup 6。它用 [z2-setup.iss](scripts/z2-setup.iss) 把 `build/dist/Z2-windows-x64/` 打成 `build/dist/Z2-setup-<VERSION>-windows-x64.exe`，打包前核对 `Z2.exe` 的产品版本与 `VERSION` 一致。安装包以管理员权限安装到 `Program Files\Z2`，带开始菜单快捷方式，桌面图标可选，升级时由 Restart Manager 关闭托盘中的 Z2。`AppId` 固定不变，安装包里不含插件和用户数据。自动更新仍使用 ZIP。
 - SDK：`build/dist/Z2-api-v<API版本>/` 及同名 `.zip`。
 - 指定插件：`build/dist/plugins/<插件文件>`，主程序压缩包不带应用插件。
 

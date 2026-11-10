@@ -42,11 +42,20 @@ function Protect-SourceBuildCache([string]$BuildPath, [string]$SourcePath) {
         Move-Item -LiteralPath $resolvedBuild -Destination ($resolvedBuild + '.previous-' + [guid]::NewGuid())
     }
 }
-Push-Location -LiteralPath $projectRoot
+# Use the Visual Studio generator that matches the newest installed MSVC
+# (VS 2022 = 17, VS 2026 = 18) instead of assuming one release.
+$vsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+$vsVersion = (& $vsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion | Select-Object -First 1)
+if (!$vsVersion) { throw 'Cannot locate an MSVC installation' }
+$vsGenerator = switch (([version]$vsVersion).Major) {
+    17 { 'Visual Studio 17 2022' }
+    18 { 'Visual Studio 18 2026' }
+    default { throw "Unsupported Visual Studio version $vsVersion" }
+}Push-Location -LiteralPath $projectRoot
 try {
     Protect-SourceBuildCache 'build/cmake-build-release' '.'
     # Build this target only, even if this build tree also has src/tests/plugins configured.
-    Invoke-Checked cmake (@('-S', '.', '-B', 'build/cmake-build-release', '-G', 'Visual Studio 17 2022', '-A', 'x64', '-DZTO_BUILD_TESTS=OFF', "-DCMAKE_PREFIX_PATH=$qtSdk") + $sodiumConfigure)
+    Invoke-Checked cmake (@('-S', '.', '-B', 'build/cmake-build-release', '-G', $vsGenerator, '-A', 'x64', '-DZTO_BUILD_TESTS=OFF', "-DCMAKE_PREFIX_PATH=$qtSdk") + $sodiumConfigure)
     Invoke-Checked cmake @('--build', 'build/cmake-build-release', '--config', 'Release', '--target', 'zto', '--parallel')
     # The automatic-update helper is a standalone Win32 executable with no Qt
     # dependency. It must be packaged next to Z2.exe so a verified update can
@@ -74,7 +83,7 @@ try {
     $apiChanged = $RebuildApi -or !$apiState -or $apiState.inputs -ne $apiFingerprint -or $apiState.sdk -ne $sdkFingerprint
     if ($apiChanged) {
         Protect-SourceBuildCache 'build/cmake-build-api' 'src/client/api'
-        Invoke-Checked cmake (@('-S', 'src/client/api', '-B', 'build/cmake-build-api', '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_PREFIX_PATH=$qtSdk") + $sodiumConfigure)
+        Invoke-Checked cmake (@('-S', 'src/client/api', '-B', 'build/cmake-build-api', '-G', $vsGenerator, '-A', 'x64', "-DCMAKE_PREFIX_PATH=$qtSdk") + $sodiumConfigure)
         Invoke-Checked cmake @('--build', 'build/cmake-build-api', '--config', 'Release', '--target', 'ztplugin_pack', '--parallel')
         $apiStaging = New-PackageStaging $apiSdk
         Invoke-Checked cmake @('--install', 'build/cmake-build-api', '--config', 'Release', '--prefix', $apiStaging)
